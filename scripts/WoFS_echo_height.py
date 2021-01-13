@@ -15,14 +15,19 @@ import numpy as np
 import sys
 
 #--------------------------------------------#
-#   Input sources
+#   Input sources 
 #--------------------------------------------#
 WoFS_file = '/ai-hail/data/WoFS/raw_wrf_output/ENS_MEM_13/wrfwof_d01_2019-05-25_03:00:00'
 
 #--------------------------------------------#
+#   Settings 
+#--------------------------------------------#
+echotop_threshold = 40.0  #Minimum reflectivity threshold for finding echo-top height (units: dBZ)
+
+#--------------------------------------------#
 #   Output filenames
 #--------------------------------------------#
-img_filename = 'sample_echotop.png'
+img_filename = 'sample_echotop' + str(echotop_threshold) + '.png'
 
 #--------------------------------------------#
 #   Read WoFS data and list info.
@@ -55,16 +60,16 @@ echotop = np.zeros((ny, nx))
 #Create an array from the REFL_10CM array where the value in each grid cell is:
 #  0 if reflectivity is < 40 dBZ
 #  1 if reflectivity is >= 40 dBZ
-refl40_mask = np.where(WoFS_data['REFL_10CM'][0,:,:,:] >= 40.0, 1, 0)
+refl_mask = np.where(WoFS_data['REFL_10CM'][0,:,:,:] >= echotop_threshold, 1, 0)
 
-print("refl40_mask dimensions: " + str(refl40_mask.shape))
-print("Minimum value: " + str(np.min(refl40_mask)) + "  |  Maximum value: " + str(np.max(refl40_mask)))
-print("Average value: " + str(np.average(refl40_mask)))
+print("refl_mask dimensions: " + str(refl_mask.shape))
+print("Minimum value: " + str(np.min(refl_mask)) + "  |  Maximum value: " + str(np.max(refl_mask)))
+print("Average value: " + str(np.average(refl_mask)))
 
 #Loop through each column to find echo top height
 for j in np.arange(0, ny, 1):
    for i in np.arange(0, nx, 1):
-      column = refl40_mask[:,j,i] #select current column
+      column = refl_mask[:,j,i] #select current column
 #      print(str(column))
       if (np.sum(column) == 0):     #if there are no values of reflectivity above 40 dBZ...
          echotop[j, i] = np.NaN   #...then set echotop to the no-echo value (np.NaN)...
@@ -76,7 +81,7 @@ for j in np.arange(0, ny, 1):
 #            print('Found echotop of ' + str(k) + ' at [' + str(j) + ',' + str(i) + ']')
             break                 #...and move on to the next column
 
-print("...Echo Top (40dBZ) calculated successfully!")
+print("...Echo Top (" + str(echotop_threshold) + " dBZ) calculated successfully!")
 print("Minimum value: " + str(np.nanmin(echotop)) + "  |  Maximum value: " + str(np.nanmax(echotop)))
 
 #Put echotop data into an xarray DataArray for convenient plotting
