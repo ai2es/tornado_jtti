@@ -86,7 +86,7 @@ class HRRRProvider(object):
         self.min_valid_time = menu[0]
         self.max_valid_time = menu[-1]
         self.valid_time = menu[-1]
-        menu = [pd.to_datetime(dt).strftime("%-m/%-d/%Y - %HZ") for dt in menu]
+        menu = [pd.to_datetime(dt).strftime("%-m/%-d/%Y %H:%M") for dt in menu]
         return menu
 
     def set_valid_time(self, valid_time):

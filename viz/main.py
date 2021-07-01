@@ -53,7 +53,7 @@ USA_map.patches("x", "y",
 USA_map.add_tools(HoverTool(tooltips=TOOLTIP))
 
 select_valid_time = Select(title="Select valid datetime",
-                           value=data_provider.valid_time_menu[-1],
+                           value=data_provider.valid_time_menu[0],
                            options=data_provider.valid_time_menu,
                            name="select_valid_time")
 
