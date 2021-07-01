@@ -17,18 +17,18 @@ models = {"GMM": "mod_0_labels_*.pkl",
           "CNN": "cnn_test_000_labels_*.pkl"}
 
 class HRRRProvider(object):
-    def __init__(self, source, cols):
+    def __init__(self, source, cols, cols_view):
         self.source = source
         self.cols = cols
+        self.cols_view = cols_view
 
         # Preparing containers
-        self.data = pd.DataFrame(columns=self.cols+["valid_time"])
-        self.data_ds = ColumnDataSource(data={cl: [] for cl in self.cols+["valid_time"]})
+        self.data = pd.DataFrame(columns=self.cols_view)
+        self.data_ds = ColumnDataSource(data={cl: [] for cl in self.cols_view})
         self.data_view = CDSView(filters=[], source=self.data_ds)
 
         # Calculating start time for inital data fetch
         self.fetch_data()
-
 
     def lon_to_web_mercator(self, lon):
         k = 6378137
@@ -47,16 +47,20 @@ class HRRRProvider(object):
             with open(filename, 'rb') as f:
                 files.append(pickle.load(f))
         data = pd.concat(files)
-        data = data[self.cols].sort_index()        
-
-        print(data['grid_point_longitudes_deg'][1].shape, data['grid_point_latitudes_deg'][1].shape)
-        data['valid_time'] = pd.to_datetime(data['valid_time_unix_sec'], unit='s')
-        data['grid_point_longitudes_deg'] = self.lon_to_web_mercator(data['grid_point_longitudes_deg'] - 360)
-        for i in data['grid_point_latitudes_deg'].index:
-            lats = np.expand_dims(data['grid_point_latitudes_deg'][i], axis=0)
-            data.at[i, 'grid_point_latitudes_deg'] = self.lat_to_web_mercator(lats)
-        print(data['grid_point_longitudes_deg'][1].shape, data['grid_point_latitudes_deg'][1].shape)
+        data = data[self.cols].sort_index()
         
+        xs = []
+        ys = []
+        for i in data.index:
+            x, y = data.loc[i, 'polygon_object_latlng_deg'].exterior.coords.xy
+            xs.append(self.lon_to_web_mercator(np.array(x) - 360))
+            ys.append(self.lat_to_web_mercator(np.array(y)))
+        data['x'] = xs
+        data['y'] = ys
+        
+        data['valid_time'] = pd.to_datetime(data['valid_time_unix_sec'], unit='s')
+        data = data[self.cols_view]
+
         if data.valid_time.size > 0:
             
             # Saving data to internal containers
@@ -68,7 +72,7 @@ class HRRRProvider(object):
             self.update_valid_time_filter()
             
         else:
-            self.data_ds.stream({cl: [] for cl in self.cols+["valid_time"]})
+            self.data_ds.stream({cl: [] for cl in self.cols_view})
             
         # Calculating filters
         valid_time_filter = self.update_valid_time_filter()

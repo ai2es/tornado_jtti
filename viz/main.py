@@ -25,7 +25,7 @@ TOOLTIP = """
 </div>
 """
 
-data_provider = HRRRProvider(cfg.DATA_SOURCE, cfg.COLS)
+data_provider = HRRRProvider(cfg.DATA_SOURCE, cfg.COLS, cfg.COLS_VIEW)
 data_scr = data_provider.data_ds
 
 USA_map = figure(x_range=(-14000000, -7000000),
@@ -42,7 +42,7 @@ USA_map.add_tile(get_provider(Vendors.CARTODBPOSITRON))
 USA_map.add_tools(BoxZoomTool(match_aspect=True))
 
 color_mapper = CategoricalColorMapper(factors=['Supercell', 'QLCS', 'Disorganized'], palette=palette[3])
-USA_map.patches("grid_point_longitudes_deg", "grid_point_latitudes_deg",
+USA_map.patches("x", "y",
 #                 fill_color={'field': 'label', 'transform': color_mapper},
 #                 fill_alpha='label_prob',
 #                 line_alpha=0.0,
