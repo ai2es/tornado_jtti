@@ -43,9 +43,9 @@ USA_map.add_tools(BoxZoomTool(match_aspect=True))
 
 color_mapper = CategoricalColorMapper(factors=['Supercell', 'QLCS', 'Disorganized'], palette=palette[3])
 USA_map.patches("x", "y",
-#                 fill_color={'field': 'label', 'transform': color_mapper},
+                fill_color='colors',
 #                 fill_alpha='label_prob',
-#                 line_alpha=0.0,
+                line_alpha=0.0,
                 source=data_scr,
 #                 legend='label',
                 view=data_provider.data_view)

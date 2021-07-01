@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import datetime as dt
 from bokeh.models import ColumnDataSource, CDSView, BooleanFilter
-from bokeh.palettes import Set1 as palette
+from bokeh.palettes import Turbo256 as palette
 import glob
 from os.path import exists, join
 import pickle
@@ -59,8 +59,10 @@ class HRRRProvider(object):
         data['y'] = ys
         
         data['valid_time'] = pd.to_datetime(data['valid_time_unix_sec'], unit='s')
+        colors = {k:v for k, v in list(zip(data['full_id_string'].unique().tolist(), list(palette)))}
+        data["colors"] = data['full_id_string'].map(colors)
         data = data[self.cols_view]
-
+        
         if data.valid_time.size > 0:
             
             # Saving data to internal containers
