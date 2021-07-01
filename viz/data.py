@@ -47,14 +47,14 @@ class HRRRProvider(object):
             with open(filename, 'rb') as f:
                 files.append(pickle.load(f))
         data = pd.concat(files)
-        data = data[self.cols]
+        data = data[self.cols].sort_index()        
+
         print(data['grid_point_longitudes_deg'][1].shape, data['grid_point_latitudes_deg'][1].shape)
         data['valid_time'] = pd.to_datetime(data['valid_time_unix_sec'], unit='s')
         data['grid_point_longitudes_deg'] = self.lon_to_web_mercator(data['grid_point_longitudes_deg'] - 360)
-        lats = []
         for i in data['grid_point_latitudes_deg'].index:
-            lats.append(self.lat_to_web_mercator(data['grid_point_latitudes_deg'][i]))
-        data['grid_point_latitudes_deg'] = lats
+            lats = np.expand_dims(data['grid_point_latitudes_deg'][i], axis=0)
+            data.at[i, 'grid_point_latitudes_deg'] = self.lat_to_web_mercator(lats)
         print(data['grid_point_longitudes_deg'][1].shape, data['grid_point_latitudes_deg'][1].shape)
         
         if data.valid_time.size > 0:
