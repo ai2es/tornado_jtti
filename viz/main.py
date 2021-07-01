@@ -20,7 +20,7 @@ TOOLTIP = """
         <h5>@label</h5>
     </div>
     <div>
-        <span style="font-weight: bold;">Probability of Mode: </span>@label_prob{0.3f}
+        <span style="font-weight: bold;">Probability of Mode: 0
     </div>
 </div>
 """
@@ -42,67 +42,33 @@ USA_map.add_tile(get_provider(Vendors.CARTODBPOSITRON))
 USA_map.add_tools(BoxZoomTool(match_aspect=True))
 
 color_mapper = CategoricalColorMapper(factors=['Supercell', 'QLCS', 'Disorganized'], palette=palette[3])
-USA_map.patches("x", "y",
-                fill_color={'field': 'label', 'transform': color_mapper},
-                fill_alpha='label_prob',
-                line_alpha=0.0,
+USA_map.patches("grid_point_longitudes_deg", "grid_point_latitudes_deg",
+#                 fill_color={'field': 'label', 'transform': color_mapper},
+#                 fill_alpha='label_prob',
+#                 line_alpha=0.0,
                 source=data_scr,
 #                 legend='label',
                 view=data_provider.data_view)
 
 USA_map.add_tools(HoverTool(tooltips=TOOLTIP))
 
-select_model = Select(title="Select model",
-                      value="CNN",
-                      options=["CNN", "GMM"],
-                      name="select_model")
-
-select_run_date = Select(title="Select run date and time",
-                         value=data_provider.run_date_menu[-1],
-                         options=data_provider.run_date_menu,
-                         name="select_run_date")
-
-slider_forecast_hour = Slider(start=1,
-                              end=17,
-                              value=1,
-                              step=1,
-                              name="slider_forecast_hour",
-                              title="Forecast Hour")
+select_valid_time = Select(title="Select valid datetime",
+                           value=data_provider.valid_time_menu[-1],
+                           options=data_provider.valid_time_menu,
+                           name="select_valid_time")
 
 def update():
     """Periodic callback."""
     data_provider.fetch_data()
 
-def update_model(attr, old, new):
-    """Set the model displayed in the visualization."""
-    if new != old:
-        data_provider.set_model(new)
-        data_provider.set_run_date(data_provider.run_date)
-        data_provider.set_forecast_hour(1)
-        data_provider.set_valid_hour()        
-
-def update_run_date(attr, old, new):
+def update_valid_time(attr, old, new):
     """Update the run date filter."""
     if new != old:
-        data_provider.set_run_date(new)
-        data_provider.set_forecast_hour(1)
-        data_provider.set_valid_hour()
+        data_provider.set_valid_time(new)
     else:
-        data_provider.set_run_date(old)
-        data_provider.set_forecast_hour(1)
-        data_provider.set_valid_hour()        
-
-def update_forecast_hour(attr, old, new):
-    """Update the forecast hour filter."""
-    if new != old:
-        data_provider.set_forecast_hour(new)
-        data_provider.set_valid_hour()
+        data_provider.set_valid_time(old)    
         
-select_model.on_change("value", update_model)
-select_run_date.on_change("value", update_run_date)
-slider_forecast_hour.on_change("value", update_forecast_hour)
+select_valid_time.on_change("value", update_valid_time)
 
 curdoc().add_root(USA_map)
-curdoc().add_root(select_model)
-curdoc().add_root(select_run_date)
-curdoc().add_root(slider_forecast_hour)
+curdoc().add_root(select_valid_time)
