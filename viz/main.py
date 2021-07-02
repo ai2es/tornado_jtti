@@ -8,7 +8,7 @@ from bokeh.plotting import figure, curdoc
 from bokeh.palettes import Set1 as palette
 from bokeh.models import HoverTool, BoxZoomTool, CategoricalColorMapper
 from bokeh.tile_providers import get_provider, Vendors
-from bokeh.models.widgets import Slider, Select
+from bokeh.models.widgets import Slider, Select, DateRangeSlider
 from bokeh.models.annotations import Title
 
 from data import HRRRProvider
@@ -52,10 +52,22 @@ USA_map.patches("x", "y",
 
 USA_map.add_tools(HoverTool(tooltips=TOOLTIP))
 
-select_valid_time = Select(title="Select valid datetime",
-                           value=data_provider.valid_time_menu[0],
-                           options=data_provider.valid_time_menu,
-                           name="select_valid_time")
+start = pd.Timestamp(data_provider.valid_time_menu[0])
+start = datetime(start.year, start.month, start.day, start.hour, start.minute)
+end = pd.Timestamp(data_provider.valid_time_menu[-1])
+end=datetime(end.year, end.month, end.day, end.hour, end.minute)
+value_min = pd.Timestamp(data_provider.valid_time_menu[0])
+value_min = datetime(value_min.year, value_min.month, value_min.day, value_min.hour, value_min.minute)
+value_max = pd.Timestamp(data_provider.valid_time_menu[0]) + pd.Timedelta("5 min")
+value_max = datetime(value_max.year, value_max.month, value_max.day, value_max.hour, value_max.minute)
+
+select_valid_time = DateRangeSlider(start=start,
+                                    end=end,
+                                    value=(value_min, value_max),
+                                    format="%x, %X",
+                                    step=300000,
+                                    title="Select valid datetime",
+                                    name="select_valid_time")
 
 def update():
     """Periodic callback."""
@@ -63,10 +75,12 @@ def update():
 
 def update_valid_time(attr, old, new):
     """Update the run date filter."""
-    if new != old:
-        data_provider.set_valid_time(new)
+    if new[0] != old[0]:
+        data_provider.set_valid_time(datetime.fromtimestamp(new[0] / 1000))
+    elif new[1] != old[1]:
+        data_provider.set_valid_time(datetime.fromtimestamp(new[1] / 1000))        
     else:
-        data_provider.set_valid_time(old)    
+        data_provider.set_valid_time(old[0])    
         
 select_valid_time.on_change("value", update_valid_time)
 
