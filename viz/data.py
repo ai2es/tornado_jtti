@@ -8,13 +8,12 @@ from bokeh.palettes import Turbo256 as palette
 import glob
 from os.path import exists, join
 import pickle
+from datetime import datetime
+
 # import dask.dataframe as dd
 
 import config as cfg
 
-
-models = {"GMM": "mod_0_labels_*.pkl",
-          "CNN": "cnn_test_000_labels_*.pkl"}
 
 class HRRRProvider(object):
     def __init__(self, source, cols, cols_view):
@@ -41,13 +40,19 @@ class HRRRProvider(object):
     def fetch_data(self):
         
         # Loading data        
-        filenames = [f for f in glob.glob(self.source + "*.p")]
+        filenames = [f for f in glob.glob(self.source + "**/*.p", recursive=True)]
         files = []
         for filename in filenames:
             with open(filename, 'rb') as f:
-                files.append(pickle.load(f))
+                df = pickle.load(f)
+                run_time = datetime.strptime(filename.split('segmotion_')[1].split('.')[0], '%Y-%m-%d-%H%M%S')
+                df['run_time'] = [run_time] * df.shape[0]
+                files.append(df)
         data = pd.concat(files)
-        data = data[self.cols].sort_index()
+        data = data[self.cols]
+        data = data.sort_values(by=['run_time', 'valid_time_unix_sec'])
+        data = data.reset_index(drop=True)
+
         
         xs = []
         ys = []
