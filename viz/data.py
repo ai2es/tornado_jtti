@@ -8,7 +8,7 @@ from bokeh.palettes import Turbo256 as palette
 import glob
 from os.path import exists, join
 import pickle
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # import dask.dataframe as dd
 
@@ -41,8 +41,13 @@ class HRRRProvider(object):
         
         # Loading data        
         filenames = [f for f in glob.glob(self.source + "**/*.p", recursive=True)]
+        datetimes = [datetime.strptime(f.split('segmotion_')[1].split('.')[0], '%Y-%m-%d-%H%M%S') for f in filenames]
+        datetime_min = datetime(year=datetimes[0].year, month=datetimes[0].month, day=datetimes[0].day, hour=12)
+        filenames_24hr = [filenames[0].split('_2')[0] + "_" + (datetime_min + timedelta(minutes=5)*i).strftime("%Y-%m-%d-%H%M%S") + '.p' for i in range(24*60//5)]
+        filenames_24hr = set(filenames).intersection(filenames_24hr)
+        print(len(filenames_24hr))
         files = []
-        for filename in filenames:
+        for filename in filenames_24hr:
             with open(filename, 'rb') as f:
                 df = pickle.load(f)
                 run_time = datetime.strptime(filename.split('segmotion_')[1].split('.')[0], '%Y-%m-%d-%H%M%S')
