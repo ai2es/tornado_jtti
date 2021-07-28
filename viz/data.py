@@ -20,6 +20,7 @@ class HRRRProvider(object):
         self.source = source
         self.cols = cols
         self.cols_view = cols_view
+        self.run_date = False
 
         # Preparing containers
         self.data = pd.DataFrame(columns=self.cols_view)
@@ -42,10 +43,17 @@ class HRRRProvider(object):
         # Loading data        
         filenames = [f for f in glob.glob(self.source + "**/*.p", recursive=True)]
         datetimes = [datetime.strptime(f.split('segmotion_')[1].split('.')[0], '%Y-%m-%d-%H%M%S') for f in filenames]
-        datetime_min = datetime(year=datetimes[0].year, month=datetimes[0].month, day=datetimes[0].day, hour=12)
-        filenames_24hr = [filenames[0].split('_2')[0] + "_" + (datetime_min + timedelta(minutes=5)*i).strftime("%Y-%m-%d-%H%M%S") + '.p' for i in range(24*60//5)]
+        self.datetimes = datetimes
+        
+        if self.run_date == False:
+            self.run_date_menu = self.get_run_date_menu()
+        
+        datetime_min = datetime(year=self.run_date.year, month=self.run_date.month, day=self.run_date.day, hour=12)
+        filename_start = filenames[0].split("20")[0] + datetime_min.strftime("%Y%m%d") + "/scale_314159265m2/storm-tracking_segmotion_"
+
+        filenames_24hr = [filename_start + (datetime_min + timedelta(minutes=5)*i).strftime("%Y-%m-%d-%H%M%S") + '.p' for i in range(24*60//5)]
         filenames_24hr = set(filenames).intersection(filenames_24hr)
-        print(len(filenames_24hr))
+        print("number of filenames", len(filenames_24hr))
         files = []
         for filename in filenames_24hr:
             with open(filename, 'rb') as f:
@@ -57,7 +65,6 @@ class HRRRProvider(object):
         data = data[self.cols]
         data = data.sort_values(by=['run_time', 'valid_time_unix_sec'])
         data = data.reset_index(drop=True)
-
         
         xs = []
         ys = []
@@ -78,9 +85,10 @@ class HRRRProvider(object):
             # Saving data to internal containers
             self.data = data
             self.data_ds.stream(self.data.to_dict(orient="list"))
-    
+                
             # initialize select variables for data_view filtering
             self.valid_time_menu = self.get_valid_time_menu()
+            self.set_select_valid_time_values()
             self.update_valid_time_filter()
             
         else:
@@ -91,13 +99,41 @@ class HRRRProvider(object):
         
         return self.data
     
+    def get_run_date_menu(self):
+        dates_12Z = []
+        for d in self.datetimes:
+            date = datetime(year=d.year, month=d.month, day=d.day, hour=12)
+            if d.hour >= 12:
+                dates_12Z.append(date)
+            if d.hour < 12:
+                dates_12Z.append(date - timedelta(days=1))
+        menu = np.unique(dates_12Z)
+        self.run_date = menu[-1]
+        menu = [dt.strftime("%-m/%-d/%Y - %HZ") for dt in menu]
+        return menu
+    
+    def set_run_date(self, run_date):
+        self.run_date = datetime.strptime(run_date, "%m/%d/%Y - %HZ")
+        self.fetch_data()
+    
     def get_valid_time_menu(self):
         menu = np.unique(self.data["valid_time"].values)
         self.min_valid_time = menu[0]
         self.max_valid_time = menu[-1]
-        self.valid_time = menu[-1]
-        menu = [pd.to_datetime(dt).strftime("%-m/%-d/%Y %H:%M") for dt in menu]
+        self.valid_time = menu[0]
+        menu = [pd.to_datetime(dt).strftime("%-m/%-d/%Y %-H:%M") for dt in menu]
         return menu
+    
+    def set_select_valid_time_values(self):
+        
+        start = pd.Timestamp(self.min_valid_time)
+        self.start = datetime(start.year, start.month, start.day, start.hour, start.minute)
+        
+        end = pd.Timestamp(self.max_valid_time)
+        self.end = datetime(end.year, end.month, end.day, end.hour, end.minute)
+        
+        value = pd.Timestamp(self.valid_time)
+        self.value = datetime(value.year, value.month, value.day, value.hour, value.minute)
 
     def set_valid_time(self, valid_time):
         valid_time = np.datetime64(pd.to_datetime(valid_time))
