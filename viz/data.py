@@ -69,20 +69,8 @@ class HRRRProvider(object):
         
         xs = []
         ys = []
-        self.y_min = 10000
-        self.y_max = 0
-        self.x_min = 10000
-        self.x_max = -10000
         for i in data.index:
             x, y = data.loc[i, 'polygon_object_latlng_deg'].exterior.coords.xy
-            print("lon_min", (np.array(x) - 360).min())
-            print("lon_max", (np.array(x) - 360).max())
-            print("lat_min", np.array(y).min())
-            print("lat_max", np.array(y).max())
-            self.x_min = min(self.x_min, (np.array(x) - 360).min())
-            self.x_max = max(self.x_max, (np.array(x) - 360).max())
-            self.y_min = min(self.y_min, np.array(y).min())
-            self.y_max = max(self.y_max, np.array(y).max())
             xs.append(self.lon_to_web_mercator(np.array(x) - 360))
             ys.append(self.lat_to_web_mercator(np.array(y)))
         data['x'] = xs
@@ -114,16 +102,16 @@ class HRRRProvider(object):
         
         return self.data
     
-    def set_zoom(self):
-        self.x_min = self.lon_to_web_mercator(self.x_min)
-        self.x_max = self.lon_to_web_mercator(self.x_max)   
-        self.y_min = self.lat_to_web_mercator(self.y_min)
-        self.y_max = self.lat_to_web_mercator(self.y_max)
-#         self.x_max = math.ceil(xs.max() / factor) * factor
-#         self.x_min = math.floor(xs.min() / factor) * factor
+    def set_zoom(self, factor=10000):
+        xs = np.concatenate(self.data['x'])
+        print("xs shape", xs.shape)
+        self.x_max = math.ceil((xs.max() + 100000) / factor) * factor
+        self.x_min = math.floor((xs.min() - 100000) / factor) * factor
         
-#         self.y_max = math.ceil(ys.max() / factor) * factor 
-#         self.y_min = math.floor(ys.min() / factor) * factor
+        ys = np.concatenate(self.data['y'])
+        print("ys shape", ys.shape)
+        self.y_max = math.ceil((ys.max() + 100000) / factor) * factor 
+        self.y_min = math.floor((ys.min() - 100000) / factor) * factor
         
 #         print("X MAX", xs.max(), self.x_max)
 #         print("X MIN", xs.min(), self.x_min)
