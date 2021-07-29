@@ -28,9 +28,11 @@ TOOLTIP = """
 data_provider = HRRRProvider(cfg.DATA_SOURCE, cfg.COLS, cfg.COLS_VIEW)
 data_scr = data_provider.data_ds
 
-# TODO: add callback that changes the x and y ranges based on that day's storms
-USA_map = figure(x_range=(-14000000, -7000000),
-                 y_range=(3100000, 6300000),
+# x_range = (-14000000, -7000000)
+# y_range = (3100000, 6300000)
+
+USA_map = figure(x_range=(data_provider.x_min, data_provider.x_max),
+                 y_range=(data_provider.y_min, data_provider.y_max),
                  x_axis_type="mercator",
                  y_axis_type="mercator",
                  x_axis_location=None,
@@ -78,6 +80,10 @@ def update_run_date(attr, old, new):
         select_valid_time.update(start=data_provider.start,
                                  end=data_provider.end,
                                  value=data_provider.value)
+        USA_map.x_range.start = data_provider.x_min
+        USA_map.x_range.end = data_provider.x_max
+        USA_map.y_range.start = data_provider.y_min
+        USA_map.y_range.end = data_provider.y_max
     else:
         data_provider.set_run_date(old)
         
