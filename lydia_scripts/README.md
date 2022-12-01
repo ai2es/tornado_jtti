@@ -17,14 +17,22 @@ Directory Contents:
 
 ```scripts_data_pipeline```
 
-- This directory is for scripts that help make the features and labels for the UNET. Please note, this requires the GridRad processing pipeline that takes a non-trival amount of time to run. 
+- This directory is for scripts that help make the features and labels for the UNET. Please note, this requires the GridRad processing pipeline that takes a non-trival amount of time to run. This directory also has the wofs processing scripts. 
 
+```scripts_ml_model```
 
+- This directory is for the evaluating trained machine learning models. 
+
+```scripts_tensorboard```
+
+- This directory contains the scripts to do the hyperparameter search. Including a tensorboard script (to monitor training/overfiting)
 
 Required Software: 
 
 [GewitterGefahr](https://github.com/dopplerchase/GewitterGefahr) 
 
-This code base was orginially developed by Ryan Lagerquist (now at CIRA/CSU) then edited by Randy Chase to run on a GridRad Dataset that was 10x larger than the original GridRad dataset used in [Lagerquist et al. (2020)](https://journals.ametsoc.org/view/journals/mwre/148/7/mwrD190372.xml). 
+- This code base was orginially developed by Ryan Lagerquist (now at CIRA/CSU) then edited by Randy Chase to run on a GridRad Dataset that was 10x larger than the original GridRad dataset used in [Lagerquist et al. (2020)](https://journals.ametsoc.org/view/journals/mwre/148/7/mwrD190372.xml). This is for creating the training data
+ 
+Tensorflow & [keras_unet_collection](https://github.com/ai2es/keras-unet-collection)
 
-
+- In order train or run the trained models you will need tensorflow and the keras_unet_collection. Please note the linked github above because we have made some changes to the original repo, like being able to change the kernel size (i.e., the preceptive field)
