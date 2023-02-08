@@ -17,8 +17,7 @@ class ProcessMonitor(psutil.Process):
     See psutil.Process for argument information.
     Augemented Process class that organizes attributes of interest for the
     process into a pandas DataFrame. 
-    TODO: include gpu monitoring and recording of multiple time intervals
-    by a parallel process
+    TODO: include gpu monitoring 
     """
     def __init__(self, pid=None):
         super().__init__(pid)
@@ -47,22 +46,16 @@ class ProcessMonitor(psutil.Process):
         #TODO make dictionary construction dynamic
         # Track process attributes throughout execution
         info = self.as_dict(attrs=self.monitored_attrs)
-        #psutil.cpu_count()
-        #['cpu_percent', 'memory_percent', 'cpu_affinity', 'io_counters', 'num_threads', 'threads', 'cpu_times', 'memory_info', 'memory_full_info', 'open_files']
-        '''self.performance_monitor = {'time': [self.start_perf_counter], 'cpu_percent': [info['cpu_percent']], 
-                                    'memory_percent': [info['memory_percent'].vms], 'num_threads': [info['num_threads']], 
-                                    'cpu_times.user': [info['cpu_times'].user], 'cpu_times.system': [info['cpu_times'].system], 
-                                    'cpu_times.idle': [info['cpu_times'].idle], 'memory_info.vms': [info['memory_full_info'].vms], 
-                                    'memory_info.rss': [info['memory_full_info'].rss]}'''
         self.performance_monitor = {'time': [], 'cpu_percent': [], 'memory_percent.rss': [], 'memory_percent.vms': [], 
                                     'num_threads': [], 'cpu_times.user': [], 'cpu_times.system': [], 
                                     'memory_info.vms': [], 'memory_info.rss': [] #(LINUX)'cpu_times.idle': [], 
                                     }
     
     def update_performance_monitor(self):
+        ''' TODO: make dynamic attribute selection
+        Record current process performance metrics
+        '''
         info = self.as_dict(attrs=self.monitored_attrs)
-        #psutil.cpu_count()
-        #self.performance_monitor = {'time': [self.start_perf_counter]}.append({key: ([val] if not isinstance(val, list) else val) for key, val in info.items()})
         self.performance_monitor['time'].append(time.perf_counter() - self.start_perf_counter)
         self.performance_monitor['cpu_percent'].append(info['cpu_percent'])
         self.performance_monitor['memory_percent.rss'].append(info['memory_percent'])
