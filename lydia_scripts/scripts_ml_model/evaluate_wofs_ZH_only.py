@@ -1,20 +1,26 @@
 from datetime import datetime
 from tensorflow import keras
+print("keras version", keras.__version__)
 import xarray as xr
+print("xr version", xr.__version__)
 import numpy as np
+print("np version", np.__version__)
 import csv
 import tensorflow as tf
+print("tensorflow version", tf.__version__)
 import glob
 import argparse
 import os
 import sys
 import scipy
+print("scipy version", scipy.__version__)
 import netCDF4
 from scipy import spatial
 sys.path.append("/home/lydiaks2/tornado_project/")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-
+sys.path.append("/home/momoshog/Tornado/tornado_jtti/process_monitoring")
+from process_monitor import ProcessMonitor
 
 
 
@@ -59,6 +65,10 @@ def get_arguments():
     INPUT_ARG_PARSER.add_argument(
         '--patch_size', type=int, required=True,
         help=PATCH_SIZE_HELP_STRING)
+        
+    INPUT_ARG_PARSER.add_argument('-d', '--dry_run',
+        action='store_true',
+        help='For testing. Execute without running or saving data and verify output paths')
 
     #Pull out all of the input strings from the .sh file
     args = INPUT_ARG_PARSER.parse_args()
@@ -83,64 +93,108 @@ def get_arguments():
     #patch size is the size of each patch in each horizontal direction
     global patch_size
     patch_size = getattr(args, 'patch_size')
+    global is_dry_run
+    is_dry_run = args.dry_run
 
 
 def make_directory_structure(patches_dirs):
 
     # Pull out the year, day, model initialization time and ensemble member of this wofs run
-    yyyy = patches_dirs[len(path_to_patches)+1:len(path_to_patches)+5]
-    yyyymmdd = patches_dirs[len(path_to_patches)+6:len(path_to_patches)+14]
-    model_initialization = patches_dirs[len(path_to_patches)+15:len(path_to_patches)+19]
-    ens_mem = patches_dirs[len(path_to_patches)+28:]
+    path_components = patches_dirs.split('/')
+    yyyy = path_components[-4]  #patches_dirs[len(path_to_patches)+1:len(path_to_patches)+5]
+    yyyymmdd = path_components[-3]  #patches_dirs[len(path_to_patches)+6:len(path_to_patches)+14]
+    model_initialization = path_components[-2]  #patches_dirs[len(path_to_patches)+15:len(path_to_patches)+19]
+    ens_mem = path_components[-1][8:]  #patches_dirs[len(path_to_patches)+28:]
+    
+    if is_dry_run:
+        print("make_directory_structure(patches_dirs)")
+        print(path_components)
+        print('yyyy', yyyy)
+        print('yyyymmdd', yyyymmdd)
+        print('model_initialization', model_initialization) 
+        print('ens_mem', ens_mem)
         
     # Make the directory structure we need for this wofs run
     # Likely many of these will run in parallel and could be creating files at the same time
     # Use error handling to prevent the parallel tasks from killing one another
-    if(not os.path.exists(outfile_dir)):
-        try:
-            os.mkdir(outfile_dir)
-        except:
-            pass
-    if(not os.path.exists(outfile_dir + '/predictions/')):
-        try:
-            os.mkdir(outfile_dir + '/predictions/')
-        except:
-            pass
-    if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy)):
-        try:
-            os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy)
-        except:
-            pass
-    if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd)):
-        try:
-            os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd)
-        except:
-            pass
-    if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization)):
-        try:
-            os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization)
-        except:
-            pass
-    if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/' + ens_mem)):
-        try:
-            os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/ENS_MEM_' + ens_mem)
-        except:
-            pass
-    outfile_path = outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/ENS_MEM_' + ens_mem + '/'
+    #if(not os.path.exists(outfile_dir)):
+    try:
+        if not is_dry_run: os.mkdir(outfile_dir)
+        print("Making directory", outfile_dir)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
+
+    new_predictions_dir = os.path.join(outfile_dir, 'predictions/')
+    #if(not os.path.exists(new_predictions_dir)): #outfile_dir + '/predictions/'
+    try:
+        if not is_dry_run: os.mkdir(new_predictions_dir)
+        print("Making directory", new_predictions_dir)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
+
+    new_yyyy_dir = os.path.join(new_predictions_dir, yyyy)
+    #if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy)):
+    #if(not os.path.exists(new_yyyy_dir)):
+    try:
+        if not is_dry_run: os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy)
+        print("Making directory", new_yyyy_dir)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
+
+    new_yyyymmdd_dir = os.path.join(new_yyyy_dir, yyyymmdd)
+    #if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd)):
+    #if(not os.path.exists(new_yyyymmdd_dir)):
+    try:
+        #if not is_dry_run: os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd)
+        if not is_dry_run: os.mkdir(new_yyyymmdd_dir)
+        print("Making directory", new_yyyymmdd_dir)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
+
+    new_model_init_dir = os.path.join(new_yyyymmdd_dir, model_initialization)
+    #if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization)):
+    #if(not os.path.exists(new_model_init_dir)):
+    try:
+        #os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization)
+        if not is_dry_run: os.mkdir(new_model_init_dir)
+        print("Making directory", new_model_init_dir)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
+
+    new_ensemble_dir = os.path.join(new_model_init_dir, 'ENS_MEM_' + ens_mem)
+    #new_ensemble_dir = os.path.join(new_model_init_dir, ens_mem)
+    #if(not os.path.exists(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/' + ens_mem)):
+    #if(not os.path.exists(new_ensemble_dir)):
+    try:
+        #os.mkdir(outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/ENS_MEM_' + ens_mem)
+        if not is_dry_run: os.mkdir(new_ensemble_dir)
+        print("Making directory", new_ensemble_dir)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
     
+    #outfile_path = outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/ENS_MEM_' + ens_mem + '/'
+    outfile_path = os.path.join(new_model_init_dir, 'ENS_MEM_' + ens_mem)
+    print("Output path", outfile_path)
     return outfile_path
 
 
 def make_wofs_predictions(all_patches, outfile_path):
 
     # Define output filenames
-    metadata_outfile_name = outfile_dir + '/predictions/' + '/wofs_metadata.csv'
-    predictions_outfile_name = outfile_dir + '/predictions/' + '/wofs_predictions.nc'
+    #metadata_outfile_name = outfile_dir + '/predictions/' + '/wofs_metadata.csv'
+    #predictions_outfile_name = outfile_dir + '/predictions/' + '/wofs_predictions.nc'
+    metadata_outfile_name = os.path.join(outfile_dir, 'predictions/', 'wofs_metadata.csv')
+    predictions_outfile_name = os.path.join(outfile_dir, 'predictions/', 'wofs_predictions.nc')
+    if is_dry_run:
+        print("metadata_outfile_name", metadata_outfile_name)
+        print("predictions_outfile_name", predictions_outfile_name)
     
     #open all the data in one DataArray
+    print("Openning all the patches", all_patches)
     wofs = xr.open_mfdataset(all_patches, concat_dim='patch',combine='nested', parallel=True, engine='netcdf4')
     
     # Read in the mean and std for each variable field from the training set to normalize the data
+    print("Opening training meta data", training_data_metadata_path)
     training_metadata = xr.open_dataset(training_data_metadata_path)
     global mean_train_ZH
     mean_train_ZH = float(training_metadata.ZH_mean.values)
@@ -166,26 +220,34 @@ def make_wofs_predictions(all_patches, outfile_path):
     
 
     #Save out the metadata
-    with open(metadata_outfile_name, 'a') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        csvwriter.writerow(['time'] + list(time))
-        csvwriter.writerow(['lat'] + list(lat))
-        csvwriter.writerow(['lon'] + list(lon))
-        csvwriter.writerow(['forecast_window'] + list(forecast_window))
-        csvwriter.writerow(['n_convective_pixels'] + list(n_convective_pixels))
-        csvwriter.writerow(['n_uh_pixels'] + list(n_uh_pixels))
+    print("Saving metadata_outfile to", metadata_outfile_name)
+    if not is_dry_run:
+        with open(metadata_outfile_name, 'a') as csvfile:
+            csvwriter = csv.writer(csvfile)
+            csvwriter.writerow(['time'] + list(time))
+            csvwriter.writerow(['lat'] + list(lat))
+            csvwriter.writerow(['lon'] + list(lon))
+            csvwriter.writerow(['forecast_window'] + list(forecast_window))
+            csvwriter.writerow(['n_convective_pixels'] + list(n_convective_pixels))
+            csvwriter.writerow(['n_uh_pixels'] + list(n_uh_pixels))
 
     #read in the unet
+    print("Loading model", checkpoint_path)
     fss = make_fractions_skill_score(2, 2, c=1.0, cutoff=0.5, want_hard_discretization=False)
     model = keras.models.load_model(checkpoint_path, 
                     custom_objects={'fractions_skill_score': fss, 
                                     'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
 
     #evaluate the unet on the testing data
-    y_hat = model.predict(input_array)
+    print("Evaluate Model. data size =", input_array.shape)
+    print("predictions_outfile_name", predictions_outfile_name)
+    ds_wofs_as_gridrad = None
+    if not is_dry_run:
+        print("Performing model predictions")
+        y_hat = model.predict(input_array)
 
-    #make a dataset of the true and predicted patch data
-    ds_wofs_as_gridrad = xr.Dataset(data_vars=dict(UH = (["patch", "x", "y"], uh),
+        #make a dataset of the true and predicted patch data
+        ds_wofs_as_gridrad = xr.Dataset(data_vars=dict(UH = (["patch", "x", "y"], uh),
                                 ZH_composite = (["patch", "x", "y"], zh.values.max(axis=3)),
                                 ZH = (["patch", "x", "y", "z"], zh.values),
                                 stitched_x = (["patch", "x"], wofs.stitched_x.values),
@@ -203,8 +265,9 @@ def make_wofs_predictions(all_patches, outfile_path):
                                 y = range(32),
                                 z = range(1,13)))
 
-    # Save out the data, formatted as gridrad
-    ds_wofs_as_gridrad.to_netcdf(predictions_outfile_name)
+        # Save out the data, formatted as gridrad
+        print("Saving the prediction output", predictions_outfile_name)
+        ds_wofs_as_gridrad.to_netcdf(predictions_outfile_name)
 
     return ds_wofs_as_gridrad
 
@@ -270,13 +333,17 @@ def run_predictions_and_interpolation(patches_dirs):
     # Make the directory structure for the wofs predictions and define the output filepath
     outfile_path = make_directory_structure(patches_dirs)
     # Define output filename
-    predictions_for_NCAR_outfile_name = outfile_path + '/wofs_stitched_light.nc'
+    #predictions_for_NCAR_outfile_name = outfile_path + '/wofs_stitched_light.nc'
+    predictions_for_NCAR_outfile_name = os.path.join(outfile_path, 'wofs_stitched_light.nc')
+    if is_dry_run: print("predictions_for_NCAR_outfile_name", predictions_for_NCAR_outfile_name)
 
     # Load in the patches from all the model times of this wofs run
-    all_patches = glob.glob(patches_dirs + '/*')
+    all_patches = glob.glob(patches_dirs + '/*')[:1] ## MOSHO - added [:1] for time/memory monitoring
+    print("all_patches", all_patches)
     
     # If these files are already made, skip this model time
     if os.path.exists(predictions_for_NCAR_outfile_name):
+        print(f"Already exists: {predictions_for_NCAR_outfile_name}")
         return
 
     # Make the wofs predictions in the gridrad format
@@ -303,14 +370,26 @@ def run_predictions_and_interpolation(patches_dirs):
         
 
         # Pull out time, model run, and ensemble member information from the filepath
-        yyyy = patches_dirs[len(path_to_patches)+6:len(path_to_patches)+10]
-        yyyymmdd = patches_dirs[len(path_to_patches)+6:len(path_to_patches)+14]
-        model_initialization = patches_dirs[len(path_to_patches)+15:len(path_to_patches)+19]
-        ens_mem = patches_dirs[len(path_to_patches)+28:]
+        path_components = patches_dirs.split('/')
+        blen = len(path_to_patches)
+        yyyy = path_components[-4]  #patches_dirs[blen+5:blen+9]
+        yyyymmdd = path_components[-3]  #patches_dirs[blen+5:blen+13]
+        model_initialization = path_components[-2]  #patches_dirs[blen+14:blen+18]
+        ens_mem = path_components[-1][8:]  #[-2:]  #patches_dirs[-2:]
+        
         mm = str(datetime_time)[5:7]
         dd = str(datetime_time)[8:10]
         hh = str(datetime_time)[11:13]
         minmin = str(datetime_time)[14:16]
+        
+        if is_dry_run:
+            print("patches dirs", patches_dirs)
+            print("path_to_patches", path_to_patches)
+            print(path_components)
+            print("yyyy", yyyy)
+            print("yyyymmdd", yyyymmdd)
+            print("model_initialization", model_initialization)
+            print("ens_mem", ens_mem)
 
         # Open the original WoFS file to get the grid spacing
         original_wofs = xr.open_dataset(path_to_wofs + '/%s/%s/%s/ENS_MEM_%s/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, yyyymmdd, model_initialization, ens_mem, yyyy, mm, dd, hh, minmin), engine='netcdf4')
@@ -360,21 +439,26 @@ def run_predictions_and_interpolation(patches_dirs):
                                 XLONG = (["Time", "south_north", "west_east"], original_wofs.XLONG.values)))
 
         # Save out the interpolated file
-        wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
+        print("Save interpolated file", outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
+        if not is_dry_run: wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
 
 
     # Combine all the stitched files into one, sort the dataset and save it out
     ds_stitched = xr.concat(ds_stitched_list, dim='time')
     ds_stitched = ds_stitched.sortby('time')
-    ds_stitched.to_netcdf(predictions_for_NCAR_outfile_name)
+    
+    print("Combined stitched files saved to", predictions_for_NCAR_outfile_name)
+    if not is_dry_run: ds_stitched.to_netcdf(predictions_for_NCAR_outfile_name)
 
     # Clean up our script
     ds_stitched.close()
     ds_wofs_as_gridrad.close()
     del ds_wofs_as_gridrad
-    del uh
-    del zh
-    del model
+    #del uh
+    #del zh
+    #del model
+    
+    return all_patches
 
 
 
@@ -385,21 +469,39 @@ def main():
     get_arguments()  
 
     # Make the beginning of the directory structure where the predictions will be saved
+    print("outfile_dir", outfile_dir)
     if(not os.path.exists(outfile_dir)):
-        os.mkdir(outfile_dir)
-    outfile_path = outfile_dir + '/wofs_predictions/'
+        print(f"Making top level predictions directory: {outfile_dir}")
+        if not is_dry_run: os.mkdir(outfile_dir)
+    outfile_path = os.path.join(outfile_dir, 'wofs_predictions/')
     if(not os.path.exists(outfile_path)):
-        os.mkdir(outfile_path)
+        print(f"Making desired predictions directory: {outfile_path}")
+        if not is_dry_run: os.mkdir(outfile_path)
 
 
     #load in the patches
-    all_patches_dirs = glob.glob(path_to_patches + '/2019/*/*/*')
+    #all_patches_dirs = glob.glob(path_to_patches + '/2019/*/*/*')
+    members_path = os.path.join(path_to_patches, '2019/*/*/*')
+    all_patches_dirs = glob.glob(members_path)
     all_patches_dirs.sort()
+
+    # Create process monitor
+    proc = ProcessMonitor()
 
     # We do in range 8 because there are ~8000 files. 
     # The task array in slurm only lets us do up to 1000, so we take care of the extra here.
-    for i in range(8):
+    for i in range(1):
+        if i == 0 and not is_dry_run: proc.start_timer()
         run_predictions_and_interpolation(all_patches_dirs[int(index_primer) + i*1000])
+        if i == 0 and not is_dry_run:
+            proc.end_timer()
+            day_idx = int(index_primer)
+            basepath = os.path.join(outfile_path, f'process_monitoring_day{day_idx}_idx{i}_1_')
+            proc.write_performance_monitor(output_path=basepath + '_performance.csv')
+            proc.plot_performance_monitor(attrs=None, ax=None, write=True,
+                                          output_path=basepath + '_performance_plot.png', format='png')
+            proc.print(write=True, output_path=basepath + '.csv')
+            print("WoFS File", all_patches_dirs[int(index_primer) + i*1000])
 
 
 if __name__ == "__main__":

@@ -1,15 +1,26 @@
 from tensorflow import keras
+print("keras version", keras.__version__)
 import xarray as xr
+print("xarray version", xr.__version__)
 import numpy as np
+print("numpy version", np.__version__)
 import csv
 import glob
 import argparse
 import tensorflow as tf
+print("tensorflow version", tf.__version__)
 import os
 import sys
+import pandas as pd
+print("pandas version", pd.__version__)
+import psutil, py3nvml
+from time import time
+from datetime import timedelta, datetime #fromtimestamp
 sys.path.append("/home/lydiaks2/tornado_project")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
+sys.path.append("../../process_monitoring")
+from process_monitor import ProcessMonitor
 
 
 def get_arguments():
@@ -63,6 +74,49 @@ def get_arguments():
     training_data_metadata_path = getattr(args, 'training_data_metadata_path')
 
 
+def process_profile(attrs=None, show=True):
+    '''
+    Obtain information about time, memory, and cpu utilization
+    @params: attrs, tuple of select attributes from psutil to 
+             output
+    @params: show, print process information to screen (1),
+             file (2), or both (3)
+    '''
+    info = psutil.Process().as_dict(attrs=attrs)
+
+    # Select Process attributes if any are specified
+    #if not attrs is None:
+    info_sel = dict(info)
+    for key in info.keys(): # TODO: map/filter??
+        details = info[key]
+        if isinstance(details, list) and len(details) > 0:
+            dets = [str(i) for i in details]
+            info[key] = "; ".join(dets)
+        elif key == 'create_time':
+            info[key] = datetime.fromtimestamp(details).strftime("%A %B %d %Y %H:%M:%S %Z")
+        elif key in ['io_counters', 'threads', 'cpu_times', 'memory_maps',
+                    'memory_info', 'memory_full_info', 'open_files']: #todo named tuples
+            dets = [str(i) for i in details._asdict().items()]
+            units = ' sec' if key == 'cpu_times' else (' bytes' if '_info' in key else '') 
+            sym = '\n' if show <= 1 else '; '
+            info[key] = (units + sym).join(dets)
+            #info[key] = f"{units}{sym}".join(dets)
+        elif 'percent' in key:
+            info[key] = "{}%".format(details)
+
+    if show in [1, 3]:
+        print('\nPROCESS INFO \n' + '\n'.join(['{0}: {1}'.format(key, value) for key, value in info.items()]))
+    if show in [2, 3]:
+        print("\nPROCESS EXECUTION PROFILE")
+        df = pd.DataFrame(data=info, index=range(1)).T
+        proc_info_fpath = os.path.join(output_predictions_path,
+                            'predictions/process_execution_profile.csv')
+        print("Writing {}".format(proc_info_fpath))
+        df.to_csv(proc_info_fpath, header=False)
+        print(df)
+    
+    return info    
+
 
 def main():
 
@@ -81,7 +135,11 @@ def main():
     # Define the output filenames
     predictions_outfile_name = output_predictions_path + '/predictions/test_predictions.nc'
     metadata_outfile_name = output_predictions_path + '/predictions/test_metadata.csv'
-        
+    
+    # Create process monitor and start tracking process information
+    proc = ProcessMonitor()
+    proc.start_timer()
+    
     #open all the testing data in one DataArray
     test = xr.open_mfdataset(all_patches_dirs, concat_dim='patch',combine='nested', parallel=True, engine='netcdf4')
 
@@ -96,12 +154,13 @@ def main():
     zh = (test.ZH.isel(z=[1,2,3,4,5,6,7,8,9,10,11,12]) - mean_train_ZH)/std_train_ZH
     labels = test.labels
 
+    # TESTING 
     # Put back together into one ML input array
-    input_array = zh
+    input_array = zh #[:1]
     
     # Define the ml labels
     output_ds = labels
-    output_array = output_ds.values
+    output_array = output_ds.values #[:1]
 
     # Pull out the metadata
     n_convective_pixels = test.n_convective_pixels.values
@@ -112,7 +171,7 @@ def main():
     lon = test.lon.values
     time = test.time.values
     forecast_window = test.forecast_window.values
-            
+    
     #Save out the metadata
     with open(metadata_outfile_name, 'a') as csvfile:
         csvwriter = csv.writer(csvfile)
@@ -134,6 +193,19 @@ def main():
         
     #evaluate the unet on the testing data
     y_hat = model.predict(input_array)
+
+
+    # Obtain memory and timing profile information
+    '''process_profile(attrs=['name', 'cwd', 'cmdline', 'exe', 'pid',
+                            'create_time', 'cpu_percent', 'cpu_times',
+                            'memory_info', 'memory_full_info',
+                            'memory_percent', 'num_threads'], show=3)
+    '''
+    proc.end_timer()
+    proc.write_performance_monitor(output_path=None)
+    proc.plot_performance_monitor(attrs=None, ax=None, output_path=None, write=True)
+    proc.print()
+    print()
 
 
     #make a dataset of the true and predicted patch data with the metadata
@@ -159,14 +231,17 @@ def main():
 
     #save out the prediction and truth values
     ds_return.to_netcdf(predictions_outfile_name)
+    #"""
 
 
 if __name__ == "__main__":
     main()
 
-
-
-
-
+    '''    
+    process_profile(attrs=['name', 'cwd', 'cmdline', 'exe', 'pid',
+                            'create_time', 'cpu_percent', 'cpu_times',
+                            'memory_info', 'memory_full_info',
+                            'memory_percent', 'num_threads'], show=3)
+    '''
 
 
