@@ -111,211 +111,91 @@ def csi(use_as_loss_function, use_soft_discretization,
         
         return loss
 
-# ###LOSSES FROM HERE: https://github.com/shruti-jadon/Semantic-Segmentation-Loss-Functions/blob/master/loss_functions.py
+class WeightedBinaryCrossEntropy(tf.keras.losses.Loss):
+    """Adapted tf.keras.backend.binary_crossentropy to have weights that work for a UNET
+    
+    Last I checked, weighting the binary cross entropy wouldnt work with the UNETs, it
+    use to complain about the shape being not right. 
+    
+    To get around this, the class here has a way to weight the 1s and 0s differently.
+    This is important for alot of meteorological instances where the event we are looking 
+    to predict is often a 'rare' event. We mean where the pixels == 1 are like 1% of the 
+    total number of pixels. 
+    
+    the expected shape of y_true is [n_sample,nx,ny,1]
+    
+    """
+    def __init__(self,weights=[1.0,1.0],from_logits=False):
+        super().__init__()
+        #store weights
+        self.w1 = weights[0]
+        self.w2 = weights[1]
+        self.from_logits=from_logits
 
-# beta = 0.25
-# alpha = 0.25
-# gamma = 2
-# epsilon = 1e-5
-# smooth = 1
+    def __str__(self):
+        return ("WeightedBinaryCrossEntropy()")
+    
+    def binary_crossentropy(self,target, output):
+        """Binary crossentropy between an output tensor and a target tensor.
+        Args:
+          target: A tensor with the same shape as `output`.
+          output: A tensor.
+          from_logits: Whether `output` is expected to be a logits tensor.
+              By default, we consider that `output`
+              encodes a probability distribution.
+        Returns:
+          A tensor.
+        """
+        target = tf.convert_to_tensor(target)
+        output = tf.convert_to_tensor(output)
 
+        # Use logits whenever they are available. `softmax` and `sigmoid`
+        # activations cache logits on the `output` Tensor.
+        if hasattr(output, '_keras_logits'):
+            output = output._keras_logits  # pylint: disable=protected-access
+            if self.from_logits:
+              warnings.warn(
+                  '"`binary_crossentropy` received `from_logits=True`, but the `output`'
+                  ' argument was produced by a sigmoid or softmax activation and thus '
+                  'does not represent logits. Was this intended?"',
+                  stacklevel=2)
+            self.from_logits = True
 
-# import tensorflow as tf 
-# import tensorflow.keras.backend as K
-# from keras.losses import binary_crossentropy
+        if self.from_logits:
+            return tf.nn.sigmoid_cross_entropy_with_logits(labels=target, logits=output)
 
-# beta = 0.25
-# alpha = 0.25
-# gamma = 2
-# epsilon = 1e-5
-# smooth = 1
+        if (not isinstance(output, (tf.__internal__.EagerTensor, tf.Variable)) and
+          output.op.type == 'Sigmoid') and not hasattr(output, '_keras_history'):
+            # When sigmoid activation function is used for output operation, we
+            # use logits from the sigmoid function directly to compute loss in order
+            # to prevent collapsing zero when training.
+            assert len(output.op.inputs) == 1
+            output = output.op.inputs[0]
+            return tf.nn.sigmoid_cross_entropy_with_logits(labels=target, logits=output)
 
+        epsilon_ = _constant_to_tensor(tf.keras.backend.epsilon(), output.dtype.base_dtype)
+        output = tf.clip_by_value(output, epsilon_, 1. - epsilon_)
 
-# class Semantic_loss_functions(object):
-#     def __init__(self,build_dict=True):
-#         if build_dict:
-#           loss_dict = {}
-#           loss_dict['dice_loss'] = self.dice_loss
-#           loss_dict['weighted_cross_entropyloss'] = self.weighted_cross_entropyloss
-#           loss_dict['focal_loss'] = self.focal_loss
-#           loss_dict['bce_dice_loss'] = self.bce_dice_loss
-#           loss_dict['tversky_loss'] = self.tversky_loss
-#           self.losses = loss_dict
-            
-#     def dice_coef(self, y_true, y_pred):
-#         y_true_f = K.flatten(y_true)
-#         y_pred_f = K.flatten(y_pred)
-#         intersection = K.sum(y_true_f * y_pred_f)
-#         return (2. * intersection + K.epsilon()) / (
-#                     K.sum(y_true_f) + K.sum(y_pred_f) + K.epsilon())
+        # Compute cross entropy from probabilities.
+        bce = target * tf.math.log(output + tf.keras.backend.epsilon())
+        bce += (1 - target) * tf.math.log(1 - output + tf.keras.backend.epsilon()) 
+        return -bce
 
-#     def sensitivity(self, y_true, y_pred):
-#         true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-#         possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
-#         return true_positives / (possible_positives + K.epsilon())
-
-#     def specificity(self, y_true, y_pred):
-#         true_negatives = K.sum(
-#             K.round(K.clip((1 - y_true) * (1 - y_pred), 0, 1)))
-#         possible_negatives = K.sum(K.round(K.clip(1 - y_true, 0, 1)))
-#         return true_negatives / (possible_negatives + K.epsilon())
-
-#     def convert_to_logits(self, y_pred):
-#         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(),
-#                                   1 - tf.keras.backend.epsilon())
-#         return tf.math.log(y_pred / (1 - y_pred))
-
-#     def weighted_cross_entropyloss(self, y_true, y_pred):
-#         y_pred = self.convert_to_logits(y_pred)
-#         pos_weight = beta / (1 - beta)
-#         loss = tf.nn.weighted_cross_entropy_with_logits(logits=y_pred,
-#                                                         labels=y_true,
-#                                                         pos_weight=pos_weight)
-#         return tf.reduce_mean(loss)
-
-#     def focal_loss_with_logits(self, logits, targets, alpha, gamma, y_pred):
-#         weight_a = alpha * (1 - y_pred) ** gamma * targets
-#         weight_b = (1 - alpha) * y_pred ** gamma * (1 - targets)
-
-#         return (tf.math.log1p(tf.exp(-tf.abs(logits))) + tf.nn.relu(
-#             -logits)) * (weight_a + weight_b) + logits * weight_b
-
-#     def focal_loss(self, y_true, y_pred):
-#         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(),
-#                                   1 - tf.keras.backend.epsilon())
-#         logits = tf.math.log(y_pred / (1 - y_pred))
-
-#         loss = self.focal_loss_with_logits(logits=logits, targets=y_true,
-#                                       alpha=alpha, gamma=gamma, y_pred=y_pred)
-
-#         return tf.reduce_mean(loss)
-
-#     def depth_softmax(self, matrix):
-#         sigmoid = lambda x: 1 / (1 + K.exp(-x))
-#         sigmoided_matrix = sigmoid(matrix)
-#         softmax_matrix = sigmoided_matrix / K.sum(sigmoided_matrix, axis=0)
-#         return softmax_matrix
-
-#     def generalized_dice_coefficient(self, y_true, y_pred):
-#         smooth = 1.
-#         y_true_f = K.flatten(y_true)
-#         y_pred_f = K.flatten(y_pred)
-#         intersection = K.sum(y_true_f * y_pred_f)
-#         score = (2. * intersection + smooth) / (
-#                     K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
-#         return score
-
-#     def dice_loss(self, y_true, y_pred):
-#         loss = 1 - self.generalized_dice_coefficient(y_true, y_pred)
-#         return loss
-
-#     def bce_dice_loss(self, y_true, y_pred):
-#         loss = binary_crossentropy(y_true, y_pred) + \
-#                self.dice_loss(y_true, y_pred)
-#         return loss / 2.0
-
-#     def confusion(self, y_true, y_pred):
-#         smooth = 1
-#         y_pred_pos = K.clip(y_pred, 0, 1)
-#         y_pred_neg = 1 - y_pred_pos
-#         y_pos = K.clip(y_true, 0, 1)
-#         y_neg = 1 - y_pos
-#         tp = K.sum(y_pos * y_pred_pos)
-#         fp = K.sum(y_neg * y_pred_pos)
-#         fn = K.sum(y_pos * y_pred_neg)
-#         prec = (tp + smooth) / (tp + fp + smooth)
-#         recall = (tp + smooth) / (tp + fn + smooth)
-#         return prec, recall
-
-#     def true_positive(self, y_true, y_pred):
-#         smooth = 1
-#         y_pred_pos = K.round(K.clip(y_pred, 0, 1))
-#         y_pos = K.round(K.clip(y_true, 0, 1))
-#         tp = (K.sum(y_pos * y_pred_pos) + smooth) / (K.sum(y_pos) + smooth)
-#         return tp
-
-#     def true_negative(self, y_true, y_pred):
-#         smooth = 1
-#         y_pred_pos = K.round(K.clip(y_pred, 0, 1))
-#         y_pred_neg = 1 - y_pred_pos
-#         y_pos = K.round(K.clip(y_true, 0, 1))
-#         y_neg = 1 - y_pos
-#         tn = (K.sum(y_neg * y_pred_neg) + smooth) / (K.sum(y_neg) + smooth)
-#         return tn
-
-#     def tversky_index(self, y_true, y_pred):
-#         y_true_pos = K.flatten(y_true)
-#         y_pred_pos = K.flatten(y_pred)
-#         true_pos = K.sum(y_true_pos * y_pred_pos)
-#         false_neg = K.sum(y_true_pos * (1 - y_pred_pos))
-#         false_pos = K.sum((1 - y_true_pos) * y_pred_pos)
-#         alpha = 0.7
-#         return (true_pos + smooth) / (true_pos + alpha * false_neg + (
-#                     1 - alpha) * false_pos + smooth)
-
-#     def tversky_loss(self, y_true, y_pred):
-#         return 1 - self.tversky_index(y_true, y_pred)
-
-#     def focal_tversky(self, y_true, y_pred):
-#         pt_1 = self.tversky_index(y_true, y_pred)
-#         gamma = 0.75
-#         return K.pow((1 - pt_1), gamma)
-
-#     def log_cosh_dice_loss(self, y_true, y_pred):
-#         x = self.dice_loss(y_true, y_pred)
-#         return tf.math.log((tf.exp(x) + tf.exp(-x)) / 2.0)
-
-# class WeightedMSE(tf.keras.losses.Loss):
-#     """ 
-#     Calculate a weighted MSE. This loss gives you control to weight the 
-#     pixels that are > 0 differently than the pixels that are 0 in y_true. This
-#     class is subclassed from tf.keras.lossess.Loss to hopefully enable 
-#     'stateful'-ness ?
-
-#     weights[0] is the weight for non-zero pixels
-#     weights[1] is the weight for zero pixels. 
-
-#     """
-#     def __init__(self, weights=[1.0,1.0],name="custom_mse",
-#                  **kwargs):
-#         super(WeightedMSE,self).__init__(name=name, **kwargs)
-
-#         #store weights
-#         self.w1 = weights[0]
-#         self.w2 = weights[1]
-
-#     def call(self, y_true, y_pred):
-
-#         #build weight_matrix 
-#         ones_array = tf.ones_like(y_true)
-#         weights_for_nonzero = tf.math.multiply(ones_array,self.w1)
-#         weights_for_zero = tf.math.multiply(ones_array,self.w2)
-#         weight_matrix = tf.where(tf.greater(y_true,0),weights_for_nonzero,
-#                            weights_for_zero)
-#         loss = tf.math.reduce_mean(tf.math.multiply(weight_matrix,
-#                                                     tf.math.square(tf.math.subtract(y_pred,y_true))))
-#         return loss
-
-# class RegressLogLoss(tf.keras.losses.Loss):
-#     """Baseline regression log-loss that includes uncertainty via a 2-output regression setup.
-#     """
-#     def __init__(self,):
-#         super().__init__()
-
-#     def __str__(self):
-#         return ("RegressBaseline()")
-
-#     def call(self, y_true, y_pred):
+    def call(self, y_true, y_pred):
         
-#         y_true = tf.cast(y_true, tf.float64)
-#         y_pred = tf.cast(y_pred, tf.float64)
+        y_true = tf.cast(y_true, tf.float64)
+        y_pred = tf.cast(y_pred, tf.float64)
         
-#         mu = y_pred[...,0]
-#         sigma = tf.math.exp(y_pred[...,1])
-        
-#         norm_dist = tfp.distributions.Normal(mu, sigma)
-
-#         # compute the log as -log(p)
-#         loss = -norm_dist.log_prob(y_true[...,0])
-        
-#         return tf.reduce_mean(loss)
+        loss = self.binary_crossentropy(y_true, y_pred)
+    
+        #build weight_matrix 
+        ones_array = tf.ones_like(y_true)
+        weights_for_nonzero = tf.math.multiply(ones_array,self.w1)
+        weights_for_zero = tf.math.multiply(ones_array,self.w2)
+        weight_matrix = tf.where(tf.greater(y_true,0.0),weights_for_nonzero,
+                           weights_for_zero)
+        self.w = weight_matrix
+        #weight non-zero pixels more
+        loss = tf.math.multiply(weight_matrix,loss)
+    
+        return tf.reduce_mean(loss)
