@@ -1,6 +1,8 @@
 # Steps to process the GridRad data for ML 
 
-This guide is to help others run the code originally written by Ryan Lagerquist during his time at OU (GewitterGefahr). There are a number of steps to follow here, but they are named in their order. If you have questions, please reach out to me (Randy Chase) and we can see if we can solve your issue. 
+This guide is to help others run the code originally written by Ryan Lagerquist during his time at OU (GewitterGefahr). There are a number of steps (total 7) to follow here, but they are named in their order. If you have questions, please reach out to me (Randy Chase) and we can see if we can solve your issue. 
+
+Keep in mind some steps take longer and more memory than others. You may need to adjust the time, memory and -n parameters of the #SBATCH header to get better performance. 
 
 ## Pre-Reqs 
 
@@ -67,5 +69,37 @@ There are 3 seperate scripts in Step2 (a,b and c). These scripts are all in the 
 
 - this script determines which echoes are 'convective'. This field is used for tracking storms. 
 
-Please be mindful and change similar lines to Step_01.sh 
+- Please be mindful and change similar lines to Step_01.sh 
+
+#### Step_03.sh
+
+- this script does the storm object id and the first pass on tracking storms through time. 
+
+- Please be mindful and change similar lines to Step_01.sh 
+
+#### Step_04.sh
+
+- this script does the second pass on storm tracking, which connects some tracks with a small gap in time etc. 
+
+- Please be mindful and change similar lines to Step_01.sh 
+
+#### Step_05.sh
+
+- this script removes storms that are over ocean. These are removed because storm reports don't exist over the ocean. Thus it is ambiguous if the storm created a tornado or not. 
+
+- Please be mindful and change similar lines to Step_01.sh 
+
+#### Step_06.sh
+
+- this script links the storm reports to the storms themselves
+
+- Please be mindful and change similar lines to Step_01.sh 
+
+#### Step_07.sh
+
+- this script creates the storm labels. 0 for no tornado, 1 for tornado. -1 are bad values
+
+- Please be mindful and change similar lines to Step_01.sh 
+
+From here you can run Lydia's pipeline (in the lydia_scripts) to generate the segmented storm maps (i.e., storms labeled by if they made a tornado or not) and slice it up for a U-Net. 
 
