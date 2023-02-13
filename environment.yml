@@ -389,7 +389,6 @@ dependencies:
 - python-language-server=0.36.2=pyhd3eb1b0_0
 - python-libarchive-c=2.9=pyhd3eb1b0_1
 - python=3.10.5=h582c2e5_0_cpython
-- python=3.8
 - python_abi=3.10=2_cp310
 - pytz=2022.1=pyhd8ed1ab_0
 - pyu2f=0.1.5=pyhd8ed1ab_0
