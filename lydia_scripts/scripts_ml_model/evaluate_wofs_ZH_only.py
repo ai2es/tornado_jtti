@@ -1,3 +1,25 @@
+"""
+Made by Lydia 2022
+Modified by Monique Shotande Feb 2023
+
+Evaluate a tensorflow model on WoFS (Warn on Forecast System) data
+that has already been interpolated to the GridRad grid. The output
+of the model is predictions for each pixel, interpolated back to the 
+original WoFS grid.
+
+Execution Instructions:
+    Conda environment requires are in the environment.yml
+    file. Execute:
+        conda env create --name tornado --file environment.yml
+    to create the conda environment necessary to run this script.
+    Custom module requirements:
+        The custom modules: custom_losses, custom_metrics, and process_monitoring
+        are in the tornado_jtti project directory.
+    Information about the required command line arguments are described in the 
+    method get_arguments(). Run
+        python evaluate_wofs_ZH_only.py --h
+"""
+
 from datetime import datetime
 from tensorflow import keras
 print("keras version", keras.__version__)
@@ -15,11 +37,13 @@ import sys
 import scipy
 print("scipy version", scipy.__version__)
 import netCDF4
+print("netCDF4 version", netCDF4.__version__)
 from scipy import spatial
 sys.path.append("/home/lydiaks2/tornado_project/")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-sys.path.append("/home/momoshog/Tornado/tornado_jtti/process_monitoring")
+#sys.path.append("/home/momoshog/Tornado/tornado_jtti/process_monitoring")
+sys.path.append("process_monitoring")
 from process_monitor import ProcessMonitor
 
 
@@ -117,6 +141,14 @@ def make_directory_structure(patches_dirs):
     # Make the directory structure we need for this wofs run
     # Likely many of these will run in parallel and could be creating files at the same time
     # Use error handling to prevent the parallel tasks from killing one another
+    outfile_path = os.path.join(outfile_dir, 'predictions/', *path_components[-4:])
+    try:
+        if not is_dry_run: os.makedirs(outfile_path)
+        print("Making predictions dir", outfile_path)
+    except OSError as err:
+        print(f"{err} in {err.filename}")
+
+    '''
     #if(not os.path.exists(outfile_dir)):
     try:
         if not is_dry_run: os.mkdir(outfile_dir)
@@ -171,9 +203,10 @@ def make_directory_structure(patches_dirs):
         print("Making directory", new_ensemble_dir)
     except OSError as err:
         print(f"{err} in {err.filename}")
+    '''
     
     #outfile_path = outfile_dir + '/predictions/' + '/' + yyyy + '/' + yyyymmdd + '/' + model_initialization + '/ENS_MEM_' + ens_mem + '/'
-    outfile_path = os.path.join(new_model_init_dir, 'ENS_MEM_' + ens_mem)
+    #outfile_path = os.path.join(new_model_init_dir, 'ENS_MEM_' + ens_mem)
     print("Output path", outfile_path)
     return outfile_path
 
@@ -241,30 +274,30 @@ def make_wofs_predictions(all_patches, outfile_path):
     #evaluate the unet on the testing data
     print("Evaluate Model. data size =", input_array.shape)
     print("predictions_outfile_name", predictions_outfile_name)
-    ds_wofs_as_gridrad = None
-    if not is_dry_run:
-        print("Performing model predictions")
-        y_hat = model.predict(input_array)
 
-        #make a dataset of the true and predicted patch data
-        ds_wofs_as_gridrad = xr.Dataset(data_vars=dict(UH = (["patch", "x", "y"], uh),
-                                ZH_composite = (["patch", "x", "y"], zh.values.max(axis=3)),
-                                ZH = (["patch", "x", "y", "z"], zh.values),
-                                stitched_x = (["patch", "x"], wofs.stitched_x.values),
-                                stitched_y = (["patch", "y"], wofs.stitched_y.values),
-                                predicted_no_tor = (["patch", "x", "y"], y_hat[:,:,:,0]),
-                                predicted_tor = (["patch", "x", "y"], y_hat[:,:,:,1]),
-                                n_convective_pixels = (["patch"], n_convective_pixels),
-                                n_uh_pixels = (["patch"], n_uh_pixels),
-                                lat = (["patch"], lat),
-                                lon = (["patch"], lon),
-                                time = (["patch"], time),
-                                forecast_window = (["patch"], forecast_window)),
-                        coords=dict(patch = range(y_hat.shape[0]),
-                                x = range(32),
-                                y = range(32),
-                                z = range(1,13)))
+    print("Performing model predictions")
+    y_hat = model.predict(input_array)
 
+    #make a dataset of the true and predicted patch data
+    ds_wofs_as_gridrad = xr.Dataset(data_vars=dict(UH = (["patch", "x", "y"], uh),
+                            ZH_composite = (["patch", "x", "y"], zh.values.max(axis=3)),
+                            ZH = (["patch", "x", "y", "z"], zh.values),
+                            stitched_x = (["patch", "x"], wofs.stitched_x.values),
+                            stitched_y = (["patch", "y"], wofs.stitched_y.values),
+                            predicted_no_tor = (["patch", "x", "y"], y_hat[:,:,:,0]),
+                            predicted_tor = (["patch", "x", "y"], y_hat[:,:,:,1]),
+                            n_convective_pixels = (["patch"], n_convective_pixels),
+                            n_uh_pixels = (["patch"], n_uh_pixels),
+                            lat = (["patch"], lat),
+                            lon = (["patch"], lon),
+                            time = (["patch"], time),
+                            forecast_window = (["patch"], forecast_window)),
+                    coords=dict(patch = range(y_hat.shape[0]),
+                            x = range(32),
+                            y = range(32),
+                            z = range(1,13)))
+
+    if not is_dry_run and not os.path.exists(predictions_outfile_name):
         # Save out the data, formatted as gridrad
         print("Saving the prediction output", predictions_outfile_name)
         ds_wofs_as_gridrad.to_netcdf(predictions_outfile_name)
@@ -344,7 +377,7 @@ def run_predictions_and_interpolation(patches_dirs):
     # If these files are already made, skip this model time
     if os.path.exists(predictions_for_NCAR_outfile_name):
         print(f"Already exists: {predictions_for_NCAR_outfile_name}")
-        return
+        #return
 
     # Make the wofs predictions in the gridrad format
     ds_wofs_as_gridrad = make_wofs_predictions(all_patches, outfile_path)
@@ -352,6 +385,11 @@ def run_predictions_and_interpolation(patches_dirs):
     # We've made predictions for all the times, but we want to save out each time individually
     times = set(ds_wofs_as_gridrad.time.values)
     ds_stitched_list = []
+
+    # Create process monitor
+    proc = ProcessMonitor()
+
+    if not is_dry_run: proc.start_timer()
 
     # Pull out and process all the data that we have for each time in the hour
     # We need to first stitch patches, then interpolate them back to the WoFS grid
@@ -446,9 +484,21 @@ def run_predictions_and_interpolation(patches_dirs):
     # Combine all the stitched files into one, sort the dataset and save it out
     ds_stitched = xr.concat(ds_stitched_list, dim='time')
     ds_stitched = ds_stitched.sortby('time')
-    
+
+    if not is_dry_run:
+        proc.end_timer()
+        day_idx = int(index_primer)
+        basepath = os.path.join(outfile_path, f'process_monitoring_day{day_idx}_stitch_interpolate_')
+        proc.write_performance_monitor(output_path=basepath + '_performance.csv')
+        proc.plot_performance_monitor(attrs=None, ax=None, write=True,
+                                        output_path=basepath + '_performance_plot.png', format='png')
+        proc.print(write=True, output_path=basepath + '.csv')
+        print("WoFS File", all_patches)
+        
+        if not os.path.exists(predictions_for_NCAR_outfile_name):
+            print(f"Writing: {predictions_for_NCAR_outfile_name}")
+            ds_stitched.to_netcdf(predictions_for_NCAR_outfile_name)
     print("Combined stitched files saved to", predictions_for_NCAR_outfile_name)
-    if not is_dry_run: ds_stitched.to_netcdf(predictions_for_NCAR_outfile_name)
 
     # Clean up our script
     ds_stitched.close()
@@ -486,14 +536,14 @@ def main():
     all_patches_dirs.sort()
 
     # Create process monitor
-    proc = ProcessMonitor()
+    #proc = ProcessMonitor()
 
     # We do in range 8 because there are ~8000 files. 
     # The task array in slurm only lets us do up to 1000, so we take care of the extra here.
     for i in range(1):
-        if i == 0 and not is_dry_run: proc.start_timer()
+        #if i == 0 and not is_dry_run: proc.start_timer()
         run_predictions_and_interpolation(all_patches_dirs[int(index_primer) + i*1000])
-        if i == 0 and not is_dry_run:
+        '''if i == 0 and not is_dry_run:
             proc.end_timer()
             day_idx = int(index_primer)
             basepath = os.path.join(outfile_path, f'process_monitoring_day{day_idx}_idx{i}_1_')
@@ -502,6 +552,7 @@ def main():
                                           output_path=basepath + '_performance_plot.png', format='png')
             proc.print(write=True, output_path=basepath + '.csv')
             print("WoFS File", all_patches_dirs[int(index_primer) + i*1000])
+        '''
 
 
 if __name__ == "__main__":
