@@ -13,29 +13,16 @@
 
 ##########################################################
 
-user=$(whoami)
-
 # source Lydia's python env
 source /home/lydiaks2/.bashrc
 bash
 conda activate tf_gpu
 
-#source ~/.tornado_bashrc
-#bash 
-#conda activate tornado_mosho
-#conda activate tf_gpu
-
 python --version
-
-#python -m pip install -U pip
-#python -m pip install .
-#python -m pip install "~/Tornado/tornado_jtti/setup.py"
-
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 
-
 #run the script
-#--patch_day_idx=$SLURM_ARRAY_TASK_ID \  # index of the day we are evaluating (ith file of storm masks from which to make the patches)
+#--patch_day_idx # index of the day (ith file of storm masks from which to make the patches)
 python -u /home/momoshog/Tornado/tornado_jtti/lydia_scripts/scripts_ml_model/evaluate_ZH_only.py \
 --patch_day_idx=$SLURM_ARRAY_TASK_ID \
 --input_patch_dir_name="/ourdisk/hpc/ai2es/tornado/learning_patches/xarray/3D/size_32/forecast_window_5" \
