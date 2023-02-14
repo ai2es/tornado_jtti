@@ -1,17 +1,44 @@
+"""
+Made by Lydia 2022
+Modified by Monique Shotande Feb 2023
+
+Convert raw WoFS (Warn on Forecast System) data from the
+WoFS griding format to the GridRad gridding format and 
+generate patches.
+
+Execution Instructions:
+    Conda environment requires are in the environment.yml
+    file. Execute:
+        conda env create --name tornado --file environment.yml
+    to create the conda environment necessary to run this script.
+    Custom module requirements:
+        The custom modules: custom_losses, custom_metrics, and process_monitoring
+        are in the tornado_jtti project directory.
+    Information about the required command line arguments are described in the 
+    method get_arguments(). Run
+        python wofs_to_gridrad_idw.py --h
+"""
+
 import xarray as xr
+print("xr version", xr.__version__)
 import numpy as np
+print("np version", np.__version__)
+import netCDF4
 from netCDF4 import Dataset
 import scipy.spatial
 import wrf
 import metpy
 import metpy.calc
-import os
+import os, sys
 import glob
 import datetime
-import netCDF4
 import multiprocessing as mp
 import argparse
 import tqdm
+#sys.path.append("/home/momoshog/Tornado/tornado_jtti/process_monitoring")
+sys.path.append("process_monitoring")
+from process_monitor import ProcessMonitor
+
 
 def find_and_create_output_path(filepath):
     #Find the wofs date of the day we are processing
@@ -33,29 +60,64 @@ def find_and_create_output_path(filepath):
 
     #Define the filepath fore the directory with all the regridded wofs data    
     #test if the filepath exists, and if not, create the necessary directories
-    if not os.path.exists(f"%s/%s/" % (patches_path, yyyy_path)):
+    path_components = filepath.split('/')
+    yyyy = path_components[-5]
+    date = path_components[-4]
+    init_time = path_components[-3]
+    ensem = path_components[-2]
+    dir_member = os.path.join(patches_path, *path_components[-5:-1])
+    print(path_components)
+    print(yyyy, date, init_time, ensem)
+    print("dir_member", dir_member)
+    '''
+    try:
+        if not is_dry_run: os.makedirs(outfile_path)
+        print(f"Making predictions dir {outfile_path} (dry_run={is_dry_run})")
+    except OSError as err:
+        print(f"[CAUGHT] {err} in {err.filename}")
+    '''
+
+    dir_yyyy = os.path.join(patches_path, yyyy_path)
+    if not os.path.exists(dir_yyyy): #f"%s/%s/" % (patches_path, yyyy_path)
         try:
-            os.mkdir(f"%s/%s/" % (patches_path, yyyy_path))
-        except:
-            pass
-    if not os.path.exists(f"%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path)):
+            if not is_dry_run: os.mkdir(dir_yyyy)
+            print(f"Making directory: {dir_yyyy} (dry_run={is_dry_run})")
+        except OSError as err:
+            print(f"[CAUGHT] {err} in {err.filename}")
+
+    dir_yyyymmdd = os.path.join(dir_yyyy, yyyymmdd_path)
+    #if not os.path.exists(f"%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path)):
+    if not os.path.exists(dir_yyyymmdd):
         try:
-            os.mkdir(f"%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path))
-        except:
-            pass
-    if not os.path.exists(f"%s/%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh)):
+            #os.mkdir(f"%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path))
+            if not is_dry_run: os.mkdir(dir_yyyymmdd)
+            print(f"Making directory: {dir_yyyymmdd} (dry_run={is_dry_run})")
+        except OSError as err:
+            print(f"[CAUGHT] {err} in {err.filename}")
+    
+    dir_model_init = os.path.join(dir_yyyymmdd, model_init_hhhh)
+    #if not os.path.exists(f"%s/%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh)):
+    if not os.path.exists(dir_model_init):
         try:
-            os.mkdir(f"%s/%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh))
-        except:
-            pass
-    if not os.path.exists(f"%s/%s/%s/%s/ENS_MEM_%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem)):
+            #os.mkdir(f"%s/%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh))
+            if not is_dry_run: os.mkdir(dir_model_init)
+            print(f"Making directory: {dir_model_init} (dry_run={is_dry_run})")
+        except OSError as err:
+            print(f"[CAUGHT] {err} in {err.filename}")
+
+    dir_member = "%s/ENS_MEM_%s" % (dir_model_init, ens_mem)
+    #if not os.path.exists(f"%s/%s/%s/%s/ENS_MEM_%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem)):
+    if not os.path.exists(dir_member):
         try:
-            os.mkdir(f"%s/%s/%s/%s/ENS_MEM_%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem))
-        except:
-            pass
+            #os.mkdir(f"%s/%s/%s/%s/ENS_MEM_%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem))
+            if not is_dry_run: os.mkdir(dir_member)
+            print(f"Making directory: {dir_member} (dry_run={is_dry_run})")
+        except OSError as err:
+            print(f"[CAUGHT] {err} in {err.filename}")
 
     # Declare the final, newly created filepath and return
-    output_filepath = f"%s/%s/%s/%s/ENS_MEM_%s/wofs_patches_%s_%s.nc" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem, yyyymmdd_day, hhmmss)
+    #output_filepath = f"%s/%s/%s/%s/ENS_MEM_%s/wofs_patches_%s_%s.nc" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem, yyyymmdd_day, hhmmss)
+    output_filepath = "%s/wofs_patches_%s_%s.nc" % (dir_member, yyyymmdd_day, hhmmss)
     
     #We need the gridrad time to be in seconds since 2001
     time = datetime.datetime(int(yyyy_day), int(mm_day), int(dd_day), int(hhmmss[0:2]), int(hhmmss[2:4]), int(hhmmss[4:]))
@@ -64,6 +126,7 @@ def find_and_create_output_path(filepath):
     forecast_window = (datetime.timedelta(hours=int(hhmmss[:2]), minutes=int(hhmmss[2:4])) - datetime.timedelta(hours=int(model_init_hhhh[:2]))).total_seconds()/60
 
     return output_filepath, time, forecast_window
+
 
 def calculate_output_lats_lons(wofs):
 
@@ -106,6 +169,7 @@ def calculate_output_lats_lons(wofs):
     new_gridrad_lats_lons = np.stack((np.ravel(gridrad_lats), np.ravel(gridrad_lons))).T
 
     return new_gridrad_lats_lons, new_gridrad_lats, new_gridrad_lons
+
 
 def extract_gridrad_data_fields(filepath, gridrad_heights):
 
@@ -159,9 +223,15 @@ def to_gridrad(filepath):
     # Create the time object corresponding to the data
     # Calculate the forecast window for this file
     output_filepath, time, forecast_window = find_and_create_output_path(filepath)
+    print(f"Output path for TIME {time} and window {forecast_window}: {output_filepath}")    
+
+    # Create process monitor for recording run times and memory usage
+    proc = ProcessMonitor()
+    proc.start_timer()
       
     # Open the wofs file
-    wofs = xr.open_dataset(filepath)
+    print(f"Loading {filepath}")
+    wofs = xr.open_dataset(filepath, engine='netcdf4')
     
     # Find the lat/lon points that will make up our regridded gridpoints
     new_gridrad_lats_lons, new_gridrad_lats, new_gridrad_lons = calculate_output_lats_lons(wofs)
@@ -171,8 +241,6 @@ def to_gridrad(filepath):
 
     # Pull out the desired data from the wofs file
     Z_agl, div, vort, uh = extract_gridrad_data_fields(filepath, gridrad_heights)
-
-
 
     # Make a list of all the lat/lon gridpoints from the original wofs grid
     wofs_lats_lons = np.stack((np.ravel(wofs.XLAT.values[0]), np.ravel(wofs.XLONG.values[0]))).T
@@ -211,9 +279,6 @@ def to_gridrad(filepath):
     REFL_10CM_final = np.swapaxes(np.swapaxes((np.sum(refls * 1/distances_3d**2, axis=2)/np.sum(1/distances_3d**2, axis=2)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0],vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
     uh_final = (np.sum(uhs * 1/distances**2, axis=1)/np.sum(1/distances**2, axis=1)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0]).astype(np.float32)
     
-    
-    
-    
     # Put the data into xarray DataArrays that have the same dimensions, coordinates, and variable fields as gridrad
     wofs_regridded_refc = xr.DataArray(
         data=REFL_10CM_final,
@@ -248,26 +313,30 @@ def to_gridrad(filepath):
         wofs_regridded = wofs_regridded.where(wofs_regridded.ZH > 0)
     
     
+    proc.end_timer()
+    basepath = os.path.join(patches_path, f'process_monitoring_idx{index_primer}_{time}')
+    print('pm basepath', basepath)
+    if not is_dry_run:
+        proc.write_performance_monitor(output_path=basepath + '_performance.csv')
+        proc.plot_performance_monitor(attrs=None, ax=None, write=True,
+                                        output_path=basepath + '_performance_plot.png', format='png')
+        proc.print(write=True, output_path=basepath + '.csv')
+    else: proc.print(write=False)
+    
      
     #make validation patches
     output = make_validation_patches(wofs_regridded, size, forecast_window, filepath)
     wofs_regridded.close()
     del wofs_regridded
     
-    #save out the data            
-    output.to_netcdf(output_filepath)
-    output.close()
+    #save out the data
+    print(f"Saving validation patches: {output_filepath}")
+    if not is_dry_run: 
+        output.to_netcdf(output_filepath)
+        output.close()
     del output
     del wofs
-    del wrfin
-    
-    
-    
-    
-    
-    
-    
-    
+    #del wrfin
     
     
 def make_validation_patches(radar, size, window, filepath):
@@ -310,14 +379,6 @@ def make_validation_patches(radar, size, window, filepath):
     output = xr.concat(patches, 'patch')
     
     return output
-    
-    
-    
-
-
-
-
-
 
 
 def get_arguments():
@@ -336,6 +397,9 @@ def get_arguments():
     INPUT_ARG_PARSER.add_argument('--patch_size', type=int, required=True, help=PATCHES_SIZE_HELP_STRING)
     INPUT_ARG_PARSER.add_argument('--with_nans', type=int, required=True, help=WITH_NANS_HELP_STRING)
 
+    INPUT_ARG_PARSER.add_argument('-d', '--dry_run', action='store_true',
+        help='For testing. Execute without running or saving data and verify output paths')
+
     #Pull out all of the input strings from the .sh file
     args = INPUT_ARG_PARSER.parse_args()
     #Index primer indicates the day of data that we are looking at in this particuar run of this code
@@ -353,6 +417,11 @@ def get_arguments():
     #with_nans is the patch size
     global with_nans 
     with_nans = getattr(args, 'with_nans')
+    global is_dry_run
+    is_dry_run = args.dry_run
+    
+    print(args)
+    #vars(args).items()
 
 
 def find_wofs_date(all_wofs_days, idx):
@@ -375,20 +444,23 @@ def main():
 
     #Glob all the days that we have data
     model_runs = glob.glob(path_to_wofs)
+    print("Model runs", model_runs)
 
     #Isolate the date of the data we are processing
     yyyy, mm, dd = find_wofs_date(model_runs, int(index_primer))
-    print('Processing', yyyy , mm , dd)
+    print('Date to process', yyyy , mm , dd)
 
     #Make a list of all the filepaths for this day
     #They have the form /ourdisk/hpc/ai2es/wofs/2019/20190430/0000/ENS_MEM_1/wrfwof_d01_*
-    filenames = glob.glob(f"/ourdisk/hpc/ai2es/wofs/%s/%s%s%s/*/ENS_MEM_*/wrfwof_d01_*" % (yyyy,yyyy,mm,dd))
+    filenames = glob.glob(f"/ourdisk/hpc/ai2es/wofs/%s/%s%s%s/*/ENS_MEM_*/wrfwof_d01_*" % (yyyy,yyyy,mm,dd))[:1] ## MOSHO [:1]
     filenames.sort()
+    print("filenames", filenames)
 
-    with mp.Pool(processes=20) as p:
-        tqdm.tqdm(p.map(to_gridrad, filenames), total=len(filenames))
-        
-
+    for file in filenames:
+        to_gridrad(file)
+    #with mp.Pool(processes=1) as p: #20
+    #    tqdm.tqdm(p.map(to_gridrad, filenames), total=len(filenames))    
+    #result = map(to_gridrad, filenames)
 
 if __name__ == "__main__":
     main()
