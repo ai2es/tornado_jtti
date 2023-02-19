@@ -3,7 +3,7 @@ Made by Lydia 2022
 Modified by Monique Shotande Feb 2023
 
 Convert raw WoFS (Warn on Forecast System) data from the
-WoFS griding format to the GridRad gridding format and 
+WoFS griding format to the GridRad griding format and 
 generate patches.
 
 Execution Instructions:
@@ -43,19 +43,19 @@ from process_monitor import ProcessMonitor
 def find_and_create_output_path(filepath):
     #Find the wofs date of the day we are processing
     yyyymmdd_path = filepath[29:37]
-    yyyy_path = yyyymmdd_path[:4]
+    #yyyy_path = yyyymmdd_path[:4]
     
     #Pull out the year, month, day and time from the input filename
-    yyyy_day = filepath[-19:-15]
+    #yyyy_day = filepath[-19:-15]
     mm_day = filepath[-14:-12]
     dd_day = filepath[-11:-9]
-    yyyymmdd_day = yyyy_day + mm_day + dd_day
+    #yyyymmdd_day = yyyy_day + mm_day + dd_day
     hhmmss = filepath[-8:-6] + filepath[-5:-3] + filepath[-2:]
 
     # Find the time of the wofs run
-    ens_mem = filepath[51:53]
-    if ens_mem[1] == '/':
-        ens_mem = ens_mem[0]
+    #ens_mem = filepath[51:53]
+    #if ens_mem[1] == '/':
+    #    ens_mem = ens_mem[0]
     model_init_hhhh = filepath[38:42]
 
     #Define the filepath fore the directory with all the regridded wofs data    
@@ -65,62 +65,25 @@ def find_and_create_output_path(filepath):
     date = path_components[-4]
     init_time = path_components[-3]
     ensem = path_components[-2]
+
     dir_member = os.path.join(patches_path, *path_components[-5:-1])
-    print(path_components)
-    print(yyyy, date, init_time, ensem)
-    print("dir_member", dir_member)
-    '''
+    if is_dry_run:
+        print(path_components)
+        print("dir_member", dir_member)
+
     try:
-        if not is_dry_run: os.makedirs(outfile_path)
-        print(f"Making predictions dir {outfile_path} (dry_run={is_dry_run})")
+        if not is_dry_run: os.makedirs(dir_member)
+        print(f"Making predictions dir {dir_member} (dry_run={is_dry_run})")
     except OSError as err:
         print(f"[CAUGHT] {err} in {err.filename}")
-    '''
-
-    dir_yyyy = os.path.join(patches_path, yyyy_path)
-    if not os.path.exists(dir_yyyy): #f"%s/%s/" % (patches_path, yyyy_path)
-        try:
-            if not is_dry_run: os.mkdir(dir_yyyy)
-            print(f"Making directory: {dir_yyyy} (dry_run={is_dry_run})")
-        except OSError as err:
-            print(f"[CAUGHT] {err} in {err.filename}")
-
-    dir_yyyymmdd = os.path.join(dir_yyyy, yyyymmdd_path)
-    #if not os.path.exists(f"%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path)):
-    if not os.path.exists(dir_yyyymmdd):
-        try:
-            #os.mkdir(f"%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path))
-            if not is_dry_run: os.mkdir(dir_yyyymmdd)
-            print(f"Making directory: {dir_yyyymmdd} (dry_run={is_dry_run})")
-        except OSError as err:
-            print(f"[CAUGHT] {err} in {err.filename}")
     
-    dir_model_init = os.path.join(dir_yyyymmdd, model_init_hhhh)
-    #if not os.path.exists(f"%s/%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh)):
-    if not os.path.exists(dir_model_init):
-        try:
-            #os.mkdir(f"%s/%s/%s/%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh))
-            if not is_dry_run: os.mkdir(dir_model_init)
-            print(f"Making directory: {dir_model_init} (dry_run={is_dry_run})")
-        except OSError as err:
-            print(f"[CAUGHT] {err} in {err.filename}")
-
-    dir_member = "%s/ENS_MEM_%s" % (dir_model_init, ens_mem)
-    #if not os.path.exists(f"%s/%s/%s/%s/ENS_MEM_%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem)):
-    if not os.path.exists(dir_member):
-        try:
-            #os.mkdir(f"%s/%s/%s/%s/ENS_MEM_%s/" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem))
-            if not is_dry_run: os.mkdir(dir_member)
-            print(f"Making directory: {dir_member} (dry_run={is_dry_run})")
-        except OSError as err:
-            print(f"[CAUGHT] {err} in {err.filename}")
-
     # Declare the final, newly created filepath and return
     #output_filepath = f"%s/%s/%s/%s/ENS_MEM_%s/wofs_patches_%s_%s.nc" % (patches_path, yyyy_path, yyyymmdd_path, model_init_hhhh, ens_mem, yyyymmdd_day, hhmmss)
-    output_filepath = "%s/wofs_patches_%s_%s.nc" % (dir_member, yyyymmdd_day, hhmmss)
+    #output_filepath = "%s/wofs_patches_%s_%s.nc" % (dir_member, yyyymmdd_day, hhmmss)
+    output_filepath = "%s/wofs_patches_%s_%s.nc" % (dir_member, date, hhmmss)
     
     #We need the gridrad time to be in seconds since 2001
-    time = datetime.datetime(int(yyyy_day), int(mm_day), int(dd_day), int(hhmmss[0:2]), int(hhmmss[2:4]), int(hhmmss[4:]))
+    time = datetime.datetime(int(yyyy), int(mm_day), int(dd_day), int(hhmmss[0:2]), int(hhmmss[2:4]), int(hhmmss[4:]))
     time = netCDF4.date2num(time,'seconds since 2001-01-01')
 
     forecast_window = (datetime.timedelta(hours=int(hhmmss[:2]), minutes=int(hhmmss[2:4])) - datetime.timedelta(hours=int(model_init_hhhh[:2]))).total_seconds()/60
@@ -171,7 +134,7 @@ def calculate_output_lats_lons(wofs):
     return new_gridrad_lats_lons, new_gridrad_lats, new_gridrad_lons
 
 
-def extract_gridrad_data_fields(filepath, gridrad_heights):
+def extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=True):
 
     # To run function from wrf-python, we need a netCDF Dataset, not xarray
     wrfin = Dataset(filepath)
@@ -181,40 +144,49 @@ def extract_gridrad_data_fields(filepath, gridrad_heights):
 
     # Pull out Reflectivity, and U and V winds from the the wofs file
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    U = wrf.g_wind.get_u_destag(wrfin)
-    V = wrf.g_wind.get_v_destag(wrfin)   
+    if not Z_only:
+        U = wrf.g_wind.get_u_destag(wrfin)
+        V = wrf.g_wind.get_v_destag(wrfin)   
+    
     
     # Interpolate the wofs data to the gridrad heights
     Z_agl = wrf.interplevel(Z,height,gridrad_heights*1000)
-    U_agl = wrf.interplevel(U,height,gridrad_heights*1000)
-    V_agl = wrf.interplevel(V,height,gridrad_heights*1000)
+    if not Z_only:
+        # Interpolate the wofs data to the gridrad heights
+        U_agl = wrf.interplevel(U,height,gridrad_heights*1000)
+        V_agl = wrf.interplevel(V,height,gridrad_heights*1000)
     
-    # Add units to the winds so that we can use the metpy functions
-    U = U_agl.values * (metpy.units.units.meter/metpy.units.units.second)
-    V = V_agl.values * (metpy.units.units.meter/metpy.units.units.second)
+        # Add units to the winds so that we can use the metpy functions
+        U = U_agl.values * (metpy.units.units.meter/metpy.units.units.second)
+        V = V_agl.values * (metpy.units.units.meter/metpy.units.units.second)
     
-    # Define the grid spacings - needed for div and vort
-    dx = 3000 * (metpy.units.units.meter)
-    dy = 3000 * (metpy.units.units.meter)
+        # Define the grid spacings - needed for div and vort
+        dx = 3000 * (metpy.units.units.meter)
+        dy = 3000 * (metpy.units.units.meter)
+
+        # Calculate divergence and vorticity
+        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
     
-    # Calculate divergence and vorticity
-    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
-    uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
+        #lets strip out just the data, get rid of the metpy.units stuff and xarray.Dataset stuff 
+        div = np.asarray(div)
+        vort = np.asarray(vort)
     
-    #lets strip out just the data, get rid of the metpy.units stuff and xarray.Dataset stuff 
-    div = np.asarray(div)
-    vort = np.asarray(vort)
+    # Remove metpy.units stuff and xarray.Dataset stuff
     Z_agl = Z_agl.values 
+    uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
 
-    return Z_agl, div, vort, uh
+    if not Z_only:
+        return Z_agl, div, vort, uh
+    else: 
+        return Z_agl, uh
 
 #Function to turn a wofs file to the gridrad format
 #where filepath is the location of the wofs file, outfile_path is the location of directory containing 
 #all of the regridded wofs files ex: /ourdisk/hpc/ai2es/tornado/wofs_gridradlike/
 #with_nans is whether we want to change gridpoints with reflectivity = 0 to nan values
-def to_gridrad(filepath):
+def to_gridrad(filepath, Z_only=True):
 
     # There is a difference sometimes between the day in the filepath and the day in the filename
     # All filepath dates have '_path' and all filename dates have '_day'
@@ -240,7 +212,10 @@ def to_gridrad(filepath):
     gridrad_heights = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
     # Pull out the desired data from the wofs file
-    Z_agl, div, vort, uh = extract_gridrad_data_fields(filepath, gridrad_heights)
+    if Z_only:
+        Z_agl, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
+    else:
+        Z_agl, div, vort, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
 
     # Make a list of all the lat/lon gridpoints from the original wofs grid
     wofs_lats_lons = np.stack((np.ravel(wofs.XLAT.values[0]), np.ravel(wofs.XLONG.values[0]))).T
@@ -268,30 +243,33 @@ def to_gridrad(filepath):
     bottom_top_3d = np.swapaxes(bottom_top_3d, 1, 2)
 
     #now selecting the data should be fast 
-    vorts = vort[bottom_top_3d,south_north_points_3d,west_east_points_3d]
-    divs = div[bottom_top_3d,south_north_points_3d,west_east_points_3d]
+    if not Z_only:
+        vorts = vort[bottom_top_3d,south_north_points_3d,west_east_points_3d]
+        divs = div[bottom_top_3d,south_north_points_3d,west_east_points_3d]
     refls = Z_agl[bottom_top_3d,south_north_points_3d,west_east_points_3d]
     uhs = uh[south_north_points,west_east_points]
 
     # Perform the IDW interpolation and reformat the data so that it has shape (Time, Altitude, Latitude, Longitude)
-    vort_final = np.swapaxes(np.swapaxes((np.sum(vorts * 1/distances_3d**2, axis=2)/np.sum(1/distances_3d**2, axis=2)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0],vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
-    div_final = np.swapaxes(np.swapaxes((np.sum(divs * 1/distances_3d**2, axis=2)/np.sum(1/distances_3d**2, axis=2)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0],vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
+    if not Z_only:
+        vort_final = np.swapaxes(np.swapaxes((np.sum(vorts * 1/distances_3d**2, axis=2)/np.sum(1/distances_3d**2, axis=2)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0],vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
+        div_final = np.swapaxes(np.swapaxes((np.sum(divs * 1/distances_3d**2, axis=2)/np.sum(1/distances_3d**2, axis=2)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0],vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
     REFL_10CM_final = np.swapaxes(np.swapaxes((np.sum(refls * 1/distances_3d**2, axis=2)/np.sum(1/distances_3d**2, axis=2)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0],vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
     uh_final = (np.sum(uhs * 1/distances**2, axis=1)/np.sum(1/distances**2, axis=1)).reshape(1,new_gridrad_lats.shape[0],new_gridrad_lons.shape[0]).astype(np.float32)
     
     # Put the data into xarray DataArrays that have the same dimensions, coordinates, and variable fields as gridrad
+    if not Z_only:
+        wofs_regridded_vort = xr.DataArray(
+            data=vort_final,
+            dims=("time", "Altitude", "Latitude", "Longitude"),
+            coords={"time": [time], "Altitude": gridrad_heights, "Latitude": new_gridrad_lats, "Longitude": new_gridrad_lons + 360},
+        )
+        wofs_regridded_div = xr.DataArray(
+            data=div_final,
+            dims=("time", "Altitude", "Latitude", "Longitude"),
+            coords={"time": [time], "Altitude": gridrad_heights, "Latitude": new_gridrad_lats, "Longitude": new_gridrad_lons + 360},
+        )
     wofs_regridded_refc = xr.DataArray(
         data=REFL_10CM_final,
-        dims=("time", "Altitude", "Latitude", "Longitude"),
-        coords={"time": [time], "Altitude": gridrad_heights, "Latitude": new_gridrad_lats, "Longitude": new_gridrad_lons + 360},
-    )
-    wofs_regridded_vort = xr.DataArray(
-        data=vort_final,
-        dims=("time", "Altitude", "Latitude", "Longitude"),
-        coords={"time": [time], "Altitude": gridrad_heights, "Latitude": new_gridrad_lats, "Longitude": new_gridrad_lons + 360},
-    )
-    wofs_regridded_div = xr.DataArray(
-        data=div_final,
         dims=("time", "Altitude", "Latitude", "Longitude"),
         coords={"time": [time], "Altitude": gridrad_heights, "Latitude": new_gridrad_lats, "Longitude": new_gridrad_lons + 360},
     )
@@ -304,15 +282,21 @@ def to_gridrad(filepath):
     # Combine the DataArrays into one Dataset
     wofs_regridded = xr.Dataset(coords={"time": [time], "Longitude": new_gridrad_lons + 360, "Latitude": new_gridrad_lats, "Altitude": gridrad_heights})
     wofs_regridded["ZH"] = wofs_regridded_refc
-    wofs_regridded["VOR"] = wofs_regridded_vort
-    wofs_regridded["DIV"] = wofs_regridded_div
     wofs_regridded["UH"] = wofs_regridded_uh
+    if not Z_only:
+        wofs_regridded["VOR"] = wofs_regridded_vort
+        wofs_regridded["DIV"] = wofs_regridded_div
     
     #Where there is no reflectivity, change 0s to nans for all data variables
     if(with_nans):
         wofs_regridded = wofs_regridded.where(wofs_regridded.ZH > 0)
     
+     
+    #make validation patches
+    output = make_validation_patches(wofs_regridded, size, forecast_window, filepath, Z_only)
+    wofs_regridded.close()
     
+    # Stop the process timer
     proc.end_timer()
     basepath = os.path.join(patches_path, f'process_monitoring_idx{index_primer}_{time}')
     print('pm basepath', basepath)
@@ -323,23 +307,20 @@ def to_gridrad(filepath):
         proc.print(write=True, output_path=basepath + '.csv')
     else: proc.print(write=False)
     
-     
-    #make validation patches
-    output = make_validation_patches(wofs_regridded, size, forecast_window, filepath)
-    wofs_regridded.close()
-    del wofs_regridded
     
     #save out the data
     print(f"Saving validation patches: {output_filepath}")
     if not is_dry_run: 
         output.to_netcdf(output_filepath)
-        output.close()
+    output.close()
+
     del output
+    del wofs_regridded
     del wofs
     #del wrfin
     
     
-def make_validation_patches(radar, size, window, filepath):
+def make_validation_patches(radar, size, window, filepath, Z_only=True):
 
     #initialize an empty array for the patches
     patches = []
@@ -356,10 +337,24 @@ def make_validation_patches(radar, size, window, filepath):
                 yi = radar.Longitude.shape[0]-size - 1
 
             # Create the patch
-            to_add = xr.Dataset(data_vars=dict(
+            if not Z_only:
+                to_add = xr.Dataset(data_vars=dict(
                            ZH=(["x", "y", "z"], radar.ZH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).values.swapaxes(0,2).swapaxes(1,0)), 
                            DIV=(["x", "y", "z"], radar.DIV.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).values.swapaxes(0,2).swapaxes(1,0)),
                            VOR=(["x", "y", "z"], radar.VOR.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).values.swapaxes(0,2).swapaxes(1,0)),
+                           UH=(["x", "y"], radar.UH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0, Altitude=0).values),
+                           stitched_x=(["x"], range(xi, xi+size)),
+                           stitched_y=(["x"], range(yi, yi+size)),
+                           n_convective_pixels = ([], np.count_nonzero(radar.ZH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).fillna(0).values.swapaxes(0,2).swapaxes(1,0).max(axis=(2)) >= 30)),
+                           n_uh_pixels = ([], np.count_nonzero(radar.UH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).fillna(0).values > 0)),
+                           lat=([],radar.Latitude.values[xi]),
+                           lon=([],radar.Longitude.values[yi]),
+                           time=([],radar.time.values[0]),
+                           forecast_window=([],window)),
+                    coords=dict(x=(["x"], np.arange(size)), y=(["y"], np.arange(size)), z=(["z"], np.arange(1,radar.Altitude.values.shape[0]+1))))
+            else:
+                to_add = xr.Dataset(data_vars=dict(
+                           ZH=(["x", "y", "z"], radar.ZH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).values.swapaxes(0,2).swapaxes(1,0)), 
                            UH=(["x", "y"], radar.UH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0, Altitude=0).values),
                            stitched_x=(["x"], range(xi, xi+size)),
                            stitched_y=(["x"], range(yi, yi+size)),
@@ -397,6 +392,8 @@ def get_arguments():
     INPUT_ARG_PARSER.add_argument('--patch_size', type=int, required=True, help=PATCHES_SIZE_HELP_STRING)
     INPUT_ARG_PARSER.add_argument('--with_nans', type=int, required=True, help=WITH_NANS_HELP_STRING)
 
+    INPUT_ARG_PARSER.add_argument('-Z', '--Z_only', action='store_true',
+        help='Use flag to only extraact the reflectivity and updraft data. Exclude U and V')
     INPUT_ARG_PARSER.add_argument('-d', '--dry_run', action='store_true',
         help='For testing. Execute without running or saving data and verify output paths')
 
@@ -422,6 +419,7 @@ def get_arguments():
     
     print(args)
     #vars(args).items()
+    return args
 
 
 def find_wofs_date(all_wofs_days, idx):
@@ -440,7 +438,7 @@ def find_wofs_date(all_wofs_days, idx):
 def main():    
 
     #get the inputs from the .sh file
-    get_arguments()
+    args = get_arguments()
 
     #Glob all the days that we have data
     model_runs = glob.glob(path_to_wofs)
@@ -457,10 +455,10 @@ def main():
     print("filenames", filenames)
 
     for file in filenames:
-        to_gridrad(file)
+        to_gridrad(file, Z_only=args.Z_only)
     #with mp.Pool(processes=1) as p: #20
     #    tqdm.tqdm(p.map(to_gridrad, filenames), total=len(filenames))    
-    #result = map(to_gridrad, filenames)
+
 
 if __name__ == "__main__":
     main()
