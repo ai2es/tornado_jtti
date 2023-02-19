@@ -1,4 +1,6 @@
 """
+auhtor: Monique Shotande (monique.shotande a ou.edu)
+
 Process monitor to measure memory and time utilization of a process.
 """
 import math
@@ -50,6 +52,7 @@ class ProcessMonitor(psutil.Process):
                                     'num_threads': [], 'cpu_times.user': [], 'cpu_times.system': [], 
                                     'memory_info.vms': [], 'memory_info.rss': [] #(LINUX)'cpu_times.idle': [], 
                                     }
+        self.update_performance_monitor()
     
     def update_performance_monitor(self):
         ''' TODO: make dynamic attribute selection
@@ -101,6 +104,7 @@ class ProcessMonitor(psutil.Process):
         ys = [a for a in attrs if not 'time' in a]
         ncols = df.shape[1]
         nrows = int(math.ceil(float(ncols) / 2))
+        # TODO: provide optional *plot_args from method definition
         axs = df.plot(kind='line', x='time', y=ys, sharex=True,
                         subplots=True, grid=True, figsize=(10,12)) #xlabel='Time (s)', 
         plt.xlabel('Time (s)')
@@ -121,6 +125,22 @@ class ProcessMonitor(psutil.Process):
         # Does NOT include time elapsed during sleep
         self.end_process_time = time.process_time()
         self.elapsed_process_time = self.end_process_time - self.start_process_time
+
+    def end_timer_write_results(self, attrs=None, ax=None, output_path=None, format='png'):
+        '''
+        Call end_timer(), display th results and save the csv and figure reports
+        @params attrs: list of attrs to plot. all atributes are plot if is None.
+        @param ax: ax for the plot
+        @param output_path: override default save location, {program_name}_performance_monitor_plot.png
+        @param write: flag specifying whether to save the plot
+        @param format: string indicating the image format for the plot file (eg 'png', 'pdf', etc). 
+                    see pandas.DataFrame.plot for more details
+        '''
+        self.end_timer()
+        self.write_performance_monitor(output_path=output_path)
+        self.plot_performance_monitor(attrs=attrs, ax=ax, write=True,
+                                        output_path=output_path, format=format)
+        self.print(attrs=attrs, write=True, output_path=output_path)
 
     def expand_attr(self, attr):
         '''
@@ -218,17 +238,25 @@ class ProcessMonitor(psutil.Process):
             else: info_up[key] = str(details) #.replace(',', ' ')
         #TODO gpu
 
+        '''
+        print(">=========================")
+        for k, v in info_up.items():
+            print(f"{k}: {v}")
+        print("<=========================")
+        '''
+        
         df = pd.DataFrame(data=info_up, index=['Information']).T
-        if write:
-            if output_path is None:
-                output_path = self.program_name + '.csv'
-            print(f"Writing {output_path}")
-            df.to_csv(output_path, header=False)
 
         # Display entire dataframe
         pd.set_option('display.max_rows', None)
         pd.set_option('display.max_columns', None)
         print(df)
+
+        if write:
+            if output_path is None:
+                output_path = self.program_name + '.csv'
+            print(f"Writing {output_path}")
+            df.to_csv(output_path, header=False)
 
         return df
 
