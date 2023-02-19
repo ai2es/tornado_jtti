@@ -10,9 +10,9 @@
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
-#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/res__%x_%j.out
-#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/res__%x_%j.err
-#SBATCH --array=0-36%6
+#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/val01__%x_%j.out
+#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/val01__%x_%j.err
+#SBATCH --array=0-25
 ##SBATCH --array=0-500%15
 
 ##########################################################
@@ -28,4 +28,4 @@ echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 
 #602 total days
 #python /home/momoshog/Tornado/tornado_jtti/lydia_scripts/scripts_data_pipeline/wofs_to_gridrad_idw.py \
-python lydia_scripts/scripts_data_pipeline/wofs_to_gridrad_idw.py --path_to_raw_wofs="/ourdisk/hpc/ai2es/wofs/2019/*"  --output_patches_path="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_patched_4/size_32/"  --array_index=$SLURM_ARRAY_TASK_ID  --patch_size=32  --with_nans=1  --dry_run
+python lydia_scripts/scripts_data_pipeline/wofs_to_gridrad_idw.py --path_to_raw_wofs="/ourdisk/hpc/ai2es/wofs/2019/*"  --output_patches_path="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_patched_4/size_32/"  --array_index=$SLURM_ARRAY_TASK_ID  --patch_size=32  --with_nans=1 --Z_only  --dry_run
