@@ -366,7 +366,6 @@ def run_predictions_and_interpolation(patches_dirs):
     # Make the directory structure for the wofs predictions and define the output filepath
     outfile_path = make_directory_structure(patches_dirs)
     # Define output filename
-    #predictions_for_NCAR_outfile_name = outfile_path + '/wofs_stitched_light.nc'
     predictions_for_NCAR_outfile_name = os.path.join(outfile_path, 'wofs_stitched_light.nc')
     if is_dry_run: print("predictions_for_NCAR_outfile_name", predictions_for_NCAR_outfile_name)
 
