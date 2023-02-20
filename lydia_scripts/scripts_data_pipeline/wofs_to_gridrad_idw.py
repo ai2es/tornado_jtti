@@ -9,11 +9,11 @@ generate patches.
 Execution Instructions:
     Conda environment requires are in the environment.yml
     file. Execute:
-        conda env create --name tornado --file environment.yml
+        conda env create --name tf_tornado --file environment.yml
     to create the conda environment necessary to run this script.
     Custom module requirements:
         The custom modules: custom_losses, custom_metrics, and process_monitoring
-        are in the tornado_jtti project directory.
+        are in the tornado_jtti project directory. Working directory expected to be tornado_jtti/ to use these custom modules
     Information about the required command line arguments are described in the 
     method get_arguments(). Run
         python wofs_to_gridrad_idw.py --h
@@ -35,7 +35,7 @@ import datetime
 import multiprocessing as mp
 import argparse
 import tqdm
-#sys.path.append("/home/momoshog/Tornado/tornado_jtti/process_monitoring")
+# Working directory expected to be tornado_jtti/
 sys.path.append("process_monitoring")
 from process_monitor import ProcessMonitor
 
@@ -144,43 +144,42 @@ def extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=True):
 
     # Pull out Reflectivity, and U and V winds from the the wofs file
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    if not Z_only:
-        U = wrf.g_wind.get_u_destag(wrfin)
-        V = wrf.g_wind.get_v_destag(wrfin)   
+    #if not Z_only:
+    U = wrf.g_wind.get_u_destag(wrfin)
+    V = wrf.g_wind.get_v_destag(wrfin)   
     
     
     # Interpolate the wofs data to the gridrad heights
     Z_agl = wrf.interplevel(Z,height,gridrad_heights*1000)
-    if not Z_only:
-        # Interpolate the wofs data to the gridrad heights
-        U_agl = wrf.interplevel(U,height,gridrad_heights*1000)
-        V_agl = wrf.interplevel(V,height,gridrad_heights*1000)
+    #if not Z_only:
+    # Interpolate the wofs data to the gridrad heights
+    U_agl = wrf.interplevel(U,height,gridrad_heights*1000)
+    V_agl = wrf.interplevel(V,height,gridrad_heights*1000)
     
-        # Add units to the winds so that we can use the metpy functions
-        U = U_agl.values * (metpy.units.units.meter/metpy.units.units.second)
-        V = V_agl.values * (metpy.units.units.meter/metpy.units.units.second)
+    # Add units to the winds so that we can use the metpy functions
+    U = U_agl.values * (metpy.units.units.meter/metpy.units.units.second)
+    V = V_agl.values * (metpy.units.units.meter/metpy.units.units.second)
     
-        # Define the grid spacings - needed for div and vort
-        dx = 3000 * (metpy.units.units.meter)
-        dy = 3000 * (metpy.units.units.meter)
+    # Define the grid spacings - needed for div and vort
+    dx = 3000 * (metpy.units.units.meter)
+    dy = 3000 * (metpy.units.units.meter)
 
-        # Calculate divergence and vorticity
-        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+    # Calculate divergence and vorticity
+    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
     
-        #lets strip out just the data, get rid of the metpy.units stuff and xarray.Dataset stuff 
-        div = np.asarray(div)
-        vort = np.asarray(vort)
+    #lets strip out just the data, get rid of the metpy.units stuff and xarray.Dataset stuff 
+    div = np.asarray(div)
+    vort = np.asarray(vort)
     
     # Remove metpy.units stuff and xarray.Dataset stuff
     Z_agl = Z_agl.values 
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
 
-    if not Z_only:
-        return Z_agl, div, vort, uh
-    else: 
-        return Z_agl, uh
+    #if not Z_only:
+    return Z_agl, div, vort, uh
+    #return Z_agl, uh
 
 #Function to turn a wofs file to the gridrad format
 #where filepath is the location of the wofs file, outfile_path is the location of directory containing 
@@ -212,10 +211,8 @@ def to_gridrad(filepath, Z_only=True):
     gridrad_heights = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
     # Pull out the desired data from the wofs file
-    if Z_only:
-        Z_agl, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
-    else:
-        Z_agl, div, vort, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
+    #Z_agl, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
+    Z_agl, div, vort, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
 
     # Make a list of all the lat/lon gridpoints from the original wofs grid
     wofs_lats_lons = np.stack((np.ravel(wofs.XLAT.values[0]), np.ravel(wofs.XLONG.values[0]))).T

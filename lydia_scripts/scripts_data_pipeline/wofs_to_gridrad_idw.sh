@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH -p normal
-#SBATCH --time=5:00:00
-##SBATCH -p debug
-##SBATCH --time=00:30:00
+##SBATCH -p normal
+##SBATCH --time=5:00:00
+#SBATCH -p debug
+#SBATCH --time=00:30:00
 #SBATCH --nodes=1
 ##SBATCH -n 20
 #SBATCH --mem-per-cpu=1000
@@ -10,9 +10,9 @@
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
-#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/val01__%x_%j.out
-#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/val01__%x_%j.err
-#SBATCH --array=0-25
+#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/env__%x_%j.out
+#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/env__%x_%j.err
+#SBATCH --array=0
 ##SBATCH --array=0-500%15
 
 ##########################################################
@@ -21,7 +21,7 @@
 #source /home/lydiaks2/.bashrc
 source ~/.bashrc
 bash
-#conda activate tornado
+conda activate tf_tornado
 
 python --version
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
