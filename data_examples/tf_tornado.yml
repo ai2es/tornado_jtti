@@ -1,0 +1,14 @@
+name: tf_tornado
+channels:
+  - defaults
+dependencies:
+  - tensorflow
+  - keras-tuner
+  - xarray
+  - jupyter
+  - jupyterlab
+  - netcdf4
+  - wrf-python
+  - metpy
+  - tqdm
+prefix: /home/momoshog/miniconda3/envs/tf_tornado
