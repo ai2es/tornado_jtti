@@ -17,4 +17,3 @@ dependencies:
   - pytest
   - pyyaml
   - pyproj
-prefix: /home/momoshog/miniconda3/envs/tf_tornado
