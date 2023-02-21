@@ -42,6 +42,8 @@ from tensorflow.keras.metrics import AUC
 from keras_tuner import HyperModel
 from keras_tuner.tuners import RandomSearch, Hyperband, BayesianOptimization
 #from tensorboard.plugins.hparams import api as hp
+from keras_tuner.engine import tuner as tuner_module
+from keras_tuner.engine import oracle as oracle_module
 
 from tensorboard.plugins.hparams import api
 from tensorboard.plugins.hparams import api_pb2
@@ -53,10 +55,11 @@ py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
 #sys.path.append("/home/lydiaks2/tornado_project/")
 #sys.path.append("/home/momoshog/Tornado/tornado_jtti/")
-sys.path.append("../../")
+sys.path.append("../")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-sys.path.append("/home/momoshog/Tornado")
+#sys.path.append("/home/momoshog/Tornado/keras-unet-collection")
+sys.path.append("../../../keras-unet-collection")
 from keras_unet_collection import models
 
 
@@ -72,8 +75,10 @@ class UNetHyperModel(HyperModel):
     @param tune_optimizer: Whether to tune the optimizer. False by default and uses
                 Adam
     """
-    def __init__(self, input_shape=None, n_labels=None, name='', tune_optimizer=False):
+    def __init__(self, input_shape, n_labels=None, name='', tune_optimizer=False):
+        #TODO expection handling
         self.input_shape = input_shape
+        #TODO expection handling
         self.n_labels = n_labels if not n_labels is None or n_labels > 0 else 1
         self.name = name
         self.tune_optimizer = tune_optimizer
@@ -120,42 +125,51 @@ class UNetHyperModel(HyperModel):
         #num = hp.Int("n_conv_down", min_value=3, step=1, max_value=10) # number of layers
         nfilters_per_layer6 = np.around(np.linspace(8, latent_dim, num=6)).astype(int).tolist()
         #nfilters_per_layer = list(range(8, latent_dim, 2))
-        nfilters_per_layer2 = [2**i for i in range(3, int(np.log(latent_dim)))]
+        #nfilters_per_layer2 = [2**i for i in range(3, int(np.log2(latent_dim)))]
+        nfilters_per_layer2 = np.logspace(3, np.log2(latent_dim), num=6, endpoint=True, base=2, dtype=int)
 
         # List defining number of conv filters per down/up-sampling block
-        filter_num = hp.Choice("nfilters_per_layer", values=[nfilters_per_layer2, nfilters_per_layer6])
+        nfilters_type = hp.Choice("nfilters_type", values=['linear', 'log'])
+        #filter_num = hp.Choice("nfilters_per_layer", values=[nfilters_per_layer2, nfilters_per_layer6])
+        filter_num = nfilters_per_layer2
+        if nfilters_type == 'linear':
+            filter_num = nfilters_per_layer6
 
         kernel_size = hp.Choice("kernel_size", [3, 5, 7])
         
         # Number of convolutional layers per downsampling level
         stack_num_down = hp.Int("n_conv_down", min_value=1, step=1, max_value=5)
         # Configuration of downsampling (encoding) blocks
-        pool = hp.Choice("pool_down", values=[False, 'ave', 'max'])
+        pool = hp.Choice("pool_down", values=['False', 'ave', 'max'])
+        pool = False if pool == 'False' else pool
         # TODO: look up GELU and Snake
         activation = hp.Choice("in_activation", values=['PReLU', 'ELU', 'GELU', 'Snake']) #'ReLU', 'LeakyReLU'
 
         # Number of conv layers (after concatenation) per upsampling level
         stack_num_up = hp.Int("n_conv_up", min_value=1, step=1, max_value=5)
         # Configuration of upsampling (decoding) blocks
-        unpool = hp.Choice("pool_up", values=[False, 'bilinear', 'nearest'])
+        unpool = hp.Choice("pool_up", values=['False', 'bilinear', 'nearest'])
+        unpool = False if unpool == 'False' else unpool
 
         # Select appropriate output activation based on loss and number of output nodes
         #has_l2 = hp.Boolean("has_l2")
         n_labels = self.n_labels
         if n_labels is None:
             with hp.conditional_scope("n_labels", [None]): 
-                n_labels = hp.Int("n_labels", min_value=1, step=2, max_value=2)
+                n_labels = hp.Int("n_labels", min_value=1, step=1, max_value=2)
 
         # TODO HyperParameters.Fixed(name, value, parent_name=None, parent_values=None)
         loss = 'binary_focal_crossentropy'
         metrics = [MaxCriticalSuccessIndex(), AUC(num_thresholds=100, curve='ROC'), 
                     AUC(num_thresholds=100, curve='PR')] #"categorical_accuracy"
         if n_labels == 1: 
-            output_activation = hp.Choice("out_activation", values=['Linear', 'Sigmoid', 'Snake'])
+            #TODO: keras.activations.linear
+            output_activation = hp.Choice("out_activation", values=['Sigmoid', 'Snake'])
             metrics.append("binary_accuracy")
         else:
             with hp.conditional_scope("n_labels", ['>=2']): 
-                output_activation = hp.Choice("out_activation", values=['Linear', 'Softmax', 'Snake']) #'Sigmoid'
+                #TODO: keras.activations.linear
+                output_activation = hp.Choice("out_activation", values=['Softmax', 'Snake']) #'Sigmoid'
                 loss = hp.Choice("loss", ["binary_focal_crossentropy", "categorical_crossentropy", "fractions_skill_score"])
                 #make_fractions_skill_score(3, 2, c=1.0, cutoff=0.5, want_hard_discretization=False)
                 # TODO: binary v categorical crossentropy math
@@ -241,7 +255,8 @@ def create_tuner(args):
     
     @return: the configured tuner object and the hyper model
     '''
-    hypermodel = UNetHyperModel(num_classes=args.num_classes)
+    #args.x_shape = (32, 32, 12)
+    hypermodel = UNetHyperModel(input_shape=args.x_shape, n_labels=args.n_labels)
     #weights = dummy_loader(model_old_path)
     #model_new = swin_transformer_model(...)
     #model_new.set_weights(weights)
@@ -294,7 +309,18 @@ def create_tuner(args):
             **tuner_args
         )
     #TODO
-    #elif args.tuner == 'custom':
+    elif args.tuner == 'custom': 
+        pass
+    else:
+        tuner = tuner_module.Tuner(
+            oracle=oracle_module.Oracle(),
+            hypermodel=hypermodel,
+            #optimizer=None,
+            #loss=None,
+            #distribution_strategy=None,
+            project_name=PROJ_NAME,
+            #**tuner_args
+        )
 
     tuner.search_space_summary()
 
@@ -339,17 +365,18 @@ def load_data(args):
     pass
 
 # TODO
-def prep_data(args, loss):
+def prep_data(args, n_labels=None):
     """ 
     Load data 
     """ 
     # Define the dataset size
     #patch_size = args.patch_size #TODO if not args.patch_size is None else 
     #height = args.elevation
-    x_shape = args.x_shape #(None, 32, 32, 12)
-    x_shape_val = args.x_shape[1:] #(32, 32, 12)
+    x_shape = (None, *args.x_shape) #(None, 32, 32, 12)
+    x_shape_val = args.x_shape #(32, 32, 12)
 
-    if loss == 'binary_focal_crossentropy':
+    #if loss == 'binary_focal_crossentropy':
+    if n_labels == 1: 
         #This loss function needs integer labels
         
         y_shape = args.y_shape #(None, 32, 32, 1)
@@ -386,10 +413,13 @@ def prep_data(args, loss):
         else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
         
     # Read tensorflow datasets
-    #ds_train = tf.data.experimental.load("/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf', elem_spec)
-    #ds_val = tf.data.experimental.load('/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf', elem_spec_val)
+    '''ds_train = tf.data.experimental.load("/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf', elem_spec)
+    ds_val = tf.data.experimental.load('/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf', elem_spec_val)
     ds_train = tf.data.experimental.load(args.in_dir, elem_spec)
     ds_val = tf.data.experimental.load(args.in_dir_val, elem_spec_val)
+    '''
+    ds_train = tf.data.Dataset.load(args.in_dir, elem_spec)
+    ds_val = tf.data.Dataset.load(args.in_dir_val, elem_spec_val)
 
     return (ds_train, ds_val)
 
@@ -403,6 +433,8 @@ def create_parser():
     ## TODO
     parser.add_argument('--in_dir', type=str, required=True,
                          help='Input directory where the data are stored')
+    parser.add_argument('--in_dir_val', type=str, required=True,
+                         help='Input directory where the validation data are stored')
     parser.add_argument('--out_dir', type=str, required=True,
                          help='Output directory for results, models, hyperparameters, etc.')
     
@@ -429,11 +461,15 @@ def create_parser():
     parser.add_argument('--num_initial_points', type=int, default=5, #required=True,
                          help='Number of initialization points for BayesianOptimization')
 
-    # Architecture arguments num_classes
-    parser.add_argument('--num_classes', type=int, default=1, #required=True,
-                         help='Number of classes (i.e. output nodes) for classification')
+    # Architecture arguments
+    parser.add_argument('--n_labels', type=int, default=1, #required=True,
+                         help='Number of class labels (i.e. output nodes) for classification')
 
     # Training arguments
+    parser.add_argument('--x_shape', type=tuple, default=(32, 32, 12),#required=True,
+                         help='')
+    parser.add_argument('--y_shape', type=tuple, default=(32, 32, 1),#required=True,
+                         help='')
     parser.add_argument('--epochs', type=int, default=5, #required=True,
                          help='Number of epochs to train the model')
     parser.add_argument('--batch_size', type=int, default=128, #required=True,
@@ -443,10 +479,6 @@ def create_parser():
 
     # Callbacks
     # EarlyStopping
-    #parser.add_argument('--x_shape', type=tuple, required=True,
-    #                     help='')
-    #parser.add_argument('--y_shape', type=tuple, required=True,
-    #                     help='')
     parser.add_argument('--patience', type=int, default=10, #required=True,
                          help='Number of epochs with no improvement after which training will be stopped. See patience in EarlyStopping')
     parser.add_argument('--min_delt', type=float, default=1e-3, #required=True,
@@ -492,76 +524,77 @@ def args2string(args):
     return args_str
 
 
-args = parse_args()
+if __name__ == "__main__":
+    args = parse_args()
 
-tuner, hypermodel = create_tuner(args)
+    tuner, hypermodel = create_tuner(args)
 
-# TODO: load data
-ds_train, ds_val = prep_data(args, loss=None)
+    # TODO: load data
+    ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
 
-execute_search(args, tuner, ds_train, X_val=ds_val, callbacks=None)
+    execute_search(args, tuner, ds_train, X_val=ds_val, callbacks=None)
 
-PROJ_NAME_PREFIX = args.project_name_prefix
-PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
+    PROJ_NAME_PREFIX = args.project_name_prefix
+    PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
 
 
-# If a tuner is specified, run the hyperparameter search
-if not args.tuner == 'none':
-    execute_search(args, tuner, callbacks=None)
-# Load the latest model
-else:
-    #TODO
-    latest = tf.train.latest_checkpoint(f'{args.out_dir}/tuners/{PROJ_NAME}/checkpoints')
+    # If a tuner is specified, run the hyperparameter search
+    if not args.tuner == 'none':
+        execute_search(args, tuner, callbacks=None)
+    # Load the latest model
+    else:
+        #TODO
+        latest = tf.train.latest_checkpoint(f'{args.out_dir}/tuners/{PROJ_NAME}/checkpoints')
 
-# Report results
-N_SUMMARY_TRIALS = 5 #MAX_TRIALS
-tuner.results_summary(N_SUMMARY_TRIALS)
-best_hp = tuner.get_best_hyperparameters(num_trials=N_SUMMARY_TRIALS)
-print(best_hp[0].values)
+    # Report results
+    N_SUMMARY_TRIALS = 5 #MAX_TRIALS
+    tuner.results_summary(N_SUMMARY_TRIALS)
+    best_hp = tuner.get_best_hyperparameters(num_trials=N_SUMMARY_TRIALS)
+    print(best_hp[0].values)
 
-# Retrieve the best model.
-best_model = tuner.get_best_models(num_models=1)[0]
-best_model.summary()
+    # Retrieve the best model.
+    best_model = tuner.get_best_models(num_models=1)[0]
+    best_model.summary()
 
-# Save best models and hyperparams
+    # Save best models and hyperparams
 
-'''plot_model(best_model, to_file=f"tuners/best_model__{args.tuner}.png",  
-           show_dtype=True, show_shapes=True, expand_nested=False)
-plot_model(best_model, to_file=f"tuners/best_model__{args.tuner}_expanded.png",  
-           show_dtype=True, show_shapes=True, expand_nested=True)
-'''
+    '''plot_model(best_model, to_file=f"tuners/best_model__{args.tuner}.png",  
+            show_dtype=True, show_shapes=True, expand_nested=False)
+    plot_model(best_model, to_file=f"tuners/best_model__{args.tuner}_expanded.png",  
+            show_dtype=True, show_shapes=True, expand_nested=True)
+    '''
 
-# Predict with best model
-'''print("-------------------------")
-print("PREDICTION")
-xtrain_recon = best_model.predict(X_train, batch_size=BATCH_SIZE)
-xval_recon = best_model.predict(X_val, batch_size=BATCH_SIZE)
-xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
-print("FVAF::", fvaf(xtrain_recon, X_train), fvaf(xval_recon, X_val), fvaf(xtest_recon, X_test))
+    # Predict with best model
+    '''print("-------------------------")
+    print("PREDICTION")
+    xtrain_recon = best_model.predict(X_train, batch_size=BATCH_SIZE)
+    xval_recon = best_model.predict(X_val, batch_size=BATCH_SIZE)
+    xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
+    print("FVAF::", fvaf(xtrain_recon, X_train), fvaf(xval_recon, X_val), fvaf(xtest_recon, X_test))
 
-# Evaluate the best model
-print("-------------------------")
-print("EVALUATION")
-res_train = best_model.evaluate(X_train, X_train)
-res_val = best_model.evaluate(X_val, X_val)
-res_test = best_model.evaluate(X_test, X_test)
-print(res_train, res_val, res_test)
-'''
+    # Evaluate the best model
+    print("-------------------------")
+    print("EVALUATION")
+    res_train = best_model.evaluate(X_train, X_train)
+    res_val = best_model.evaluate(X_val, X_val)
+    res_test = best_model.evaluate(X_test, X_test)
+    print(res_train, res_val, res_test)
+    '''
 
-'''
-print("[INFO] training the best model...")
-model = tuner.hypermodel.build(best_hp)
-H = model.fit(X_train, X_train,
-              validation_data=(X_val, X_val), batch_size=BS,
-              epochs=NEPOCHS, callbacks=[es], verbose=1)
-plot_learning_loss(H)
-print(H.history.keys())
+    '''
+    print("[INFO] training the best model...")
+    model = tuner.hypermodel.build(best_hp)
+    H = model.fit(X_train, X_train,
+                validation_data=(X_val, X_val), batch_size=BS,
+                epochs=NEPOCHS, callbacks=[es], verbose=1)
+    plot_learning_loss(H)
+    print(H.history.keys())
 
-# evaluate the network
-print("[INFO] evaluating network...")
-print(best_hp.values)
-xtrain_recon = model.predict(X_train) #, batch_size=BS)
-xval_recon = model.predict(X_val) #, batch_size=BS)
-xtest_recon = model.predict(X_test) #, batch_size=BS)
-'''
+    # evaluate the network
+    print("[INFO] evaluating network...")
+    print(best_hp.values)
+    xtrain_recon = model.predict(X_train) #, batch_size=BS)
+    xval_recon = model.predict(X_val) #, batch_size=BS)
+    xtest_recon = model.predict(X_test) #, batch_size=BS)
+    '''
 
