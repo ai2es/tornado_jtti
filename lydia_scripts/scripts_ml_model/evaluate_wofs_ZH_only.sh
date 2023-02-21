@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=normal
-#SBATCH --time=04:45:00
-##SBATCH --partition=debug
-##SBATCH --time=00:30:00
+##SBATCH --partition=normal
+##SBATCH --time=04:45:00
+#SBATCH --partition=debug
+#SBATCH --time=00:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=20  #-n 20
 #SBATCH --mem=10G
@@ -10,11 +10,10 @@
 #SBATCH --job-name=evaluate_wofs
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
-##SBATCH --chdir=/home/momoshog/Tornado/GewitterGefahr/gewittergefahr/scripts/
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
-#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/run__%x_%j.out
-#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/run__%x_%j.err
-#SBATCH --array=0-36
+#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/env__%x_%j.out
+#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/env__%x_%j.err
+#SBATCH --array=37
 ##SBATCH --array=0-1000%20
 
 ##########################################################
@@ -45,4 +44,4 @@ python -u lydia_scripts/scripts_ml_model/evaluate_wofs_ZH_only.py \
 --training_data_metadata_path='/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_onehot_tor/training_metadata_ZH_only.nc' \
 --path_to_wofs='/ourdisk/hpc/ai2es/wofs/' \
 --patch_size=32  \
-#--dry_run
+--dry_run

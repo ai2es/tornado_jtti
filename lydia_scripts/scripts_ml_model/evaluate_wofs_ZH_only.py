@@ -14,7 +14,7 @@ Execution Instructions:
     to create the conda environment necessary to run this script.
     Custom module requirements:
         The custom modules: custom_losses, custom_metrics, and process_monitoring
-        are in the tornado_jtti project directory.
+        are in the tornado_jtti/ project directory. The working directory is expected to be tornado_jtti/.
     Information about the required command line arguments are described in the 
     method get_arguments(). Run
         python evaluate_wofs_ZH_only.py --h
@@ -39,10 +39,10 @@ print("scipy version", scipy.__version__)
 import netCDF4
 print("netCDF4 version", netCDF4.__version__)
 from scipy import spatial
-sys.path.append("/home/lydiaks2/tornado_project/")
+#sys.path.append("/home/lydiaks2/tornado_project/")
+sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-#sys.path.append("/home/momoshog/Tornado/tornado_jtti/process_monitoring")
 sys.path.append("process_monitoring")
 from process_monitor import ProcessMonitor
 
@@ -393,7 +393,6 @@ def run_predictions_and_interpolation(patches_dirs):
     # Pull out and process all the data that we have for each time in the hour
     # We need to first stitch patches, then interpolate them back to the WoFS grid
     for time in times:
-
         # Format the time string correctly
         datetime_time = np.datetime64(netCDF4.num2date(time,'seconds since 2001-01-01'))
         # Isolate all the data from this one time
@@ -404,7 +403,6 @@ def run_predictions_and_interpolation(patches_dirs):
         
         # Add the stitched file to the list of stitched files     
         ds_stitched_list.append(predictions)
-        
 
         # Pull out time, model run, and ensemble member information from the filepath
         path_components = patches_dirs.split('/')
@@ -503,17 +501,11 @@ def run_predictions_and_interpolation(patches_dirs):
     ds_stitched.close()
     ds_wofs_as_gridrad.close()
     del ds_wofs_as_gridrad
-    #del uh
-    #del zh
-    #del model
     
     return all_patches
 
 
-
-
 def main():
-
     # Get the inputs from the .sh file
     get_arguments()  
 
