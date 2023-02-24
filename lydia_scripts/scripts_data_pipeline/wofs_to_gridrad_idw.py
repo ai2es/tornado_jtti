@@ -27,6 +27,7 @@ import netCDF4
 from netCDF4 import Dataset
 import scipy.spatial
 import wrf
+print("wrf-python version", wrf.__version__)
 import metpy
 import metpy.calc
 import os, sys
@@ -34,13 +35,15 @@ import glob
 import datetime
 import multiprocessing as mp
 import argparse
-import tqdm
+#import tqdm
 # Working directory expected to be tornado_jtti/
 sys.path.append("process_monitoring")
 from process_monitor import ProcessMonitor
 
 
-def find_and_create_output_path(filepath):
+def find_and_create_output_path(filepath, args):
+    is_dry_run = args.dry_run
+
     #Find the wofs date of the day we are processing
     yyyymmdd_path = filepath[29:37]
     #yyyy_path = yyyymmdd_path[:4]
@@ -91,27 +94,34 @@ def find_and_create_output_path(filepath):
     return output_filepath, time, forecast_window
 
 
-def calculate_output_lats_lons(wofs):
-
+def calculate_output_lats_lons(wofs, gridrad_spacing=48):
     # Find the range of the wofs grid in lat lon
     # This should be a rectangle in lat/lon coordinates, so we search for the extreme values of 
     # latitude on the most constrained longitude, and the extreme values of longitude on the most
     # constrained latitude
-    min_lat_wofs = wofs.XLAT[0,:,int(wofs.XLAT.shape[2]/2)].values.min()
-    max_lat_wofs = wofs.XLAT[0,:,0].values.max()
-    min_lon_wofs = wofs.XLONG[0,0].values.min()
-    max_lon_wofs = wofs.XLONG[0,0].values.max()
+    # Gridrad files have grid spacings of 1/48th degrees lat/lon
+    # @param gridrad_spacing: 1 / (gridrad_spacing) degrees
+    min_lat_wofs = wofs.XLAT[0, :, wofs.XLAT.shape[2]//2].values.min()
+    max_lat_wofs = wofs.XLAT[0, :, 0].values.max()
+    min_lon_wofs = wofs.XLONG[0, 0].values.min()
+    max_lon_wofs = wofs.XLONG[0, 0].values.max()
     
     # Create a grid with gridrad spacing that is contained within the given wofs grid
     # Gridrad files have grid spacings of 1/48th degrees lat/lon
-    new_min_lat = int(min_lat_wofs * 48 + 1)/48
+    '''new_min_lat = int(min_lat_wofs * 48 + 1)/48
     new_max_lat = int(max_lat_wofs * 48 - 1)/48
     new_min_lon = int(min_lon_wofs * 48 + 1)/48
-    new_max_lon = int(max_lon_wofs * 48 - 1)/48
+    new_max_lon = int(max_lon_wofs * 48 - 1)/48'''
+    new_min_lat = int(min_lat_wofs * gridrad_spacing + 1) / gridrad_spacing
+    new_max_lat = int(max_lat_wofs * gridrad_spacing - 1) / gridrad_spacing
+    new_min_lon = int(min_lon_wofs * gridrad_spacing + 1) / gridrad_spacing
+    new_max_lon = int(max_lon_wofs * gridrad_spacing - 1) / gridrad_spacing
 
     # Find the total number of lats and lons for this wofs grid
-    num_lats = round((new_max_lat - new_min_lat)*48 + 1)
-    num_lons = round((new_max_lon - new_min_lon)*48 + 1)
+    '''num_lats = round((new_max_lat - new_min_lat)*48 + 1)
+    num_lons = round((new_max_lon - new_min_lon)*48 + 1)'''
+    num_lats = round((new_max_lat - new_min_lat) * gridrad_spacing + 1)
+    num_lons = round((new_max_lon - new_min_lon) * gridrad_spacing + 1)
 
     # Make the new lats and lons grid. This new grid is just contained by the original wofs grid
     new_gridrad_lats = np.linspace(new_min_lat, new_max_lat, num_lats)
@@ -119,14 +129,16 @@ def calculate_output_lats_lons(wofs):
     
     # Combine the individual lat and lon array into one array with both lat and lon:
     # Make 2D arrays of for both lats and lons
-    gridrad_lats = np.zeros((new_gridrad_lats.shape[0], new_gridrad_lons.shape[0]))
-    gridrad_lons = np.zeros((new_gridrad_lats.shape[0], new_gridrad_lons.shape[0]))
+    lats_len = new_gridrad_lats.shape[0]
+    lons_len = new_gridrad_lons.shape[0]
+    gridrad_lats = np.zeros((lats_len, lons_len))
+    gridrad_lons = np.zeros((lats_len, lons_len))
 
-    # Put the 1D lats lons into 2D grids
-    for i in range(new_gridrad_lons.shape[0]):
-        gridrad_lons[:,i] = new_gridrad_lons[i]
-    for j in range(new_gridrad_lats.shape[0]):
+    # Put the 1D lats lons into 2D grids. TODO: (MoSho) refactor 
+    for j in range(lats_len):
         gridrad_lats[j] = new_gridrad_lats[j]
+    for i in range(lons_len):
+        gridrad_lons[:, i] = new_gridrad_lons[i]
 
     # Combine the Lats and Lons into an array of tuples, where each tuple is a point to interpolate the data to
     new_gridrad_lats_lons = np.stack((np.ravel(gridrad_lats), np.ravel(gridrad_lons))).T
@@ -177,15 +189,17 @@ def extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=True):
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
 
-    #if not Z_only:
-    return Z_agl, div, vort, uh
+    #if Z_only:
     #return Z_agl, uh
+    return Z_agl, div, vort, uh
 
 #Function to turn a wofs file to the gridrad format
 #where filepath is the location of the wofs file, outfile_path is the location of directory containing 
 #all of the regridded wofs files ex: /ourdisk/hpc/ai2es/tornado/wofs_gridradlike/
 #with_nans is whether we want to change gridpoints with reflectivity = 0 to nan values
-def to_gridrad(filepath, Z_only=True):
+#def to_gridrad(filepath, Z_only=True):
+def to_gridrad(filepath, args):
+    is_dry_run = args.dry_run
 
     # There is a difference sometimes between the day in the filepath and the day in the filename
     # All filepath dates have '_path' and all filename dates have '_day'
@@ -193,7 +207,7 @@ def to_gridrad(filepath, Z_only=True):
     # Create the directory structure to save out the data and return the output filepath for this file
     # Create the time object corresponding to the data
     # Calculate the forecast window for this file
-    output_filepath, time, forecast_window = find_and_create_output_path(filepath)
+    output_filepath, time, forecast_window = find_and_create_output_path(filepath, args)
     print(f"Output path for TIME {time} and window {forecast_window}: {output_filepath}")    
 
     # Create process monitor for recording run times and memory usage
@@ -211,6 +225,7 @@ def to_gridrad(filepath, Z_only=True):
     gridrad_heights = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
     # Pull out the desired data from the wofs file
+    Z_only = args.Z_only
     #Z_agl, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
     Z_agl, div, vort, uh = extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=Z_only)
 
@@ -232,11 +247,11 @@ def to_gridrad(filepath, Z_only=True):
     distances_3d = np.tile(np.reshape(distances, (distances.shape[0], 1, distances.shape[1])), (1,gridrad_heights.shape[0], 1))
     
     #need to make the z coordinate indices. This might be able to be improved, but works fine.  
-    for i in np.arange(0,gridrad_heights.shape[0]):
+    for i in np.arange(0, gridrad_heights.shape[0]):
         if i == 0:
-            bottom_top_3d = np.zeros((south_north_points.shape[0],south_north_points.shape[1],1),dtype=int) 
+            bottom_top_3d = np.zeros((south_north_points.shape[0],south_north_points.shape[1],1), dtype=int) 
         else:
-            bottom_top_3d = np.append(bottom_top_3d,np.ones((south_north_points.shape[0], south_north_points.shape[1], 1),dtype=int)*int(i), axis=2)
+            bottom_top_3d = np.append(bottom_top_3d,np.ones((south_north_points.shape[0], south_north_points.shape[1], 1),dtype=int) * int(i), axis=2)
     bottom_top_3d = np.swapaxes(bottom_top_3d, 1, 2)
 
     #now selecting the data should be fast 
@@ -285,7 +300,7 @@ def to_gridrad(filepath, Z_only=True):
         wofs_regridded["DIV"] = wofs_regridded_div
     
     #Where there is no reflectivity, change 0s to nans for all data variables
-    if(with_nans):
+    if(args.with_nans):
         wofs_regridded = wofs_regridded.where(wofs_regridded.ZH > 0)
     
      
@@ -408,10 +423,10 @@ def get_arguments():
     #size is the patch size
     global size 
     size = getattr(args, 'patch_size')
-    #with_nans is the patch size
-    global with_nans 
+    # with_nans is the patch size
+    #global with_nans 
     with_nans = getattr(args, 'with_nans')
-    global is_dry_run
+    #global is_dry_run
     is_dry_run = args.dry_run
     
     print(args)
@@ -452,7 +467,8 @@ def main():
     print("filenames", filenames)
 
     for file in filenames:
-        to_gridrad(file, Z_only=args.Z_only)
+        #to_gridrad(file, Z_only=args.Z_only)
+        to_gridrad(file, args)
     #with mp.Pool(processes=1) as p: #20
     #    tqdm.tqdm(p.map(to_gridrad, filenames), total=len(filenames))    
 
