@@ -4,6 +4,9 @@ author: Monique Shotande (monique.shotande a ou.edu)
 UNet Hyperparameter Search using keras tuners. 
 A keras_tuner.HyperModel subclass is defined as UNetHyperModel
 that defines how to build various versions of the UNet models
+
+GridRad /ourdisk/hpc/ai2es/tornado/gridrad_gridded/ ??
+/ourdisk/hpc/ai2es/tornado/storm_mask_unet/ ??
 """
 
 import os, io, sys, random, shutil
@@ -292,9 +295,9 @@ def create_tuner(args):
     elif args.tuner == 'hyperband':
         tuner = Hyperband(
             hypermodel,
-            max_epochs=10, #TODO command line args. max number of epochs to train one model. recommended to set slightly higher than the expected epochs to convergence 
-            factor=3, #TODO command line args. Integer, reduction factor for the number of epochs and number of models for each bracket
-            hyperband_iterations=2, #TODO command line args. Integer, at least 1, the number of times to iterate over the full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. It is recommended to set this to as high a value as is within your resource budget. 
+            max_epochs=args.max_epoches, #10, #max train epochs per model. recommended slightly higher than expected epochs to convergence 
+            factor=args.factor, #3, #int reduction factor for epochs and number of models per bracket
+            hyperband_iterations=args.hyperband_iterations, #2, #>=1,  number of times to iterate over full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. set as high a value as is within your resource budget
             project_name=PROJ_NAME,
             **tuner_args
         )
@@ -302,9 +305,9 @@ def create_tuner(args):
         tuner = BayesianOptimization(
             hypermodel,
             max_trials=MAX_TRIALS, # # of hyperparameter combinations tested by tuner
-            num_initial_points=2, #TODO command line args
-            alpha=0.0001, #TODO command line args. value added to the diagonal of the kernel matrix during fitting. It represents the expected amount of noise in the observed performances
-            beta=2.6, #TODO command line args. balancing exploration v exploitation. larger is more explorative
+            num_initial_points=args.num_initial_points, #2, 
+            alpha=args.alpha, #0.0001, #added to diagonal of kernel matrix during fitting. represents expected noise in performances
+            beta=args.beta, #2.6, #balance exploration v exploitation. larger more explorative
             project_name=PROJ_NAME,
             **tuner_args
         )
@@ -429,7 +432,7 @@ def create_parser():
     @return: the configured arguments parser
     '''
     parser = argparse.ArgumentParser(description='Tornado Model Hyperparameter Search',
-                                     epilog='MoSho')
+                                     epilog='AI2ES')
     ## TODO
     parser.add_argument('--in_dir', type=str, required=True,
                          help='Input directory where the data are stored')
@@ -438,9 +441,28 @@ def create_parser():
     parser.add_argument('--out_dir', type=str, required=True,
                          help='Output directory for results, models, hyperparameters, etc.')
     
-    parser.add_argument('-t', '--tuner', default='none', choices=['none', 'random', 'hyperband', 'bayesian', 'custom'],
-                         help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
-
+    #parser.add_argument('-t', '--tuner', default='none', choices=['none', 'random', 'hyperband', 'bayesian', 'custom'],
+     #                    help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
+    subparsers = parser.add_subparsers('tuners', help='tuner selection')
+    prsr_none = subparsers.add_parser('none', help='Hyperparameter search is not performed')
+    prsr_rand = subparsers.add_parser('random', aliases=['rand'], help='Use random search')
+    prsr_bayes = subparsers.add_parser('bayesian', aliases=['bayes'], help='Use bayesian optimization')
+    prsr_bayes.add_argument('--num_initial_points', type=int, default=2,
+                         help='Number of points to initialize')
+    prsr_bayes.add_argument('--alpha', type=float, default=0.0001, 
+                         help='Value added to the diagonal of the kernel matrix during fitting. Represents expected amount of noise in the observed performances')
+    prsr_bayes.add_argument('--beta', type=float, default=2.6, 
+                         help='Balance exploration v exploitation. Larger is more explorative')
+    prsr_hyper = subparsers.add_parser('hyperband', aliases=['hyper'], help='Use hyperband')
+    prsr_hyper.add_argument('--max_epochs', type=int, default=10,
+                         help='max number of epochs to train one model. recommended to set slightly higher than the expected epochs to convergence ')
+    prsr_hyper.add_argument('--factor', type=int, default=3, 
+                         help='Reduction factor for the number of epochs and number of models for each bracket')
+    prsr_hyper.add_argument('--hyperband_iterations', type=int, default=2, 
+                         help='At least 1. Number of times to iterate over the full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. It is recommended to set this to as high a value as is within your resource budget. ')
+    prsr_custom = subparsers.add_parser('random', help='Use random search')
+    prsr_custom.add_argument('--args', type=dict, default=3, 
+                         help='')
     # Tuner hyperparameter search arguments
     parser.add_argument('--objective', type=str, default='val_loss', #required=True,
                          help='Objective to optimize. See keras tuner for more information')
@@ -498,7 +520,7 @@ def create_parser():
 
 def parse_args():
     '''
-    Create and parse the command line args parser for the XOR experiment
+    Create and parse the command line args parser for the experiment
     @return: the parsed arguments object
     '''
     parser = create_parser()
