@@ -1142,8 +1142,9 @@ if __name__ == '__main__':
     if args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
 
-        #>anim_args = {'repeat': True, 'repeat_delay': 100}
-        #>create_gif(args, wofs_combo, 'patches_ZH_distr', interval=550, figsize=(10, 9), DB=DB, **anim_args)
+        anim_args = {'repeat': True, 'repeat_delay': 100}
+        create_gif(args, wofs_combo, 'patches_ZH_distr', interval=550, figsize=(10, 9), DB=DB, **anim_args)
+        #plt.close()
 
         # original reflectivity
         fname = os.path.basename(wofs_files) + f'__ZH_distr.png'
@@ -1151,61 +1152,24 @@ if __name__ == '__main__':
                         title='Reflectivity 10 cm', cb_label='dBZ', 
                         cmap="Spectral_r", vmin=0, vmax=50, dpi=250, figsize=(10, 9))
 
-        # predictions GRIDRAD GRID
-        fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
-        plot_pcolormesh(args, stitched.predicted_tor[0], fname, 
-                        title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
-
-        #fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-        #ZH_distr = ax.pcolormesh(stitched.predicted_tor[0], cmap="cividis", vmin=0, vmax=1)
-        #ax.set_aspect('equal', 'box') #.axis('equal') #
-        #ax.set_title('Predicted Tor (GridaRad Grid)')
-        #cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
-        #cb_ZH_distr.set_label('$p_{tor}$', rotation=0)
-
-        #fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
-        #fpath = os.path.join(dir_figs, fname)
-        #print("  Saving", fpath)
-        #plt.savefig(fpath, dpi=250)
-
-
-        # predictions WOFS GRID
-        fname = os.path.basename(wofs_files) + f'__predictions.png'
-        plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
-                        title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
-
-        #fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-        #ZH_distr = ax.pcolormesh(preds_wofsgrid.ML_PREDICTED_TOR[0], cmap="cividis", vmin=0, vmax=1)
-        #ax.set_aspect('equal', 'box') #.axis('equal') #
-        #ax.set_title('Predicted Tor (WoFS Grid)')
-        #cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
-        #cb_ZH_distr.set_label('$p_{tor}$', rotation=0)
-
-        #fname = os.path.basename(wofs_files) + f'__predictions.png'
-        #fpath = os.path.join(dir_figs, fname)
-        #print("  Saving", fpath)
-        #plt.savefig(fpath, dpi=250)
-
-
         # Reflectivity GRIDRAD
         fname = os.path.basename(wofs_files) + f'__gridrad_ZH.png'
         plot_pcolormesh(args, wofs_gridrad.ZH[0,:,:,0], fname, 
                         title='Reflectivity (GridRad Grid)', cb_label='Reflectivity', 
                         cmap="Spectral_r", vmin=0, vmax=50, dpi=250, figsize=(10, 9))
 
-        #fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-        #ZH = ax.pcolormesh(wofs_gridrad.ZH[0,:,:,0], cmap="Spectral_r", vmin=0, vmax=50)
-        #ax.set_aspect('equal', 'box') #.axis('equal') #
-        #ax.set_title('Reflectivity (GridRad Grid)')
-        #cb_ZH = fig.colorbar(ZH, ax=ax)
-        #cb_ZH.set_label('Reflectivity', rotation=0)
 
-        #fname = os.path.basename(wofs_files) + f'__gridrad_ZH.png'
-        #fpath = os.path.join(dir_figs, fname)
-        #print("  Saving", fpath)
-        #plt.savefig(fpath, dpi=250)
+        # predictions GRIDRAD GRID
+        fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
+        plot_pcolormesh(args, stitched.predicted_tor[0], fname, 
+                        title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
+                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
+
+        # predictions WOFS GRID
+        fname = os.path.basename(wofs_files) + f'__predictions.png'
+        plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
+                        title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
+                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
 
 
         npatches = wofs_combo.ZH_composite.values.shape[0]
@@ -1229,17 +1193,6 @@ if __name__ == '__main__':
             plot_pcolormesh(args, wofs_combo.predicted_tor.values[pi], fname, 
                             title=f'Prediction (patch {pi:03d})', cb_label='$p_{tor}$', 
                             cmap="coolwarm", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
-            #fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-            #ZH_distr = ax.pcolormesh(wofs_combo.predicted_tor.values[pi], cmap="cividis", vmin=0, vmax=1)
-            #ax.set_aspect('equal', 'box') #.axis('equal') #
-            #ax.set_title('Prediction')
-            #cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
-            #cb_ZH_distr.set_label('$p_{tor}$', rotation=0)
-
-            #fname = os.path.basename(wofs_files) + f'__patch{pi:03d}_ZH_distr_preds.png'
-            #fpath = os.path.join(dir_figs, fname)
-            #print("  Saving", fpath)
-            #plt.savefig(fpath, dpi=250)
 
     # Close Datasets
     #wofs_netcdf.close()
