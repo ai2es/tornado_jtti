@@ -197,7 +197,6 @@ def extract_gridrad_data_fields(filepath, gridrad_heights, Z_only=True):
 #where filepath is the location of the wofs file, outfile_path is the location of directory containing 
 #all of the regridded wofs files ex: /ourdisk/hpc/ai2es/tornado/wofs_gridradlike/
 #with_nans is whether we want to change gridpoints with reflectivity = 0 to nan values
-#def to_gridrad(filepath, Z_only=True):
 def to_gridrad(filepath, args):
     is_dry_run = args.dry_run
 
