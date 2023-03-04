@@ -183,8 +183,10 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
             used if forecast time not expected to be within the WoFS Dataset under
             the data variable Times
     @param datetime_format: date time format the date time is expected to be in
-    @param seconds_since: seconds since date statement to use for creating NETCDF4 
-            datetime integers
+    @param seconds_since: string seconds since date statement to use for creating
+            NETCDF4 datetime integers. string of the form since describing the 
+            time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
+            documentation for more information
     @param engine: Engine to use when reading file. see documentation for xarray 
             Dataset
     @param DB: int debug flag
@@ -234,11 +236,19 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
 
 def create_wofs_time(year, month, day, hour, min, sec, 
                      seconds_since='seconds since 2001-01-01', DB=0):
-    ''' TODO
-    Create corresponding data time object and return the date in GridRad time as seconds since
+    ''' 
+    Create corresponding datatime object and return the date in GridRad time 
+    as seconds since
 
-    @param year, month, day, hour, min, sec, 
-    @param seconds_since: 
+    @param year: integer year of the corresponding datetime
+    @param month: integer month of the corresponding datetime
+    @param day: integer day of the corresponding datetime
+    @param hour: integer hour of the corresponding datetime
+    @param min: integer min of the corresponding datetime
+    @param sec: integer sec of the corresponding datetime
+    @param seconds_since: string of the form since describing the time units. 
+            can be days, hours, minutes, seconds, milliseconds or microseconds. 
+            see netcdf4.date2num() documentation for more information
 
     @return: the WoFS datetime as a np.datetime int
     '''
@@ -263,7 +273,9 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
             indicating the datetime of the WoFS forecast
     @param datetime_format: (optional) string indicating the expected date time 
             format for all datetimes. default '%Y-%m-%d_%H:%M:%S'
-    @param seconds_since: 
+    @param seconds_since: string of the form since describing the time units. 
+            can be days, hours, minutes, seconds, milliseconds or microseconds. 
+            see netcdf4.date2num() documentation for more information
 
     @return: a 3-tuple with the datetime object, the datetime int since seconds_since and the 
             formatted datetime string for the WoFS data file
@@ -303,7 +315,7 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     return datetime_obj, datetime_int, datetime_str
 
 def compute_forecast_window(init_time, forecast_time, DB=0): #hh, mm):
-    ''' TODO
+    ''' 
     Calculate the forecast window
 
     @param init_time: string indicating the initialization time of the WoFS simulation.
@@ -312,27 +324,32 @@ def compute_forecast_window(init_time, forecast_time, DB=0): #hh, mm):
     @return: the duration of the forecast window in minutes
     '''
     # Initialization time
-    t0 = time.fromisoformat(init_time) #datetime.timedelta(hours=int(model_init_hhhh[:2]))
+    t0 = time.fromisoformat(init_time) 
     # Forecast time
-    t1 = time.fromisoformat(forecast_time) #('20111104') #datetime.timedelta(hours=int(hhmmss[:2]), minutes=int(hhmmss[2:4]))
+    t1 = time.fromisoformat(forecast_time) 
+
     forecast_window = (t1 - t0).total_seconds() / 60
-    if DB: print(f"Forecast window: {forecast_window} min\n")    
+    if DB: print(f"Forecast window: {forecast_window} min\n")  
+
     return forecast_window
 
-def extract_fields(args, wrfin, gridrad_heights, fields=None):
+def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     ''' 
-    Extract reflectivity, vorticity, divergence and any additionally specified WoFS fields
+    Extract WoFS fields reflectivity, vorticity, divergence from the netcdf4 
+    Dataset
 
     @param args: parsed command line args. see create_argsparser()
-    @param wrfin: netCDF Dataset, not xarray, is required to use wrf-python functions
-    @param gridrad_heights: list or numpy array of the elevations in the GridRad data in km
+    @param wrfin: netCDF Dataset, not xarray, is required to use wrf-python 
+            functions
+    @param gridrad_heights: list or numpy array of the elevations in the GridRad 
+            data in km
     @param fields: TODO list of strings indicating additional fields to extract
 
-    @return: 4-tuple of numpy arrays containing the reflectivity, divergence, vorticity,
-            and updraft helicity. ( Z_agl, div, vort, uh)
+    @return: 4-tuple of numpy arrays containing the reflectivity, divergence, 
+            vorticity, and updraft helicity. ( Z_agl, div, vort, uh)
     '''
     # Get wofs heights
-    height = wrf.getvar(wrfin, "height_agl", units='m') #wofs._file_obj.ds,
+    height = wrf.getvar(wrfin, "height_agl", units='m')
 
     # Get reflectivity, and U and V winds
     Z = wrf.getvar(wrfin, "REFL_10CM")
@@ -343,7 +360,7 @@ def extract_fields(args, wrfin, gridrad_heights, fields=None):
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    #if not ZH_only:
+    #TODO if not ZH_only:
     U_agl = wrf.interplevel(U, height, gridrad_heights)
     V_agl = wrf.interplevel(V, height, gridrad_heights)
     
@@ -352,8 +369,10 @@ def extract_fields(args, wrfin, gridrad_heights, fields=None):
     V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
     
     # Define grid spacings (for div and vort)
-    dx = 3000 * (metpy.units.units.meter) #TODO pull from WoFS
-    dy = 3000 * (metpy.units.units.meter) #TODO pull from WoFS
+    #dx = 3000 * (metpy.units.units.meter) 
+    #dy = 3000 * (metpy.units.units.meter) 
+    dx = wrfin.DX * (metpy.units.units.meter) 
+    dy = wrfin.DY * (metpy.units.units.meter) 
 
     # Calculate divergence and vorticity
     div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
@@ -499,7 +518,7 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
                                                                     gridrad_spacing=gridrad_spacing)
 
     # Pull out the desired data from the wofs file
-    Z_agl, div, vort, uh = extract_fields(args, wofs_netcdf, gridrad_heights)
+    Z_agl, div, vort, uh = extract_netcdf_dataset_fields(args, wofs_netcdf, gridrad_heights)
 
     # Remove axes of length 1
     xlat_vals = np.squeeze(wofs.XLAT.values)
@@ -560,10 +579,8 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
         vort_final = np.swapaxes(np.swapaxes((np.sum(vorts / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
         div_final = np.swapaxes(np.swapaxes((np.sum(divs / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
     
-    # Create corresponding data time object and
-    #dtime = create_wofs_time(year, month, day, hhmmss, DB=is_dry_run)
+    # Put data into DataArrays with same dimensions, coordinates, and variable fields as gridrad
     dtime = wofs['Time'].values[0]
-    # Put data into xarray DataArrays with same dimensions, coordinates, and variable fields as gridrad
     wofs_regridded_refc = xr.DataArray(
         data=REFL_10CM_final,
         dims=("time", "Altitude", "Latitude", "Longitude"),
@@ -591,8 +608,10 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
         )
     
     # Combine DataArrays into a Dataset
-    wofs_regridded = xr.Dataset(coords={"time": [dtime], "Longitude": new_gridrad_lons + 360, 
-                                        "Latitude": new_gridrad_lats, "Altitude": gridrad_heights})
+    wofs_regridded = xr.Dataset(coords={"time": [dtime], 
+                                        "Longitude": new_gridrad_lons + 360, 
+                                        "Latitude": new_gridrad_lats, 
+                                        "Altitude": gridrad_heights})
     wofs_regridded["ZH"] = wofs_regridded_refc
     wofs_regridded["UH"] = wofs_regridded_uh
     if not Z_only:
@@ -612,6 +631,7 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
 
     # Make patches
     ds_patches = make_patches(args, wofs_regridded, forecast_window)
+    #ds_patches['Times'] = wofs.Times
     ds_patches.attrs = wofs.attrs
     
     if args.write in [2, 4] and not args.dir_patches is None:
@@ -655,8 +675,9 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
     return train_stats
 
 def load_evaluate(args, wofs, stats, eval=False, DB=0, **fss_args):
-    '''TODO
-    Load and evaluate the model
+    '''
+    Load and evaluate the model.
+    TODO: predict on arbitrary set of fields
 
     @param args: command line args. see create_argsparser()
             Relevant attributes:
@@ -700,9 +721,10 @@ def load_evaluate(args, wofs, stats, eval=False, DB=0, **fss_args):
     return preds
 
 def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
-    '''TODO
+    '''
     Combine the fields of interest with true and predicted data into a single Dataset
-    Combine the predictions, reflectivity, U, V,
+    Combine the predictions, reflectivity, U, V.
+    TODO: extend to arbitrary sets of fields
 
     @param args: command line args. see create_argsparser()
                 Relevent attributes:
@@ -715,19 +737,13 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
 
     @return: xarray dataset wit hthe combined information
     '''
-    #zh = wofs.ZH.values
-    #uh = wofs.UH.values
-    #n_convective_pixels = wofs.n_convective_pixels.values
-    #n_uh_pixels = wofs.n_uh_pixels.values
-    #lat = wofs.lat.values
-    #lon = wofs.lon.values
-    dtime = wofs.time.values
-    #forecast_window = wofs.forecast_window.values
-
     fields = ['ZH', 'UH', 'stitched_x', 'stitched_y', 'n_convective_pixels', 
               'n_uh_pixels', 'lat', 'lon', 'time', 'forecast_window']
     if not args.ZH_only:
         fields += ['DIV', 'VOR']
+    if not args.fields is None:
+        fields += args.fields
+        fields = set(fields)
     wofs_preds = wofs[fields].copy(deep=True)
 
     dims = dict(wofs.dims)
@@ -756,137 +772,109 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
 
 def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
                  seconds_since='seconds since 2001-01-01', DB=0):
-    ''' TODO
+    '''
     Interpolate the WofS data back into the original WoFS grid
 
     @param args: command line args. see crate_argsparser()
     @param wofs_orig: original WoFS data prior to interpolating to GridRad. Used 
             to obtain the original WoFS grid spacing
     @param wofs_gridrad: WoFS data in GridRad grid system, with the predictions
-    @param gridrad_spacing: 48
+    @param stats: dataset containing the mean and STD from the training data
+    @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
+            1 / (gridrad_spacing) degrees
+    @param seconds_since: string seconds since date statement to use for creating
+            NETCDF4 datetime integers. string of the form since describing the 
+            time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
+            documentation for more information
     @param DB: debug flag
 
     @return: WoFS data as xarray Dataset in the original WoFS grid system
     '''
-    # We've made predictions for all the times, but we want to save out each time individually
-    forecast_times = set(wofs_gridrad.time.values)
-    stitched_preds = []
-    on_wofsgrid = []
+    # Stitch back together the patches of the predictions
+    predictions =  stitch_patches(args, wofs_gridrad, stats, 
+                                    gridrad_spacing=gridrad_spacing, 
+                                    seconds_since=seconds_since, DB=DB)
+    
+    # Add the stitched file to the list of stitched files     
+    #stitched_preds.append(predictions)
 
-    # TODO process monitor
+    # Calculate number of grid points required to add to each side to get to the full WoFS grid
+    to_add_east_west = round((wofs_orig.XLONG.max().values - predictions.lon.max().values + 360) * gridrad_spacing + 1)
+    to_add_north_south = round((wofs_orig.XLAT.max().values - predictions.lat.max().values) * gridrad_spacing + 1)
 
-    #TODO wofs_orig_instant = wofs_orig.where(wofs_orig.time==ftime, drop=True)
-    # Iterate over each forecast time. First stitch patches, then interpolate them  to the WoFS grid
-    for ftime in forecast_times:
-        # Extract data from this one time
-        wofs_instant = wofs_gridrad.where(wofs_gridrad.time==ftime, drop=True)
+    # Pad the top, bottom, left and right of the grid toobtain the exact size of the original WoFS file grid
+    zeros_east_west = np.zeros((predictions.predicted_tor.isel(time=0).shape[0], to_add_east_west))
+    padded_east_west = np.concatenate((zeros_east_west, predictions.predicted_tor.isel(time=0).values, zeros_east_west), axis=1)
+    zeros_north_south = np.zeros((to_add_north_south, padded_east_west.shape[1]))
+    padded_predictions = np.concatenate((zeros_north_south, padded_east_west, zeros_north_south), axis=0)
 
-        # Stitch the patches back together preds_wofsgrid
-        predictions =  stitch_patches(args, wofs_instant, stats, 
-                                     gridrad_spacing=gridrad_spacing, 
-                                     seconds_since=seconds_since, DB=DB)
-        
-        # Add the stitched file to the list of stitched files     
-        stitched_preds.append(predictions)
+    # Calculate lats and lons of gridrad grid, which is padded with 0s on each side
+    padded_lats = np.linspace(predictions.lat.min().values - to_add_north_south / gridrad_spacing, 
+                                predictions.lat.max().values + to_add_north_south / gridrad_spacing, padded_predictions.shape[0])
+    padded_lons =  np.linspace(predictions.lon.min().values - to_add_east_west / gridrad_spacing, 
+                                predictions.lon.max().values + to_add_east_west / gridrad_spacing, padded_predictions.shape[1])
 
-        # Open the original WoFS file to get the grid spacing
-        #original_wofs = xr.open_dataset(path_to_wofs + '/%s/%s/%s/ENS_MEM_%s/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, yyyymmdd, model_initialization, ens_mem, yyyy, mm, dd, hh, minmin), engine='netcdf4')
+    # Place lats and lons into 2D arrays from 1D arrays
+    plons_len = padded_lons.size
+    plats_len = padded_lats.size
+    gridrad_lats = np.tile(padded_lats, plons_len).reshape(plons_len, plats_len).T
+    gridrad_lons = np.tile(padded_lons - 360, plats_len).reshape(plats_len, plons_len)
+    # Combine these 2 arrays into 1
+    gridrad_lats_lons = np.stack((np.ravel(gridrad_lats), np.ravel(gridrad_lons))).T
+    
+    # Extract the lats and lons from the wofs grid which we are interpolating to
+    wofs_lats_lons = np.stack((np.ravel(wofs_orig.XLAT.values[0]), np.ravel(wofs_orig.XLONG.values[0]))).T
+    
+    # Make the KD Tree
+    tree = spatial.cKDTree(gridrad_lats_lons)
 
-        # Calculate number of grid points required to add to each side to get to the full WoFS grid
-        to_add_east_west = round((wofs_orig.XLONG.max().values - predictions.lon.max().values + 360) * gridrad_spacing + 1)
-        to_add_north_south = round((wofs_orig.XLAT.max().values - predictions.lat.max().values) * gridrad_spacing + 1)
+    # Query the tree at the desired points
+    # For each wofs point, find the closest gridrad gridpoint
+    distances, points = tree.query(wofs_lats_lons, k=4)
 
-        # Pad the top, bottom, left and right of the grid toobtain the exact size of the original WoFS file grid
-        zeros_east_west = np.zeros((predictions.predicted_tor.isel(time=0).shape[0], to_add_east_west))
-        padded_east_west = np.concatenate((zeros_east_west, predictions.predicted_tor.isel(time=0).values, zeros_east_west), axis=1)
-        zeros_north_south = np.zeros((to_add_north_south, padded_east_west.shape[1]))
-        padded_predictions = np.concatenate((zeros_north_south, padded_east_west, zeros_north_south), axis=0)
+    # Get the indices of the interpolation points in the new padded gridrad grid
+    lat_points, lon_points = np.unravel_index(points, (plats_len, plons_len))
 
-        # Calculate lats and lons of gridrad grid, which is padded with 0s on each side
-        padded_lats = np.linspace(predictions.lat.min().values - to_add_north_south / gridrad_spacing, 
-                                    predictions.lat.max().values + to_add_north_south / gridrad_spacing, padded_predictions.shape[0])
-        padded_lons =  np.linspace(predictions.lon.min().values - to_add_east_west / gridrad_spacing, 
-                                    predictions.lon.max().values + to_add_east_west / gridrad_spacing, padded_predictions.shape[1])
-   
-        # Place lats and lons into 2D arrays from 1D arrays
-        plons_len = padded_lons.size
-        plats_len = padded_lats.size
-        gridrad_lats = np.tile(padded_lats, plons_len).reshape(plons_len, plats_len).T
-        gridrad_lons = np.tile(padded_lons - 360, plats_len).reshape(plats_len, plons_len)
-        # Combine these 2 arrays into 1
-        gridrad_lats_lons = np.stack((np.ravel(gridrad_lats), np.ravel(gridrad_lons))).T
-        
-        # Extract the lats and lons from the wofs grid which we are interpolating to
-        wofs_lats_lons = np.stack((np.ravel(wofs_orig.XLAT.values[0]), np.ravel(wofs_orig.XLONG.values[0]))).T
-        
-        # Make the KD Tree
-        tree = spatial.cKDTree(gridrad_lats_lons)
+    # Use inverse distance weighting to get the new grid
+    predictions_not_idw = padded_predictions[lat_points, lon_points]
+    dist_sq = distances**2
+    predictions_idw = (np.sum(predictions_not_idw / dist_sq, axis=1) / np.sum(1 / dist_sq, axis=1)).reshape(wofs_orig.XLAT.values.shape[1:])
 
-        # Query the tree at the desired points
-        # For each wofs point, find the closest gridrad gridpoint
-        distances, points = tree.query(wofs_lats_lons, k=4)
+    # Create Dataset formatted like the raw WoFS file
+    wofs_like = xr.Dataset(data_vars=dict(ML_PREDICTED_TOR=(["Time", "south_north", "west_east"], 
+                                            predictions_idw.reshape((1,) + predictions_idw.shape))),
+                            coords=dict(XLAT=(["Time", "south_north", "west_east"], wofs_orig.XLAT.values),
+                                            XLONG=(["Time", "south_north", "west_east"], wofs_orig.XLONG.values)),
+                            attrs=wofs_orig.attrs
+                            )
+    #on_wofsgrid.append(wofs_like)
 
-        # Get the indices of the interpolation points in the new padded gridrad grid
-        lat_points, lon_points = np.unravel_index(points, (plats_len, plons_len))
-
-        # Use inverse distance weighting to get the new grid
-        predictions_not_idw = padded_predictions[lat_points, lon_points]
-        dist_sq = distances**2
-        predictions_idw = (np.sum(predictions_not_idw / dist_sq, axis=1) / np.sum(1 / dist_sq, axis=1)).reshape(wofs_orig.XLAT.values.shape[1:])
-
-        # Create Dataset formatted like the raw WoFS file
-        wofs_like = xr.Dataset(data_vars=dict(ML_PREDICTED_TOR=(["Time", "south_north", "west_east"], 
-                                                predictions_idw.reshape((1,) + predictions_idw.shape))),
-                               coords=dict(XLAT=(["Time", "south_north", "west_east"], wofs_orig.XLAT.values),
-                                                XLONG=(["Time", "south_north", "west_east"], wofs_orig.XLONG.values)),
-                               attrs=wofs_orig.attrs
-                               )
-        on_wofsgrid.append(wofs_like)
-
-        # Save out the interpolated file
-        if args.write in [1, 4]:
-            fname = os.path.basename(wofs_orig.filenamepath)
-            fname, file_extension = os.path.splitext(fname)
-            savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
-            print(f"Save WoFS grid predictions to {savepath}\n")
-            wofs_like.to_netcdf(savepath)
-            #wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
-
-    # Combine all stitched files into one, sort the dataset by time
-    ds_stitched_preds = xr.concat(stitched_preds, dim='time')
-    ds_stitched_preds = ds_stitched_preds.sortby('time')
-    ds_stitched_preds.attrs = wofs_orig.attrs
-
-    ds_wofsgrid = xr.concat(on_wofsgrid, dim='Time')
-    ds_wofsgrid = ds_wofsgrid.sortby('Time')
-    ds_wofsgrid.attrs = wofs_orig.attrs
-
-    ''' TODO?
-    if args.write in [2, 4]:
+    # Save out the interpolated file
+    if args.write in [1, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-
-        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions_stitched.nc')
-        print("Save interpolated file", savepath)
-        ds_stitched_preds.to_netcdf(savepath)
-        
-        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions.nc')
-        print(f"Save interpolated file to {savepath}\n")
-        ds_wofsgrid.to_netcdf(savepath)
-    '''
+        savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
+        print(f"Save WoFS grid predictions to {savepath}\n")
+        wofs_like.to_netcdf(savepath)
+        #wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
     
-    return ds_stitched_preds, ds_wofsgrid
+    return predictions, wofs_like
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
                    seconds_since='seconds since 2001-01-01', DB=0):
-    """ TODO
+    """ 
     Reconstruct the stitched grid for a single WoFS forecast time
 
     @param args: command line args. see create_argsparser()
     @param wofs: WoFS data from a single time point
     @param stats: xarray dataset with training mean and std of the reflectivity 
             and other fields
-    @param gridrad_spacing=48 TODO
+    @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
+            1 / (gridrad_spacing) degrees
+    @param seconds_since: string seconds since date statement to use for creating
+            NETCDF4 datetime integers. string of the form since describing the 
+            time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
+            documentation for more information
     @param DB: int debug flag
 
     @return: xarray Dataset of the WoFS data stitched
@@ -923,7 +911,6 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
     if ndims == 3:
         # Number of channels
         csize = args.patch_shape[2]
-    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 1, 2, or 3 but was {ndims}")
 
     # Loop through all the patches
     zeros = np.ones((xsize, ysize))
@@ -969,21 +956,6 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
 
     return wofs_stiched
 
-def separate_times(args, wofs):
-    '''TODO
-    Extract all the forecast times from the WoFS data provided
-
-    @param args: command line arguments. see create_argsparser()
-    @param wofs: xarray Dataset with all the loaded WoFS data
-
-    @return: the set of forecast times
-    '''
-    #attrs={'START_DATE'}
-    #wofs.START_DATE
-    #wofs.Times.data[0]
-    forecast_times = set(wofs.time.values)
-    return forecast_times
-
 
 """
 Visualization methods
@@ -1018,7 +990,7 @@ def plot_pcolormesh(args, data, fname, title, cb_label, cmap="Spectral_r",
     return fig, ax
 
 def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, figsize=(10, 9), DB=0, **kwargs):
-    ''' TODO
+    ''' 
     Create a .gif or movie file of the storm data
     matplotlib documentation https://www.c-sharpcorner.com/article/create-animated-gif-using-python-matplotlib/
 
@@ -1081,7 +1053,7 @@ if __name__ == '__main__':
 
     args = parse_args()
     DB = args.dry_run
-    xr.set_options(file_cache_maxsize=3, warn_for_unclosed_files=DB)
+    #xr.set_options(file_cache_maxsize=3, warn_for_unclosed_files=DB)
 
     wofs_files = []
     if os.path.isfile(args.loc_wofs):
@@ -1093,17 +1065,11 @@ if __name__ == '__main__':
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
-    #'%Y-%m-%d_%H:%M:%S'
-    #--datetime_format="^%Y-^%m-^%d_^%H^:^%M^:^%S"  
-    #--datetime_init="2019-05-17_03^:00^:00" 
-    #--datetime_forecast="2019-05-18_05^:25^:00"
+
+    # TODO verify set from args
     datetime_fmt = '%Y-%m-%d_%H:%M:%S' #args.datetime_format
     print(datetime_fmt)
 
-    # TODO: remove if datetimes are in raw wofs
-    #args.datetime_init = args.datetime_init #"2019-05-17_03:00:00" 
-    #datetime_forecast = args.datetime_forecast #datetime.fromisoformat(args.datetime_forecast) #"2019-05-18_05:25:00"
-    
     SECS_SINCE = 'seconds since 2001-01-01'
     ds_load_args = {'cache': False}
     wofs, wofs_netcdf = load_wofs_file(wofs_files, args.filename_prefix, 
@@ -1131,19 +1097,59 @@ if __name__ == '__main__':
     # Combine the predictions, reflectivity and select fields into a single dataset
     wofs_combo = combine_fields(args, wofs_gridrad, preds, DB=DB)
 
-    # TODO: Predictions potentially made for multiple forecast times
+    # Interpolate back to WoFS grid
+    preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
+                                           train_stats, gridrad_spacing=GRIDRAD_SPACING, 
+                                           seconds_since=SECS_SINCE, DB=DB)
 
-    # TODO: Interpolate back to WoFS grid
-    stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, train_stats, 
+    '''
+    # Interpolate back to WoFS grid
+    # Predictions for multiple times
+    forecast_times = set(wofs_combo.time.values)
+    stitched_preds = []
+    on_wofsgrid = []
+
+    #Iterate over each forecast time. First stitch patches, then interpolate them  to the WoFS grid
+    for ftime in forecast_times:
+        wofs_orig_instant = wofs_orig.where(wofs_orig.time==ftime, drop=True)
+
+        preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, train_stats, 
                                            gridrad_spacing=GRIDRAD_SPACING, 
                                            seconds_since=SECS_SINCE, DB=DB)
+
+        stitched_preds.append(preds_gridrad_stitched)
+        on_wofsgrid.append(preds_wofsgrid)
+
+    # Combine all stitched predictions from each time into a time sorted Dataset
+    ds_stitched_preds = xr.concat(stitched_preds, dim='time')
+    ds_stitched_preds = ds_stitched_preds.sortby('time')
+    ds_stitched_preds.attrs = wofs_orig.attrs
+
+    ds_wofsgrid = xr.concat(on_wofsgrid, dim='Time')
+    ds_wofsgrid = ds_wofsgrid.sortby('Time')
+    ds_wofsgrid.attrs = wofs_orig.attrs
+
+    if args.write in [2, 4]:
+        fname = os.path.basename(wofs_orig.filenamepath)
+        fname, file_extension = os.path.splitext(fname)
+
+        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions_gridrad_stitched.nc')
+        print("Save interpolated file", savepath)
+        ds_stitched_preds.to_netcdf(savepath)
+        
+        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions.nc')
+        print(f"Save interpolated file to {savepath}\n")
+        ds_wofsgrid.to_netcdf(savepath)
+    '''
+
 
     # Plot data
     if args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
 
         anim_args = {'repeat': True, 'repeat_delay': 100}
-        create_gif(args, wofs_combo, 'patches_ZH_distr', interval=550, figsize=(10, 9), DB=DB, **anim_args)
+        create_gif(args, wofs_combo, 'patches_ZH_distr', interval=550, 
+                   figsize=(10, 9), DB=DB, **anim_args)
         #plt.close()
 
         # original reflectivity
@@ -1161,7 +1167,7 @@ if __name__ == '__main__':
 
         # predictions GRIDRAD GRID
         fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
-        plot_pcolormesh(args, stitched.predicted_tor[0], fname, 
+        plot_pcolormesh(args, preds_gridrad_stitched.predicted_tor[0], fname, 
                         title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
                         cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
 
@@ -1175,7 +1181,8 @@ if __name__ == '__main__':
         npatches = wofs_combo.ZH_composite.values.shape[0]
         for pi in range(0, npatches, 25):
             fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-            ZH_distr = ax.pcolormesh(wofs_combo.ZH_composite.values[pi], cmap="Spectral_r", vmin=0, vmax=50)
+            ZH_distr = ax.pcolormesh(wofs_combo.ZH_composite.values[pi], 
+                                     cmap="Spectral_r", vmin=0, vmax=50)
             ax.contour(wofs_combo.predicted_tor.values[pi])
             ax.set_aspect('equal', 'box') #.axis('equal') #
             ax.set_title('Composite Reflectivity')
