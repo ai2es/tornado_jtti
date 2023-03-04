@@ -5,14 +5,13 @@ Functions based on those provided by Lydia
 End to end script takes as input the raw WoFS (warn on Forecast System) data,
 and outputs the predictions in the WoFS grid.
 
-todo: /ourdisk/hpc/ai2es/tornado/unet/ZH_only/initialrun_model8/patch_images/
-
 General Procedure:
 1. read raw WoFS file(s)
 2. interpolate WoFS grid to GridRad grid
 3. construct patches (optional)
-4. make predictions
-5. interpolate back to WoFS grid
+4. load ML model
+5. make predictions
+6. interpolate back to WoFS grid
 
 Execution Instructions:
     Conda environment requires are in the environment.yml
@@ -120,7 +119,7 @@ def create_argsparser(args_list=None):
     '''
 
     parser.add_argument('--dir_preds', type=str, required=True, 
-        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions_<PATCH_SHAPE>.nc')
+        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
     parser.add_argument('--dir_patches', type=str, #required=True, 
         help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
     parser.add_argument('--dir_figs', type=str, #required=True, 
@@ -128,8 +127,10 @@ def create_argsparser(args_list=None):
 
     #parser.add_argument('-p', '--patch_size', type=int, required=True, 
     #    help='Size of patches in each horizontal dimension. Ex: patch_size=32 would make patches of shape (32, 32, 12).')
-    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32, 32, 12), #required=True, 
-        help='Shape of patches. Can be empty (), 2D (xy, h), 2D (x, y, h), or 3D (x, y, c, h) tuple. If empty tuple, patching is not performed. Last dimension must contain the number of GridRad elevation levels. If 2D, the x and y dimension are the same. Ex: (32, 12) or (32, 32, 12).')
+    #parser.add_argument('-p', '--patch_shape', type=tuple, default=(32, 32, 12), #required=True, 
+    #    help='Shape of patches. Can be empty (), 2D (xy, h), 2D (x, y, h), or 3D (x, y, c, h) tuple. If empty tuple, patching is not performed. Last dimension must contain the number of GridRad elevation levels. If 2D, the x and y dimension are the same. Ex: (32, 12) or (32, 32, 12).')
+    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,), #required=True, 
+        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats.')
     parser.add_argument('-Z', '--ZH_only', action='store_true',
@@ -146,12 +147,9 @@ def create_argsparser(args_list=None):
     #    help='directory where the trained model is stored')
 
     parser.add_argument('-w', '--write', type=int, default=0,
-        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save (.nc) data files, set to 2 to only save figures, and set to 3 to save both data files and figures')
+        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS prediction file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
     parser.add_argument('-d', '--dry_run', action='store_true',
         help='For testing and debugging. Execute without running models or saving data and display output paths')
-
-    #parser.add_argument('--exp', type=str, required=True,
-    #    help='Experimental index')
 
     return parser
 
@@ -167,6 +165,7 @@ def parse_args(args_list=None):
     parser = create_argsparser(args_list=args_list)
     args = parser.parse_args()
     return args
+
 
 """
 WoFS to GridRad interpolation methods, refactored from lydia_scripts/scripts_data_pipeline
@@ -398,16 +397,16 @@ def make_patches(args, radar, window):
     ysize = None
     csize = None
     ndims = len(args.patch_shape)
-    if ndims >= 2:
+    if ndims > 0:
         xsize = args.patch_shape[0]
-    if ndims == 2:
+    if ndims == 1:
         ysize = xsize
-    elif ndims >= 3:
+    elif ndims >= 2:
         ysize = args.patch_shape[1]
-    if ndims == 4:
+    if ndims == 3:
         # Number of channels
         csize = args.patch_shape[2]
-    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 2, 3, or 5 but was {ndims}")
+    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 1, 2, or 3 but was {ndims}")
     
     lat_range = range(0, lat_len, xsize - 4)
     lon_range = range(0, lon_len, ysize - 4)
@@ -615,16 +614,17 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
     ds_patches = make_patches(args, wofs_regridded, forecast_window)
     ds_patches.attrs = wofs.attrs
     
-    if args.write in [1, 3] and not args.dir_patches is None:
+    if args.write in [2, 4] and not args.dir_patches is None:
         fname = os.path.basename(wofs.filenamepath)
         fname, _ext = os.path.splitext(fname)
         patch_shape = [f'{c:03d}' for c in args.patch_shape]
         patch_shape_str = '_'.join(patch_shape)
         savepath = os.path.join(args.dir_patches, f'{fname}_patched_{patch_shape_str}.nc')
-        print("Saving patched WoFS data interpolated to GridRad grid", savepath)
-        ds_patches.to_netcdf(savepath)
+        print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
+        ds_patches.to_netcdf(savepath) #, engine='netcdf4'
 
     return ds_patches
+
 
 """
 Tornado prediction methods.
@@ -690,8 +690,9 @@ def load_evaluate(args, wofs, stats, eval=False, DB=0, **fss_args):
     X = (wofs.ZH - ZH_mu) / ZH_std
 
     # Predict with the data
-    if DB: print(f"Performing predictions (wofs dims={wofs.dims}) ...")
-    if DB: print(f"Performing predictions (wofs coords={wofs.coords}) ...")
+    if DB: 
+        print(f"Performing predictions (wofs dims={wofs.dims}) ...")
+        print(f"Performing predictions (wofs coords={wofs.coords}) ...")
     print(f"Performing predictions (input shape={X.shape}) ...")
     preds = model.predict(X)
     #if eval: results = model.evaluate(X, y_test, batch_size=128)
@@ -751,42 +752,6 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
         coords=coords
     )
 
-    '''
-    xsize = None
-    ysize = None
-    csize = None
-    ndims = len(args.patch_shape)
-    if ndims >= 2:
-        xsize = args.patch_shape[0]
-    if ndims == 2:
-        ysize = xsize
-    elif ndims >= 3:
-        ysize = args.patch_shape[1]
-    if ndims == 4:
-        # Number of channels
-        csize = args.patch_shape[2]
-    
-    wofs_preds = xr.Dataset(data_vars=dict(UH = (["patch", "x", "y"], uh),
-                                        ZH_composite = (["patch", "x", "y"], zh.max(axis=3)),
-                                        ZH = (["patch", "x", "y", "z"], zh),
-                                        stitched_x = (["patch", "x"], wofs.stitched_x.values),
-                                        stitched_y = (["patch", "y"], wofs.stitched_y.values),
-                                        predicted_no_tor = (["patch", "x", "y"], preds[:,:,:,0]),
-                                        predicted_tor = (["patch", "x", "y"], preds[:,:,:,1]),
-                                        n_convective_pixels = (["patch"], n_convective_pixels),
-                                        n_uh_pixels = (["patch"], n_uh_pixels),
-                                        lat = (["patch"], lat),
-                                        lon = (["patch"], lon),
-                                        time = (["patch"], dtime),
-                                        forecast_window = (["patch"], forecast_window)),
-                                    coords=dict(patch=range(preds.shape[0]),
-                                                x=range(xsize),
-                                                y=range(ysize),
-                                                z=gridrad_heights),
-                                    attrs=wofs.attrs
-                                    )
-    '''
-
     return wofs_preds
 
 def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
@@ -808,9 +773,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     stitched_preds = []
     on_wofsgrid = []
 
-    # Create process monitor
-    #proc = ProcessMonitor()
-    #proc.start_timer()
+    # TODO process monitor
 
     #TODO wofs_orig_instant = wofs_orig.where(wofs_orig.time==ftime, drop=True)
     # Iterate over each forecast time. First stitch patches, then interpolate them  to the WoFS grid
@@ -881,11 +844,11 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
         on_wofsgrid.append(wofs_like)
 
         # Save out the interpolated file
-        if args.write in [1, 3]:
+        if args.write in [1, 4]:
             fname = os.path.basename(wofs_orig.filenamepath)
             fname, file_extension = os.path.splitext(fname)
             savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
-            print("Save WoFS grid predictions", savepath)
+            print(f"Save WoFS grid predictions to {savepath}\n")
             wofs_like.to_netcdf(savepath)
             #wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
 
@@ -899,7 +862,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     ds_wofsgrid.attrs = wofs_orig.attrs
 
     ''' TODO?
-    if args.write in [1, 3]:
+    if args.write in [2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
 
@@ -908,7 +871,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
         ds_stitched_preds.to_netcdf(savepath)
         
         savepath = os.path.join(args.dir_preds, f'all_wofs_predictions.nc')
-        print("Save interpolated file", savepath)
+        print(f"Save interpolated file to {savepath}\n")
         ds_wofsgrid.to_netcdf(savepath)
     '''
     
@@ -951,16 +914,16 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
     ysize = None
     csize = None
     ndims = len(args.patch_shape)
-    if ndims >= 2:
+    if ndims > 0:
         xsize = args.patch_shape[0]
-    if ndims == 2:
+    if ndims == 1:
         ysize = xsize
-    elif ndims >= 3:
+    elif ndims >= 2:
         ysize = args.patch_shape[1]
-    if ndims == 4:
+    if ndims == 3:
         # Number of channels
         csize = args.patch_shape[2]
-    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 2, 3, or 5 but was {ndims}")
+    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 1, 2, or 3 but was {ndims}")
 
     # Loop through all the patches
     zeros = np.ones((xsize, ysize))
@@ -1025,6 +988,34 @@ def separate_times(args, wofs):
 """
 Visualization methods
 """
+def plot_pcolormesh(args, data, fname, title, cb_label, cmap="Spectral_r", 
+                    vmin=0, vmax=50, dpi=250, figsize=(10, 9)):
+    '''
+    Use matplotlib pcolormesh to plot the data
+
+    @param args:
+    @param data:
+    @param fname: name of the file, including the image extension
+    @param title: figure title
+    @param cb_label: colorbar label
+    @param cmap: 
+
+    @return: the fig and the axes objects
+    '''
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    pcmesh = ax.pcolormesh(data, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_aspect('equal', 'box') #.axis('equal') #
+    ax.set_title(title)
+    cb_ = fig.colorbar(pcmesh, ax=ax)
+    cb_.set_label(cb_label, rotation=0)
+
+    dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
+    fpath = os.path.join(dir_figs, fname)
+    print("  Saving", fpath)
+    plt.savefig(fpath, dpi=dpi)
+
+    return fig, ax
+
 def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, figsize=(10, 9), DB=0, **kwargs):
     ''' TODO
     Create a .gif or movie file of the storm data
@@ -1075,7 +1066,7 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, figsiz
     nframes = wofs['patch'].size
     animator = FuncAnimation(fig, draw_storm_frame, frames=nframes, 
                              interval=interval, **kwargs)
-    if args.write in [2, 3]:
+    if args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
         fnpath = os.path.join(dir_figs, fname)
         print("  Saving", fnpath)
@@ -1096,7 +1087,8 @@ if __name__ == '__main__':
         wofs_files = args.loc_wofs
     elif os.path.isdir(args.loc_wofs):
         wofs_files = os.listdir(args.loc_wofs)
-    else: raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory was {args.loc_wofs}")
+    else: 
+        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory was {args.loc_wofs}")
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
@@ -1146,26 +1138,29 @@ if __name__ == '__main__':
                                            seconds_since=SECS_SINCE, DB=DB)
 
     # Plot data
-    if args.write in [2, 3]:
+    if args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
 
-        npatches = wofs_combo.ZH_composite.values.shape[0]
         anim_args = {'repeat': True, 'repeat_delay': 100}
         create_gif(args, wofs_combo, 'patches_ZH_distr', interval=550, figsize=(10, 9), DB=DB, **anim_args)
 
-
         # original reflectivity
-        fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-        ZH_distr = ax.pcolormesh(wofs.REFL_10CM.values[0, 0], cmap="Spectral_r", vmin=0, vmax=50)
-        ax.set_aspect('equal', 'box') #.axis('equal') #
-        ax.set_title('Reflectivity 10 cm')
-        cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
-        cb_ZH_distr.set_label('dBZ', rotation=0)
-
         fname = os.path.basename(wofs_files) + f'__ZH_distr.png'
-        fpath = os.path.join(dir_figs, fname)
-        print("  Saving", fpath)
-        plt.savefig(fpath, dpi=250)
+        #fpath = os.path.join(dir_figs, fname)
+        plot_pcolormesh(args, wofs.REFL_10CM.values[0, 0], fname, 
+                        title='Reflectivity 10 cm', cb_label='dBZ', 
+                        cmap="Spectral_r", vmin=0, vmax=50, dpi=250, figsize=(10, 9))
+
+        #fig, ax = plt.subplots(1, 1, figsize=(10, 9))
+        #ZH_distr = ax.pcolormesh(wofs.REFL_10CM.values[0, 0], cmap="Spectral_r", vmin=0, vmax=50)
+        #ax.set_aspect('equal', 'box') #.axis('equal') #
+        #ax.set_title('Reflectivity 10 cm')
+        #cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
+        #cb_ZH_distr.set_label('dBZ', rotation=0)
+        #fname = os.path.basename(wofs_files) + f'__ZH_distr.png'
+        #fpath = os.path.join(dir_figs, fname)
+        #print("  Saving", fpath)
+        #plt.savefig(fpath, dpi=250)
 
 
         # predictions GRIDRAD GRID
@@ -1209,6 +1204,8 @@ if __name__ == '__main__':
         print("  Saving", fpath)
         plt.savefig(fpath, dpi=250)
 
+
+        npatches = wofs_combo.ZH_composite.values.shape[0]
         for pi in range(0, npatches, 25):
             fig, ax = plt.subplots(1, 1, figsize=(10, 9))
             ZH_distr = ax.pcolormesh(wofs_combo.ZH_composite.values[pi], cmap="Spectral_r", vmin=0, vmax=50)
