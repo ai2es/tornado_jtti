@@ -28,13 +28,15 @@ Execution Instructions:
         python lydia_scripts/wofs_raw_predictions.py --h
         python lydia_scripts/wofs_raw_predictions.py --loc_wofs 
                                                      --datetime_format 
-                                                     --datetime_init
-                                                     (--filename_prefix | --datetime_forecast)
+                                                     (--filename_prefix)
                                                      --dir_preds
+                                                     (--dir_patches)
+                                                     (--dir_figs)
                                                      --with_nans 
+                                                     (--fields)
                                                      --loc_model
                                                      --file_trainset_stats
-                                                     --write
+                                                     --write=0
                                                      --dry_run
 """
 import re, os, sys, glob, argparse
@@ -81,9 +83,10 @@ def create_argsparser(args_list=None):
     Create command line arguments parser
 
     @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not overridden
+            any received arguments. default value is None and args are not 
+            overridden. not used in production. mostly used for unit testing
 
-    @return: the argument parser
+    @return: the argument parser object
     '''
     if not args_list is None:
         sys.argv = args_list #TODO: test
@@ -91,32 +94,13 @@ def create_argsparser(args_list=None):
     parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from WoFS data', epilog='AI2ES')
 
     # WoFS file(s) path 
-    '''
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--dir_wofs', type=str, #required=True, 
-        help='Directory path to raw WoFS file(s)')
-    # subparser if file, init datetime and forecast datetime
-    group.add_argument('--file_wofs', type=str, #required=True, 
-        help='File path to the raw WoFS file')
-    '''
-
     parser.add_argument('--loc_wofs', type=str, required=True, 
         help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
 
     parser.add_argument('--datetime_format', type=str, required=True, 
-        help='Date time format string used') # in the WoFS file name
+        help='Date time format string used in the WoFS file name')
     parser.add_argument('--filename_prefix', type=str, #required=True, 
         help='Prefix used in the WoFS file name')
-    '''
-    parser.add_argument('--datetime_init', type=str, required=True, 
-        help='Date time of the initialization data used to produce the WoFS forecast data. Date time should follow the format provided in --datetime_format')
-
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--filename_prefix', type=str, #required=True, 
-        help='Prefix used in the WoFS file name')    
-    group.add_argument('--datetime_forecast', type=str, # required=True, 
-        help='Forecast date time of the WoFS file following the format provided in --datetime_format')
-    '''
 
     parser.add_argument('--dir_preds', type=str, required=True, 
         help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
@@ -125,8 +109,6 @@ def create_argsparser(args_list=None):
     parser.add_argument('--dir_figs', type=str, #required=True, 
         help='Top level directory to save any corresponding figures.')
 
-    #parser.add_argument('-p', '--patch_size', type=int, required=True, 
-    #    help='Size of patches in each horizontal dimension. Ex: patch_size=32 would make patches of shape (32, 32, 12).')
     #parser.add_argument('-p', '--patch_shape', type=tuple, default=(32, 32, 12), #required=True, 
     #    help='Shape of patches. Can be empty (), 2D (xy, h), 2D (x, y, h), or 3D (x, y, c, h) tuple. If empty tuple, patching is not performed. Last dimension must contain the number of GridRad elevation levels. If 2D, the x and y dimension are the same. Ex: (32, 12) or (32, 32, 12).')
     parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,), #required=True, 
@@ -143,8 +125,6 @@ def create_argsparser(args_list=None):
         help='Trained model directory or file path (i.e. file descriptor)')
     parser.add_argument('--file_trainset_stats', type=str, required=True,
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
-    #parser.add_argument('--dir_checkpoint', type=str, required=True,
-    #    help='directory where the trained model is stored')
 
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS prediction file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
@@ -158,7 +138,8 @@ def parse_args(args_list=None):
     Create and parse the command line args parser
 
     @param args_list: list of strings with command line arguments to override
-            any received arguments
+            any received arguments. default value is None and args are not 
+            overridden. not used in production. mostly used for unit testing
 
     @return: the parsed arguments object
     '''
@@ -177,19 +158,19 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
     ''' 
     Load the raw WoFS file as xarray dataset and netcdf dataset
 
-    @param filepaths: list of WoFS file paths
-    @param filename_prefix: (optional) prefix used for all the file names
-    @param wofs_datetime: (optional) forecast time of the WoFS file. Optional, 
-            used if forecast time not expected to be within the WoFS Dataset under
-            the data variable Times
-    @param datetime_format: date time format the date time is expected to be in
+    @param filepath: string with the WoFS file path
+    @param filename_prefix: (optional) prefix in the WoFS file naming convention
+    @param wofs_datetime: (optional) forecast time of the WoFS file. Optionally 
+            used if forecast time not expected to be within the WoFS Dataset 
+            under the data variable Times
+    @param datetime_format: datetime format expected for the datetimes
     @param seconds_since: string seconds since date statement to use for creating
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
     @param engine: Engine to use when reading file. see documentation for xarray 
             Dataset
-    @param DB: int debug flag
+    @param DB: int debug flag to print out additional debug information
     @param kwargs: any additional desired parameters to xarray.open_dataset(...)
     
     @return: tuple with xarray Dataset and netCDF4 Dataset
@@ -201,25 +182,23 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
     wofs = xr.open_dataset(filepath, engine=engine, **kwargs).load()
     wofs.close()
     wofs.attrs['filenamepath'] = filepath
-    #with xr.open_dataset(filepaths[0], engine=engine) as wofs: wofs.load()
-    #wofs = xr.load_dataset(filepaths[0], engine=engine, **kwargs)
 
     if wofs_datetime is None:
-        wofs_datetime = wofs.Times.data[0].decode('ascii') # decode from binary string to regular text string
+        wofs_datetime = wofs.Times.data[0].decode('ascii') # decode from binary string to text string
     _datetime, dt_int, dt_str = get_wofs_datetime(filepath, filename_prefix=filename_prefix, 
                                                 wofs_datetime=wofs_datetime, seconds_since=seconds_since, 
                                                 datetime_format=datetime_format, DB=DB)
     wofs = wofs.reindex(Time=[dt_int])
+    wofs.attrs['FORECAST_DATETIME'] = dt_str
     
     # Create netcdf4 Dataset to use wrf-python 
     wofs_netcdf = Dataset(filepath)
-    #wofs_netcdf.close()
     return wofs, wofs_netcdf
 
 def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4',
-                   seconds_since='seconds since 2001-01-01', **kwargs):
+                   seconds_since='seconds since 2001-01-01', DB=0, **kwargs):
     ''' TODO: maybe. stretch
-    Load multiple WoFS files
+    (not implemented) Load multiple WoFS files
     '''
     wofs = xr.open_mfdataset(filepaths, concat_dim='Times', combine='nested', 
                              parallel=True, engine=engine, **kwargs) #concat_dim='patch'
@@ -232,13 +211,14 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
         wofs = wofs.reindex(Time=[dt_int])
         wofs_netcdf = Dataset(filepath)
 
-    return wofs
+    #return wofs
+    pass
 
 def create_wofs_time(year, month, day, hour, min, sec, 
                      seconds_since='seconds since 2001-01-01', DB=0):
     ''' 
     Create corresponding datatime object and return the date in GridRad time 
-    as seconds since
+    seconds since
 
     @param year: integer year of the corresponding datetime
     @param month: integer month of the corresponding datetime
@@ -249,6 +229,7 @@ def create_wofs_time(year, month, day, hour, min, sec,
     @param seconds_since: string of the form since describing the time units. 
             can be days, hours, minutes, seconds, milliseconds or microseconds. 
             see netcdf4.date2num() documentation for more information
+    @param DB: int debug flag to print out additional debug information
 
     @return: the WoFS datetime as a np.datetime int
     '''
@@ -261,35 +242,29 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
                       datetime_format='%Y-%m-%d_%H:%M:%S', 
                       seconds_since='seconds since 2001-01-01', DB=0):
     ''' 
-    Construct a datetime object from the raw WoFS file name. Raw WoFS files are 
-    of the form: wrfwof_d01_2019-05-18_07:35:00 ('YYYY-MM-DD_hh:mm:ss'). However, this method  
-    should be generic enough for most formats, assuming the datetime is part of the filename.
+    Construct a datetime object for the raw WoFS file name. Raw WoFS file names 
+    are of the form: wrfwof_d01_2019-05-18_07:35:00 ('YYYY-MM-DD_hh:mm:ss'). 
+    However, this method should be generic enough for most formats, assuming the 
+    datetime is part of the filename.
 
-    @param fnpath: filename or filenamepath of the file. If a file path is provided,
-            the filename is extracted
-    @param filename_prefix: (optional) string prefix used for all the file names if wofs_datetime 
-            not provided
-    @param wofs_datetime: (optional) wofs_datetime if filename_prefix not provided. string 
-            indicating the datetime of the WoFS forecast
-    @param datetime_format: (optional) string indicating the expected date time 
-            format for all datetimes. default '%Y-%m-%d_%H:%M:%S'
+    @param fnpath: filename or filename path of the file. If a file path is 
+            provided, the filename is extracted
+    @param filename_prefix: (optional) string prefix used for the file name if 
+            wofs_datetime is not provided
+    @param wofs_datetime: (optional) string forecast datetime of the WoFS data 
+            if filename_prefix not provided. string indicates the datetime of 
+            the WoFS forecast
+    @param datetime_format: (optional) string indicating the expected datetime 
+            format for the datetimes. default '%Y-%m-%d_%H:%M:%S'
     @param seconds_since: string of the form since describing the time units. 
             can be days, hours, minutes, seconds, milliseconds or microseconds. 
             see netcdf4.date2num() documentation for more information
+    @param DB: int debug flag to print out additional debug information
 
-    @return: a 3-tuple with the datetime object, the datetime int since seconds_since and the 
-            formatted datetime string for the WoFS data file
+    @return: a 3-tuple with the datetime object, the datetime int 
+            since seconds_since and the formatted datetime string for the WoFS 
+            data file
     '''
-    #re.findall('\d{4}-\d{2}-%d{2}_\d{2}:\d{2}:\d{2}', wofs_files)
-    #wrfwof_d01_2019-05-18_07:35:00
-    #datetime_fmt = '2019-05-18_07:35:00'
-    #datetime_fmt = args.datetime_format
-    #date.fromisoformat('2019-12-04') #datetime.date(2019, 12, 4)
-    #date.strftime(datetime_fmt)
-    #datetime_fmt = 'YYYY-MM-DD_hh:mm:ss' #%Y-%m-%d_%H:%M:%S
-    #dateparser.parse('wrfwof_d01_2019-05-18_07:35:00', date_formats='YYYY-MM-DD_hh:mm:ss')
-    #path_components = patches_dirs.split('/')
-
     fname = os.path.basename(fnpath) 
     fname, file_extension = os.path.splitext(fname)
 
@@ -314,14 +289,17 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
 
     return datetime_obj, datetime_int, datetime_str
 
-def compute_forecast_window(init_time, forecast_time, DB=0): #hh, mm):
+def compute_forecast_window(init_time, forecast_time, DB=0):
     ''' 
-    Calculate the forecast window
+    Calculate the forecast window as the time between the WoFS initialization 
+    time and the WoFS forecast time.
 
-    @param init_time: string indicating the initialization time of the WoFS simulation.
+    @param init_time: string indicating the initialization time of the WoFS 
+            simulation.
     @param forecast_time: string indicating the forecast time of the WoFS data
+    @param DB: int debug flag to print out additional debug information
 
-    @return: the duration of the forecast window in minutes
+    @return: integer duration of the forecast window in minutes
     '''
     # Initialization time
     t0 = time.fromisoformat(init_time) 
@@ -339,11 +317,12 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     Dataset
 
     @param args: parsed command line args. see create_argsparser()
+                ZH_only: TODO flag whether to only extract reflectivity
+                fields: TODO list of fields to extract
     @param wrfin: netCDF Dataset, not xarray, is required to use wrf-python 
             functions
     @param gridrad_heights: list or numpy array of the elevations in the GridRad 
             data in km
-    @param fields: TODO list of strings indicating additional fields to extract
 
     @return: 4-tuple of numpy arrays containing the reflectivity, divergence, 
             vorticity, and updraft helicity. ( Z_agl, div, vort, uh)
@@ -395,8 +374,8 @@ def make_patches(args, radar, window):
 
     @param args: parsed command line args
             Relevant args: see create_argsparser for more details
-                patch_shape: shape of the patches
                 ZH_only: only extract ZH
+                patch_shape: shape of the patches
     @param radar: WoFS data
     @param window: duration time in minutes of the forecast window (i.e., the 
                     time between the initialization of the simulation and the 
@@ -498,13 +477,17 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
 
     @param args: command line args. see create_argsparser()
             Relevant args:
-                with_nans
+                dir_patches: directory to save patched WoFS data in the GridRad grid
+                write: flag whether to the patched data
+                with_nans: flag whether to set reflectivity values that are 0 to NaN
+                dry_run: 
     @param wofs: xarray Dataset
     @param wofs_netcdf: netcdf Dataset
     @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
             1 / (gridrad_spacing) degrees
-    @param gridrad_heights: 1D array of the elevation levels in the GridRad data. Height 
-            values we want to interpolate to
+    @param gridrad_heights: 1D array of the elevation levels in the GridRad data. 
+            Height values we want to interpolate to
+    @param DB: int debug flag to print out additional debug information
 
     @return: xarray Dataset with the interpolated and patched data
     '''
@@ -656,9 +639,11 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
 
     @param args: command line args. see create_argsparser()
             Relevant args:
-                fields: list of fields to normalize
-    @param engine: Engine to use when reading file. see xarray Dataset documentation 
-    @param DB: int debug flag
+                file_trainset_stats: file path to the mean and STD of the fields
+                fields: list of fields
+    @param engine: Engine to use when reading file. see xarray Dataset 
+            documentation 
+    @param DB: int debug flag to print out additional debug information
     @param kwargs: keyword args for xr.open_dataset()
 
     @return: the dataset with the means and stds of the features
@@ -669,8 +654,6 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
 
     train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load() #, cache=False
     train_stats.close()
-    #with xr.open_dataset(fpath, engine=engine, **kwargs) as train_stats: train_stats.load()
-    #train_stats = xr.load_dataset(fpath, engine=engine, **kwargs)
 
     return train_stats
 
@@ -681,12 +664,12 @@ def load_evaluate(args, wofs, stats, eval=False, DB=0, **fss_args):
 
     @param args: command line args. see create_argsparser()
             Relevant attributes:
-                loc_model
+                loc_model: location to the the trained model to use
     @param wofs: data to predict on
-    @param stats: data field statistics such as mean and standard deviation of the WoFS 
-            fields from the training set data
-    @param eval: whether to compute evaluation results
-    @param DB: int debug flag.
+    @param stats: data field statistics such as mean and standard deviation of 
+            the WoFS fields from the training set data
+    @param eval: TODO whether to compute evaluation results
+    @param DB: int debug flag to print out additional debug information
     @param fss_args: keyword args for make_fractions_skill_score()
             default: {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                         'cutoff': 0.5, 'want_hard_discretization': False}
@@ -728,14 +711,14 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
 
     @param args: command line args. see create_argsparser()
                 Relevent attributes:
-                    ZH_only: whether
+                    ZH_only: flag whether to only include reflectivity
                     fields: list of additional fields to write
     @param wofs: xarray Dataset with all the wofs data
     @param preds: the predictions from the reflectivity
     @param gridrad_heights: indicies of the vertical levels 
-    @params DB: debug flag: to print out debugging information
+    @param DB: int debug flag to print out additional debug information
 
-    @return: xarray dataset wit hthe combined information
+    @return: xarray dataset with the combined fields and predictions
     '''
     fields = ['ZH', 'UH', 'stitched_x', 'stitched_y', 'n_convective_pixels', 
               'n_uh_pixels', 'lat', 'lon', 'time', 'forecast_window']
@@ -773,9 +756,12 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
 def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
                  seconds_since='seconds since 2001-01-01', DB=0):
     '''
-    Interpolate the WofS data back into the original WoFS grid
+    Interpolate the WofS predictions data back into the original WoFS grid
 
     @param args: command line args. see crate_argsparser()
+            Relevant arguements:
+                dir_preds: directory to save the WoFS grid predictions
+                write: flag whether to write out the predictions
     @param wofs_orig: original WoFS data prior to interpolating to GridRad. Used 
             to obtain the original WoFS grid spacing
     @param wofs_gridrad: WoFS data in GridRad grid system, with the predictions
@@ -786,9 +772,11 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
-    @param DB: debug flag
+    @param DB: int debug flag to print out additional debug information
 
-    @return: WoFS data as xarray Dataset in the original WoFS grid system
+    @return: a tuple with stitched WoFS prediction patches (in gridrad system), 
+            and the WoFS data as an xarray Dataset in the original WoFS grid 
+            system
     '''
     # Stitch back together the patches of the predictions
     predictions =  stitch_patches(args, wofs_gridrad, stats, 
@@ -866,6 +854,8 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
     Reconstruct the stitched grid for a single WoFS forecast time
 
     @param args: command line args. see create_argsparser()
+            Relevant arguments
+                patch_shape: shape of the patches
     @param wofs: WoFS data from a single time point
     @param stats: xarray dataset with training mean and std of the reflectivity 
             and other fields
@@ -875,9 +865,9 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
-    @param DB: int debug flag
+    @param DB: int debug flag to print out additional debug information
 
-    @return: xarray Dataset of the WoFS data stitched
+    @return: xarray Dataset of the stitched WoFS patches
     """
 
     # Compute total number of grid points in latitude and longitude
@@ -965,12 +955,20 @@ def plot_pcolormesh(args, data, fname, title, cb_label, cmap="Spectral_r",
     '''
     Use matplotlib pcolormesh to plot the data
 
-    @param args:
-    @param data:
-    @param fname: name of the file, including the image extension
+    @param args: command line args. see create_argsparser()
+            Relevant arguments
+                write
+                dir_preds
+                dir_figs
+    @param data: data to plot
+    @param fname: name of the file with the image extension
     @param title: figure title
     @param cb_label: colorbar label
-    @param cmap: 
+    @param cmap: color map. See matplotlib for the colormap options
+    @param vmin: color bar min value
+    @param vmax: color bar max value
+    @param dpi: integer for the saved figure resolution as dots per inch
+    @param figsize: as tuple for the figure width and height
 
     @return: the fig and the axes objects
     '''
@@ -981,30 +979,40 @@ def plot_pcolormesh(args, data, fname, title, cb_label, cmap="Spectral_r",
     cb_ = fig.colorbar(pcmesh, ax=ax)
     cb_.set_label(cb_label, rotation=0)
 
-    dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
-    fpath = os.path.join(dir_figs, fname)
-    print("  Saving", fpath)
-    plt.savefig(fpath, dpi=dpi)
+    if args.write in [3, 4]:
+        dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
+        fpath = os.path.join(dir_figs, fname)
+        print("  Saving", fpath)
+        plt.savefig(fpath, dpi=dpi)
     plt.close()
 
     return fig, ax
 
-def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, figsize=(10, 9), DB=0, **kwargs):
+def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, 
+               figsize=(10, 9), DB=0, **kwargs):
     ''' 
     Create a .gif or movie file of the storm data
-    matplotlib documentation https://www.c-sharpcorner.com/article/create-animated-gif-using-python-matplotlib/
+    matplotlib documentation 
+    https://www.c-sharpcorner.com/article/create-animated-gif-using-python-matplotlib/
 
     @param args: command line args. see create_argsparser()
+            Relevant arguments
+                write
+                dir_preds
+                dir_figs
     @param wofs: WoFS data 
     @param suffix: file name suffix to append to the file name
     @param field0: TODO WoFS field to render in the colormap
     @param field1: TODO WoFS field to render as contours
-    @param interval: Delay between frames in milliseconds. See matplotlib FuncAnimation documentation for more information
+    @param interval: Delay between frames in milliseconds. See matplotlib 
+            FuncAnimation documentation for more information
     @param figsize: tuple with the width and height of the figure
-    @param DB: debug flag
+    @param DB: int debug flag to print out additional debug information
     @param kwargs: additional keyword args for the animator
-            repeat: bool, default: True. Whether the animation repeats when the sequence of frames is completed.
-            repeat_delay: int, default: 0. The delay in milliseconds between consecutive animation runs, if repeat is True.
+            repeat: bool, default: True. Whether the animation repeats when the 
+                    sequence of frames is completed.
+            repeat_delay: int, default: 0. The delay in milliseconds between 
+                    consecutive animation runs, if repeat is True.
     '''
     from matplotlib.animation import FuncAnimation, PillowWriter
     #import imageio
@@ -1013,6 +1021,7 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, figsiz
 
     def draw_storm_frame(pi):
         '''
+        Draw a patch as a single frame
         @param pi: patch index (aka draw frame index)
         '''
         ax.clear()
