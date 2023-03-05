@@ -663,7 +663,7 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
 
 def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
     '''
-    Load the mode and perform the predictions.
+    Load the model and perform the predictions.
     TODO: predict on arbitrary set of fields
 
     @param args: command line args. see create_argsparser()
