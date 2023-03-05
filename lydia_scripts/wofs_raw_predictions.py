@@ -84,12 +84,14 @@ def create_argsparser(args_list=None):
 
     @param args_list: list of strings with command line arguments to override
             any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing
+            overridden. not used in production. mostly used for unit testing.
+            Element at index 0 should either be the empty string or the name of
+            the python script
 
     @return: the argument parser object
     '''
     if not args_list is None:
-        sys.argv = args_list #TODO: test
+        sys.argv = args_list
         
     parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from WoFS data', epilog='AI2ES')
 
@@ -97,16 +99,16 @@ def create_argsparser(args_list=None):
     parser.add_argument('--loc_wofs', type=str, required=True, 
         help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
 
-    parser.add_argument('--datetime_format', type=str, required=True, 
-        help='Date time format string used in the WoFS file name')
-    parser.add_argument('--filename_prefix', type=str, #required=True, 
+    parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
+        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
+    parser.add_argument('--filename_prefix', type=str, 
         help='Prefix used in the WoFS file name')
 
     parser.add_argument('--dir_preds', type=str, required=True, 
         help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
-    parser.add_argument('--dir_patches', type=str, #required=True, 
+    parser.add_argument('--dir_patches', type=str,  
         help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
-    parser.add_argument('--dir_figs', type=str, #required=True, 
+    parser.add_argument('--dir_figs', type=str,  
         help='Top level directory to save any corresponding figures.')
 
     #parser.add_argument('-p', '--patch_shape', type=tuple, default=(32, 32, 12), #required=True, 
@@ -114,7 +116,7 @@ def create_argsparser(args_list=None):
     parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,), #required=True, 
         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
-        help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats.')
+        help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
     parser.add_argument('-Z', '--ZH_only', action='store_true',
         help='Use flag to only extract the reflectivity and updraft data, excluding divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
     parser.add_argument('-f', '--fields', type=list,
@@ -127,7 +129,7 @@ def create_argsparser(args_list=None):
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
 
     parser.add_argument('-w', '--write', type=int, default=0,
-        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS prediction file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
+        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
     parser.add_argument('-d', '--dry_run', action='store_true',
         help='For testing and debugging. Execute without running models or saving data and display output paths')
 
@@ -139,7 +141,9 @@ def parse_args(args_list=None):
 
     @param args_list: list of strings with command line arguments to override
             any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing
+            overridden. not used in production. mostly used for unit testing.
+            Element at index 0 should either be the empty string or the name of
+            the python script
 
     @return: the parsed arguments object
     '''
@@ -610,7 +614,7 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
     datetime_forecast = datetime.fromisoformat(datetime_forecast_str)
     datetime_init = datetime.fromisoformat(wofs.START_DATE) #datetime.fromisoformat(args.datetime_init) #.strftime(datetime_fmt) #datetime.strptime(args.datetime_init, datetime_fmt)
     forecast_window = (datetime_forecast - datetime_init).seconds / 60
-    if DB: print(f"Forecast window: {forecast_window} min")
+    if DB: print(f"Forecast window: {forecast_window} min\n")
 
     # Make patches
     ds_patches = make_patches(args, wofs_regridded, forecast_window)
@@ -657,9 +661,9 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
 
     return train_stats
 
-def load_evaluate(args, wofs, stats, eval=False, DB=0, **fss_args):
+def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
     '''
-    Load and evaluate the model.
+    Load the mode and perform the predictions.
     TODO: predict on arbitrary set of fields
 
     @param args: command line args. see create_argsparser()
@@ -668,7 +672,8 @@ def load_evaluate(args, wofs, stats, eval=False, DB=0, **fss_args):
     @param wofs: data to predict on
     @param stats: data field statistics such as mean and standard deviation of 
             the WoFS fields from the training set data
-    @param eval: TODO whether to compute evaluation results
+    @param eval: TODO whether to compute evaluation results. only available if
+            the true labels are also available
     @param DB: int debug flag to print out additional debug information
     @param fss_args: keyword args for make_fractions_skill_score()
             default: {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
@@ -838,7 +843,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     #on_wofsgrid.append(wofs_like)
 
     # Save out the interpolated file
-    if args.write in [1, 4]:
+    if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
         savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
@@ -1067,17 +1072,17 @@ if __name__ == '__main__':
     wofs_files = []
     if os.path.isfile(args.loc_wofs):
         wofs_files = args.loc_wofs
-    elif os.path.isdir(args.loc_wofs):
-        wofs_files = os.listdir(args.loc_wofs)
+    #TODO elif os.path.isdir(args.loc_wofs):
+    #    wofs_files = os.listdir(args.loc_wofs)
     else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory was {args.loc_wofs}")
+        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file, but was {args.loc_wofs}")
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
 
-    # TODO verify set from args
-    datetime_fmt = '%Y-%m-%d_%H:%M:%S' #args.datetime_format
-    print(datetime_fmt)
+    #datetime_fmt = '%Y-%m-%d_%H:%M:%S' #YYYY-MM-DD_hh-mm-ss
+    datetime_fmt = args.datetime_format
+    print("Datetime format:", datetime_fmt)
 
     SECS_SINCE = 'seconds since 2001-01-01'
     ds_load_args = {'cache': False}
@@ -1099,7 +1104,7 @@ if __name__ == '__main__':
     train_stats = load_trainset_stats(args, DB=DB)
 
     # Compute predictions
-    preds = load_evaluate(args, wofs_gridrad, train_stats, DB=DB) #, **fss_args)
+    preds = predict(args, wofs_gridrad, train_stats, DB=DB) #, **fss_args)
 
     # TODO: optional display/output performance
 
@@ -1214,4 +1219,4 @@ if __name__ == '__main__':
     #wofs_netcdf.close()
     #ds_stitched.close()
     #ds_wofs_as_gridrad.close()
-    print('PREDICTIONS COMPLETE.')
+    print(f"PREDICTIONS COMPLETE FOR {wofs_files}.")
