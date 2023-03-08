@@ -222,9 +222,9 @@ def make_wofs_predictions(all_patches, outfile_path):
         print("metadata_outfile_name", metadata_outfile_name)
         print("predictions_outfile_name", predictions_outfile_name)
     
-    #open all the data in one DataArray
-    print("Openning all the patches", all_patches)
-    wofs = xr.open_mfdataset(all_patches, concat_dim='patch',combine='nested', parallel=True, engine='netcdf4')
+    #open all the data in one Dataset
+    print("Opening all the patches", all_patches)
+    wofs = xr.open_mfdataset(all_patches, concat_dim='patch', combine='nested', parallel=True, engine='netcdf4')
     
     # Read in the mean and std for each variable field from the training set to normalize the data
     print("Opening training meta data", training_data_metadata_path)
@@ -237,7 +237,7 @@ def make_wofs_predictions(all_patches, outfile_path):
     del training_metadata
 
     # Pull out each wofs field & normalize based on training mean/std
-    zh = (wofs.ZH - mean_train_ZH)/std_train_ZH
+    zh = (wofs.ZH - mean_train_ZH) / std_train_ZH
 
     # Combine the wofs data into one training input array
     input_array = zh
@@ -271,10 +271,9 @@ def make_wofs_predictions(all_patches, outfile_path):
                     custom_objects={'fractions_skill_score': fss, 
                                     'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
 
-    #evaluate the unet on the testing data
     print("Evaluate Model. data size =", input_array.shape)
     print("predictions_outfile_name", predictions_outfile_name)
-
+    #evaluate the unet on the testing data
     print("Performing model predictions")
     y_hat = model.predict(input_array)
 
@@ -316,8 +315,8 @@ def stitch_patches(one_time, datetime_time):
     lon_min = one_time.lon.min().values
 
     # Because the grid is regular in lat/lon, reconstruct the lat/lon grid for the stitched data
-    lats = np.linspace(lat_min, lat_min+(total_in_lat-1)/48, total_in_lat)
-    lons = np.linspace(lon_min, lon_min+(total_in_lon-1)/48, total_in_lon)
+    lats = np.linspace(lat_min, lat_min+(total_in_lat-1) / 48, total_in_lat)
+    lons = np.linspace(lon_min, lon_min+(total_in_lon-1) / 48, total_in_lon)
 
     # Define empty arrays that will hold the stitched data
     tor_predictions_array = np.zeros((total_in_lat, total_in_lon))
@@ -343,9 +342,9 @@ def stitch_patches(one_time, datetime_time):
 
     
     # Take the average value at each patch by dividing by the total number of patches that contained each pixel
-    tor_predictions_array = tor_predictions_array/overlap_array
-    uh_array = uh_array/overlap_array
-    zh_low_level = zh_low_level/overlap_array
+    tor_predictions_array = tor_predictions_array / overlap_array
+    uh_array = uh_array / overlap_array
+    zh_low_level = zh_low_level / overlap_array
 
     # Put the stitched grid into a dataset and return 
     predictions = xr.Dataset(data_vars=dict(UH = (["time", "lat", "lon"], uh_array.reshape(1,total_in_lat, total_in_lon)),
@@ -396,7 +395,7 @@ def run_predictions_and_interpolation(patches_dirs):
         # Format the time string correctly
         datetime_time = np.datetime64(netCDF4.num2date(time,'seconds since 2001-01-01'))
         # Isolate all the data from this one time
-        one_time = ds_wofs_as_gridrad.where(ds_wofs_as_gridrad.time == time, drop = True)
+        one_time = ds_wofs_as_gridrad.where(ds_wofs_as_gridrad.time == time, drop=True)
 
         # Stitch the patches back together
         predictions = stitch_patches(one_time, datetime_time)
@@ -406,11 +405,10 @@ def run_predictions_and_interpolation(patches_dirs):
 
         # Pull out time, model run, and ensemble member information from the filepath
         path_components = patches_dirs.split('/')
-        blen = len(path_to_patches)
-        yyyy = path_components[-4]  #patches_dirs[blen+5:blen+9]
-        yyyymmdd = path_components[-3]  #patches_dirs[blen+5:blen+13]
-        model_initialization = path_components[-2]  #patches_dirs[blen+14:blen+18]
-        ens_mem = path_components[-1][8:]  #[-2:]  #patches_dirs[-2:]
+        yyyy = path_components[-4]  
+        yyyymmdd = path_components[-3]  
+        model_initialization = path_components[-2] 
+        ens_mem = path_components[-1][8:] 
         
         mm = str(datetime_time)[5:7]
         dd = str(datetime_time)[8:10]
