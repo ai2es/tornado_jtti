@@ -65,27 +65,27 @@ def find_and_create_output_path(filepath):
 
     return output_filepath, time, forecast_window
 
-def calculate_output_lats_lons(wofs):
+def calculate_output_lats_lons(wofs, gridrad_spacing=48):
 
     # Find the range of the wofs grid in lat lon
     # This should be a rectangle in lat/lon coordinates, so we search for the extreme values of 
     # latitude on the most constrained longitude, and the extreme values of longitude on the most
     # constrained latitude
-    min_lat_wofs = wofs.XLAT[0,:,int(wofs.XLAT.shape[2]/2)].values.min()
+    min_lat_wofs = wofs.XLAT[0,:,wofs.XLAT.shape[2]//2].values.min()
     max_lat_wofs = wofs.XLAT[0,:,0].values.max()
     min_lon_wofs = wofs.XLONG[0,0].values.min()
     max_lon_wofs = wofs.XLONG[0,0].values.max()
     
     # Create a grid with gridrad spacing that is contained within the given wofs grid
     # Gridrad files have grid spacings of 1/48th degrees lat/lon
-    new_min_lat = int(min_lat_wofs * 48 + 1)/48
-    new_max_lat = int(max_lat_wofs * 48 - 1)/48
-    new_min_lon = int(min_lon_wofs * 48 + 1)/48
-    new_max_lon = int(max_lon_wofs * 48 - 1)/48
+    new_min_lat = int(min_lat_wofs * gridrad_spacing + 1) / gridrad_spacing
+    new_max_lat = int(max_lat_wofs * gridrad_spacing - 1) / gridrad_spacing
+    new_min_lon = int(min_lon_wofs * gridrad_spacing + 1) / gridrad_spacing
+    new_max_lon = int(max_lon_wofs * gridrad_spacing - 1) / gridrad_spacing
 
     # Find the total number of lats and lons for this wofs grid
-    num_lats = round((new_max_lat - new_min_lat)*48 + 1)
-    num_lons = round((new_max_lon - new_min_lon)*48 + 1)
+    num_lats = round((new_max_lat - new_min_lat) * gridrad_spacing + 1)
+    num_lons = round((new_max_lon - new_min_lon) * gridrad_spacing + 1)
 
     # Make the new lats and lons grid. This new grid is just contained by the original wofs grid
     new_gridrad_lats = np.linspace(new_min_lat, new_max_lat, num_lats)
@@ -93,13 +93,15 @@ def calculate_output_lats_lons(wofs):
     
     # Combine the individual lat and lon array into one array with both lat and lon:
     # Make 2D arrays of for both lats and lons
-    gridrad_lats = np.zeros((new_gridrad_lats.shape[0], new_gridrad_lons.shape[0]))
-    gridrad_lons = np.zeros((new_gridrad_lats.shape[0], new_gridrad_lons.shape[0]))
+    gridrad_lats_length = new_gridrad_lats.shape[0]
+    gridrad_lons_length = new_gridrad_lons.shape[0]
+    gridrad_lats = np.zeros((gridrad_lats_length, gridrad_lons_length))
+    gridrad_lons = np.zeros((gridrad_lats_length, gridrad_lons_length))
 
     # Put the 1D lats lons into 2D grids
-    for i in range(new_gridrad_lons.shape[0]):
+    for i in range(gridrad_lons_length):
         gridrad_lons[:,i] = new_gridrad_lons[i]
-    for j in range(new_gridrad_lats.shape[0]):
+    for j in range(gridrad_lats_length):
         gridrad_lats[j] = new_gridrad_lats[j]
 
     # Combine the Lats and Lons into an array of tuples, where each tuple is a point to interpolate the data to
