@@ -24,8 +24,9 @@ Execution Instructions:
         are in the tornado_jtti project directory. Working directory is expected 
         to be tornado_jtti/ to use these custom modules
     Information about the required command line arguments are described in the 
-    method get_arguments(). Run
+    method get_arguments(). For details on the command line arguments run
         python lydia_scripts/wofs_raw_predictions.py --h
+    Example use can be found in lydia_scripts/wofs_raw_predictions.sh:
         python lydia_scripts/wofs_raw_predictions.py --loc_wofs 
                                                      --datetime_format 
                                                      (--filename_prefix)
@@ -131,7 +132,7 @@ def create_argsparser(args_list=None):
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
     parser.add_argument('-d', '--dry_run', action='store_true',
-        help='For testing and debugging. Execute without running models or saving data and display output paths')
+        help='For testing and debugging. Execute without displaying output paths')
 
     return parser
 
