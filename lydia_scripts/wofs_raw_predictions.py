@@ -2,16 +2,16 @@
 author: Monique Shotande 
 Functions based on those provided by Lydia
 
-End to end script takes as input the raw WoFS (warn on Forecast System) data,
+End to end script takes as input the raw WoFS (Warn on Forecast System) data,
 and outputs the predictions in the WoFS grid.
 
 General Procedure:
 1. read raw WoFS file(s)
 2. interpolate WoFS grid to GridRad grid
-3. construct patches (optional)
+3. construct patches (dependent on patch size)
 4. load ML model
 5. make predictions
-6. interpolate back to WoFS grid
+6. interpolate predictions to WoFS grid
 
 Execution Instructions:
     Conda environment requires are in the environment.yml
@@ -1068,7 +1068,6 @@ if __name__ == '__main__':
 
     args = parse_args()
     DB = args.dry_run
-    #xr.set_options(file_cache_maxsize=3, warn_for_unclosed_files=DB)
 
     wofs_files = []
     if os.path.isfile(args.loc_wofs):
