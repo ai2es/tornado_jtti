@@ -8,7 +8,7 @@ and outputs the predictions in the WoFS grid.
 General Procedure:
 1. read raw WoFS file(s)
 2. interpolate WoFS grid to GridRad grid
-3. construct patches (optional)
+3. construct patches (dependent on patch size)
 4. load ML model
 5. make predictions
 6. interpolate back to WoFS grid
@@ -24,8 +24,9 @@ Execution Instructions:
         are in the tornado_jtti project directory. Working directory is expected 
         to be tornado_jtti/ to use these custom modules
     Information about the required command line arguments are described in the 
-    method get_arguments(). Run
+    method get_arguments(). For details on the command line arguments run
         python lydia_scripts/wofs_raw_predictions.py --h
+    Example use can be found in lydia_scripts/wofs_raw_predictions.sh:
         python lydia_scripts/wofs_raw_predictions.py --loc_wofs 
                                                      --datetime_format 
                                                      (--filename_prefix)
@@ -93,7 +94,7 @@ def create_argsparser(args_list=None):
     if not args_list is None:
         sys.argv = args_list
         
-    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from WoFS data', epilog='AI2ES')
+    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
 
     # WoFS file(s) path 
     parser.add_argument('--loc_wofs', type=str, required=True, 
@@ -1067,7 +1068,6 @@ if __name__ == '__main__':
 
     args = parse_args()
     DB = args.dry_run
-    #xr.set_options(file_cache_maxsize=3, warn_for_unclosed_files=DB)
 
     wofs_files = []
     if os.path.isfile(args.loc_wofs):
