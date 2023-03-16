@@ -5,6 +5,8 @@ UNet Hyperparameter Search using keras tuners.
 A keras_tuner.HyperModel subclass is defined as UNetHyperModel
 that defines how to build various versions of the UNet models
 
+Expected working directory is tornado_jtti/
+
 GridRad /ourdisk/hpc/ai2es/tornado/gridrad_gridded/ ??
 /ourdisk/hpc/ai2es/tornado/storm_mask_unet/ ??
 """
@@ -17,6 +19,8 @@ import time, datetime
 import argparse
 import numpy as np
 print("np version", np.__version__)
+import pandas as pd
+print("pd version", pd.__version__)
 import xarray as xr 
 print("xr version", xr.__version__)
 #import scipy
@@ -52,18 +56,16 @@ from tensorboard.plugins.hparams import api
 from tensorboard.plugins.hparams import api_pb2
 from tensorboard.plugins.hparams import summary as hp_summary
 
-#GRAB GPU0
 import py3nvml
-py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
-#sys.path.append("/home/lydiaks2/tornado_project/")
-#sys.path.append("/home/momoshog/Tornado/tornado_jtti/")
-sys.path.append("../")
+#sys.path.append("../")
+sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-#sys.path.append("/home/momoshog/Tornado/keras-unet-collection")
-sys.path.append("../../../keras-unet-collection")
+#sys.path.append("../../../keras-unet-collection")
+sys.path.append("../keras-unet-collection")
 from keras_unet_collection import models
+print(' ')
 
 
 
@@ -75,16 +77,20 @@ class UNetHyperModel(HyperModel):
                 that can either be 1 or 2.
     @param name: prefix of the layers and model. Use keras.models.Model.summary to 
                 identify the exact name of each layer. Empty by default
-    @param tune_optimizer: Whether to tune the optimizer. False by default and uses
-                Adam
+    @param tune_optimizer: Whether to tune the choice for the learning 
+                optimizer. False by default and uses Adam
     """
     def __init__(self, input_shape, n_labels=None, name='', tune_optimizer=False):
+        '''
+        Class constructor
+        '''
         #TODO expection handling
         self.input_shape = input_shape
         #TODO expection handling
         self.n_labels = n_labels if not n_labels is None or n_labels > 0 else 1
         self.name = name
         self.tune_optimizer = tune_optimizer
+        super().__init__(name=name) #, tunable=True)
 
     def save_model(self, filepath, weights=True, model=None, save_traces=True):
         '''
@@ -95,7 +101,7 @@ class UNetHyperModel(HyperModel):
         @params model: if None, save this model, otherwise save the provided model
         @params save_traces: 
 
-        @return: True is the save occured, False otherwise
+        @return: True if the save occured, False otherwise
         '''
         if model is None:
             print(f"Saving this model to {filepath} (save_weights={weights})")
@@ -118,6 +124,7 @@ class UNetHyperModel(HyperModel):
 
         @return: compiled Keras model.
         """
+        print("BUILDING UNET HYPERMODEL")
         # Set our random seed
         rng = None if seed is None else random.Random(seed)
 
@@ -249,16 +256,37 @@ class UNetHyperModel(HyperModel):
 
         # Build and return the model
         model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+        model.summary()
         return model
 
-def create_tuner(args):
+def create_tuner(args, DB=1):
     '''
-    Create the Keras Tuner. Tuners RandomSearch, Hyperband, BayeOpt, custom and none.
-    @param args: the command line args object
-    
-    @return: the configured tuner object and the hyper model
+    Create the Keras Tuner. Tuner can be instance of RandomSearch, Hyperband, 
+    BayeOpt, custom or Tuner (the base Tuner class) when no tuner is selected.
+    @param args: the command line args object. See create_argsparser() for
+            details about the command line arguments
+            Command line arguments relevant to this method:
+                x_shape
+                n_labels
+                objective
+                max_trials
+                max_retries_per_trial
+                max_consecutive_failed_trials
+                executions_per_trial
+                overwrite
+                out_dir
+                project_name_prefix
+                tuner
+                max_epochs
+                factor
+                hyperband_iterations
+                num_initial_points
+                alpha,
+                beta
+    @param DB: debug flag to print the resulting hyperparam search space
+
+    @return: tuple containing the configured tuner object and the hypermodel
     '''
-    #args.x_shape = (32, 32, 12)
     hypermodel = UNetHyperModel(input_shape=args.x_shape, n_labels=args.n_labels)
     #weights = dummy_loader(model_old_path)
     #model_new = swin_transformer_model(...)
@@ -285,23 +313,23 @@ def create_tuner(args):
 
     # Select tuner
     tuner = None
-    if args.tuner == 'random':
+    if args.tuner in ['rand', 'random']:
         tuner = RandomSearch(
             hypermodel,
             max_trials=MAX_TRIALS,
             project_name=PROJ_NAME, #TODO prefix for files saved by this Tuner.
             **tuner_args
         )
-    elif args.tuner == 'hyperband':
+    elif args.tuner in ['hyper', 'hyperband']:
         tuner = Hyperband(
             hypermodel,
-            max_epochs=args.max_epoches, #10, #max train epochs per model. recommended slightly higher than expected epochs to convergence 
+            max_epochs=args.max_epochs, #10, #max train epochs per model. recommended slightly higher than expected epochs to convergence 
             factor=args.factor, #3, #int reduction factor for epochs and number of models per bracket
             hyperband_iterations=args.hyperband_iterations, #2, #>=1,  number of times to iterate over full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. set as high a value as is within your resource budget
             project_name=PROJ_NAME,
             **tuner_args
         )
-    elif args.tuner == 'bayesian':
+    elif args.tuner in ['bayes', 'bayesian']:
         tuner = BayesianOptimization(
             hypermodel,
             max_trials=MAX_TRIALS, # # of hyperparameter combinations tested by tuner
@@ -322,22 +350,39 @@ def create_tuner(args):
             #loss=None,
             #distribution_strategy=None,
             project_name=PROJ_NAME,
+            #overwrite=args.overwrite,
+            directory=args.out_dir
             #**tuner_args
         )
 
-    tuner.search_space_summary()
+    if DB:
+        print(' ')
+        tuner.search_space_summary()
+        print(' ')
 
     return tuner, hypermodel
 
-def execute_search(args, tuner, X_train, X_val=None, callbacks=None, **kwargs):
+def execute_search(args, tuner, X_train, X_val=None, 
+                   callbacks=None, DB=0, **kwargs):
     ''' TODO
     Execute the hyperparameter search. Calls tuner.search()
-    @param args:
-    @param tuner:
-    @param X_train:
-    @param X_val: optional tuple
+    @param args: the command line args object. See create_argsparser() for
+            details about the command line arguments
+            Command line arguments relevant to this method:
+                batch_size 
+                epochs 
+                project_name_prefix 
+                tuner objective 
+                patience 
+                min_delta 
+                out_dir 
+    @param tuner: Keras Tuner
+    @param X_train: Tensorflow Dataset
+    @param X_val: optional Tensorflow Dataset
     @params callbacks: overwrite the default callbacks. Default callbacks are 
             EarlyStopping and Tensorboard. (TODO: ModelCheckpoint)
+    @param DB: debug flag to print the resulting hyperparam search space
+    @param kwargs: additional keyword arguments
     '''
     BATCH_SIZE = args.batch_size 
     NEPOCHS = args.epochs 
@@ -346,52 +391,64 @@ def execute_search(args, tuner, X_train, X_val=None, callbacks=None, **kwargs):
 
     if callbacks is None:
         # TODO: separate arg for objective and monitor?
-        es = EarlyStopping(monitor=args.objective, start_from_epoch=10, 
+        es = EarlyStopping(monitor=args.objective, #start_from_epoch=10, 
                             patience=args.patience, min_delta=args.min_delta, 
                             restore_best_weights=True) #"val_loss"
-        tb = TensorBoard(f"{args.out_dir}/tuners/{PROJ_NAME}") # TODO tensorboard --logdir=bayes_opt
-        #cp = ModelCheckpoint(filepath=f"{args.out_dir}/tuners/{PROJ_NAME}/checkpoints', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
+        tb_path = os.path.join(args.out_dir, PROJ_NAME, 'tb')
+        tb = TensorBoard(tb_path)
+        #tb = TensorBoard(f"{args.out_dir}/{PROJ_NAME}/tb") # TODO tensorboard --logdir=bayes_opt
+        #cp = ModelCheckpoint(filepath=f"{args.out_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
+        #manager = tf.train.CheckpointManager(ckpt, './tf_ckpts', max_to_keep=3)
         callbacks = [es, tb]
 
     # Perform the hyperparameter search
-    # TODO: data set split
+    #https://www.tensorflow.org/tutorials/structured_data/imbalanced_data
+    # TODO: dataset split
     print("[INFO] performing hyperparameter search...")
-    tuner.search(X_train, X_train,
+    tuner.search(X_train, #X_train,
                 validation_data=X_val, #(X_val, X_val), 
                 validation_batch_size=None, #validation_split=.1
                 batch_size=BATCH_SIZE, epochs=NEPOCHS, 
-                shuffle=True, callbacks=callbacks, verbose="auto",
-                max_queue_size=10, workers=1, use_multiprocessing=False) 
+                shuffle=False, callbacks=callbacks,
+                steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, 
+                workers=1, use_multiprocessing=False) 
 
 # TODO
 def load_data(args):
     pass
 
 # TODO
-def prep_data(args, n_labels=None):
+def prep_data(args, n_labels=None, DB=1):
     """ 
-    Load data 
+    Load and prepare the data.
+    @param args: the command line args object. See create_argsparser() for
+            details about the command line arguments
+            Command line arguments relevant to this method:
+
+    @param n_labels: number of class labels. If None, tune as a hyperparameter in 
+                that can either be 1 or 2.
+
+    @return: tuple with the training and validation sets as Tensorflow Datasets
     """ 
-    # Define the dataset size
-    #patch_size = args.patch_size #TODO if not args.patch_size is None else 
+    # Dataset size
     #height = args.elevation
     x_shape = (None, *args.x_shape) #(None, 32, 32, 12)
     x_shape_val = args.x_shape #(32, 32, 12)
+    
+    y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
+    y_shape_val = args.y_shape
 
     #if loss == 'binary_focal_crossentropy':
-    if n_labels == 1: 
-        #This loss function needs integer labels
-        
-        y_shape = args.y_shape #(None, 32, 32, 1)
-        elem_spec = (tf.TensorSpec(shape=x_shape, dtype=tf.float64), 
+    if n_labels == 1:        
+        #y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64), 
                      tf.TensorSpec(shape=y_shape, dtype=tf.int64))
 
-        y_shape_val = args.y_shape[1:] #(32, 32, 1)
-        elem_spec_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64), 
+        #y_shape_val = args.y_shape #(32, 32, 1)
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64), 
                          tf.TensorSpec(shape=y_shape_val, dtype=tf.int64))
 
         # Pick out the correct dataset paths
-        #hparams[HP_DATA_PATCHES_TYPE]
         if args.dataset == 'tor':
             path = "int_tor"
         elif args.dataset == 'nontor_tor':
@@ -399,21 +456,21 @@ def prep_data(args, n_labels=None):
         else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
     else:
         # Define the dataset size
-        y_shape = (None, 32, 32, 2)
-        elem_spec = (tf.TensorSpec(shape=x_shape, dtype=tf.float64), 
+        #y_shape = (None, 32, 32, 2)
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64), 
                      tf.TensorSpec(shape=y_shape, dtype=tf.float32))
 
-        y_shape_val = y_shape[1:] #(32, 32, 2)
-        elem_spec_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64), 
+        #y_shape_val = y_shape[1:] #(32, 32, 2)
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64), 
                          tf.TensorSpec(shape=y_shape_val, dtype=tf.float32))
 
-        # Pick out the correct dataset paths
-        #hparams[HP_DATA_PATCHES_TYPE]
-        if args.dataset == 'tor':
-            path = "onehot_tor"
-        elif args.dataset == 'nontor_tor':
-            path = "onehot_nontor_tor"
-        else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
+    # Pick out the correct dataset paths
+    #hparams[HP_DATA_PATCHES_TYPE]
+    if args.dataset == 'tor':
+        path = "onehot_tor"
+    elif args.dataset == 'nontor_tor':
+        path = "onehot_nontor_tor"
+    else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
         
     # Read tensorflow datasets
     '''ds_train = tf.data.experimental.load("/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf', elem_spec)
@@ -421,12 +478,29 @@ def prep_data(args, n_labels=None):
     ds_train = tf.data.experimental.load(args.in_dir, elem_spec)
     ds_val = tf.data.experimental.load(args.in_dir_val, elem_spec_val)
     '''
-    ds_train = tf.data.Dataset.load(args.in_dir, elem_spec)
-    ds_val = tf.data.Dataset.load(args.in_dir_val, elem_spec_val)
+    def drop_dim(x, y):
+        '''
+        Remove None dimension
+        '''
+        return x[1:], y[1:]
+    ds_train = tf.data.Dataset.load(args.in_dir, specs)
+    #ds_train = ds_train.shuffle(x_shape[0], seed=24)
+    #ds_train = ds_train.batch(args.batch_size)
+    #ds_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+    #ds_train = ds_train.shuffle(x_train.shape[0], seed=24).batch(args.batch_size)
+    #ds_train.save(path)
+    #xy_train = np.array(list(ds_train.as_numpy_iterator()))
+    #ds_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+    #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val)
+    ds_val = ds_val.batch(args.batch_size)
+    if DB:
+        print("Training Dataset Specs:", specs)
+        print("Validation Dataset Specs:", specs_val)
 
     return (ds_train, ds_val)
 
-def create_parser():
+def create_argsparser():
     '''
     Create a command line args parser for the XOR experiment
     @return: the configured arguments parser
@@ -441,57 +515,58 @@ def create_parser():
     parser.add_argument('--out_dir', type=str, required=True,
                          help='Output directory for results, models, hyperparameters, etc.')
     
+
+    # Tuner hyperparameter search arguments
+    parser.add_argument('--objective', type=str, default='val_loss', #required=True,
+                         help='Objective or loss functionor value to optimize, such as val_loss. See keras tuner for more information')
+    parser.add_argument('--project_name_prefix', type=str, default='tornado_unet', #required=True,
+                         help='Prefix to the project name for the tuner. Used as the prefix for the name of the sub-directory where the search results are stored. See keras tuner attribute project_name for more information')
+    parser.add_argument('--max_trials', type=int, default=5, #required=True,
+                         help='Number of trials (i.e. hyperparameter configurations) to try. See keras tuner for more information')
+    parser.add_argument('--overwrite', action='store_true', #required=True,
+                         help='Include to overwrite the tuner project directory. Otherwise, reload existing project of the same name if found. See keras tuner for more information')
+    parser.add_argument('--max_retries_per_trial', type=int, default=0, #required=True,
+                         help='Maximum number of times to retry a Trial if the trial crashed or the results are invalid. See keras tuner for more information')
+    parser.add_argument('--max_consecutive_failed_trials', type=int, default=1, #required=True,
+                         help='Maximum number of consecutive failed Trials. When this number is reached, the search will be stopped. A Trial is marked as failed when none of the retries succeeded. See keras tuner for more information')
+    parser.add_argument('--executions_per_trial', type=int, default=1, #required=True,
+                         help='Number of executions (training a model from scratch, starting from a new initialization) to run per trial (model configuration). See keras tuner for more information')
     #parser.add_argument('-t', '--tuner', default='none', choices=['none', 'random', 'hyperband', 'bayesian', 'custom'],
-     #                    help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
-    subparsers = parser.add_subparsers('tuners', help='tuner selection')
-    prsr_none = subparsers.add_parser('none', help='Hyperparameter search is not performed')
-    prsr_rand = subparsers.add_parser('random', aliases=['rand'], help='Use random search')
-    prsr_bayes = subparsers.add_parser('bayesian', aliases=['bayes'], help='Use bayesian optimization')
-    prsr_bayes.add_argument('--num_initial_points', type=int, default=2,
+    #                    help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
+    tunersparsers = parser.add_subparsers(title='tuners', dest='tuner', help='tuner selection')
+    #prsr_none = tunersparsers.add_parser('no_tuner', help='Hyperparameter search is not performed')
+    prsr_rand = tunersparsers.add_parser('random', aliases=['rand'], 
+                    help='Use random search')
+    # BAYESOPT
+    prsr_bayes = tunersparsers.add_parser('bayesian', aliases=['bayes'], help='Use bayesian optimization for tuning')
+    prsr_bayes.add_argument('--num_initial_points', type=int, default=5, #required=True,
                          help='Number of points to initialize')
     prsr_bayes.add_argument('--alpha', type=float, default=0.0001, 
                          help='Value added to the diagonal of the kernel matrix during fitting. Represents expected amount of noise in the observed performances')
     prsr_bayes.add_argument('--beta', type=float, default=2.6, 
                          help='Balance exploration v exploitation. Larger is more explorative')
-    prsr_hyper = subparsers.add_parser('hyperband', aliases=['hyper'], help='Use hyperband')
+    # HYPERBAND
+    prsr_hyper = tunersparsers.add_parser('hyperband', aliases=['hyper'], help='Use hyperband seach for tuning')
     prsr_hyper.add_argument('--max_epochs', type=int, default=10,
                          help='max number of epochs to train one model. recommended to set slightly higher than the expected epochs to convergence ')
     prsr_hyper.add_argument('--factor', type=int, default=3, 
                          help='Reduction factor for the number of epochs and number of models for each bracket')
     prsr_hyper.add_argument('--hyperband_iterations', type=int, default=2, 
                          help='At least 1. Number of times to iterate over the full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. It is recommended to set this to as high a value as is within your resource budget. ')
-    prsr_custom = subparsers.add_parser('random', help='Use random search')
-    prsr_custom.add_argument('--args', type=dict, default=3, 
+    # TODO
+    prsr_custom = tunersparsers.add_parser('custom', help='Use custom tuner class')
+    prsr_custom.add_argument('--args', type=dict, 
                          help='')
-    # Tuner hyperparameter search arguments
-    parser.add_argument('--objective', type=str, default='val_loss', #required=True,
-                         help='Objective to optimize. See keras tuner for more information')
-    parser.add_argument('--project_name_prefix', type=str, default='tornado_unet', #required=True,
-                         help='Prefix to the project name for the tuner. Used as the prefix for the name of the sub-directory where the search results are stored. See keras tuner attribute project_name for more information')
-    parser.add_argument('--max_trials', type=int, default=5, #required=True,
-                         help='Number of trials (i.e. hyperparameter configurations) to try. See keras tuner for more information')
-    parser.add_argument('--overwrite', action='store_true', #required=True,
-                         help='Include to overwrite the project. Otherwise, reload existing project of the same name if found. See keras tuner for more information')
-    parser.add_argument('--max_retries_per_trial', type=int, default=3, #required=True,
-                         help='Maximum number of times to retry a Trial if the trial crashed or the results are invalid. See keras tuner for more information')
-    parser.add_argument('--max_consecutive_failed_trials', type=int, default=5, #required=True,
-                         help='Maximum number of consecutive failed Trials. When this number is reached, the search will be stopped. A Trial is marked as failed when none of the retries succeeded. See keras tuner for more information')
-    parser.add_argument('--executions_per_trial', type=int, default=1, #required=True,
-                         help='Number of executions (training a model from scratch, starting from a new initialization) to run per trial (model configuration). See keras tuner for more information')
-
-    # Tuner BayesianOptimization arguments
-    parser.add_argument('--num_initial_points', type=int, default=5, #required=True,
-                         help='Number of initialization points for BayesianOptimization')
 
     # Architecture arguments
     parser.add_argument('--n_labels', type=int, default=1, #required=True,
                          help='Number of class labels (i.e. output nodes) for classification')
 
     # Training arguments
-    parser.add_argument('--x_shape', type=tuple, default=(32, 32, 12),#required=True,
-                         help='')
-    parser.add_argument('--y_shape', type=tuple, default=(32, 32, 1),#required=True,
-                         help='')
+    parser.add_argument('--x_shape', type=tuple, default=(32, 32, 12), #required=True,
+                         help='The size of the input patches')
+    parser.add_argument('--y_shape', type=tuple, default=(32, 32, 1), #required=True,
+                         help='The size of the output patches')
     parser.add_argument('--epochs', type=int, default=5, #required=True,
                          help='Number of epochs to train the model')
     parser.add_argument('--batch_size', type=int, default=128, #required=True,
@@ -503,17 +578,18 @@ def create_parser():
     # EarlyStopping
     parser.add_argument('--patience', type=int, default=10, #required=True,
                          help='Number of epochs with no improvement after which training will be stopped. See patience in EarlyStopping')
-    parser.add_argument('--min_delt', type=float, default=1e-3, #required=True,
-                         help='Absolute change of less than min_delta will count as no improvement. See patience in EarlyStopping')
+    parser.add_argument('--min_delta', type=float, default=1e-4, #required=True,
+                         help='Absolute change of less than min_delta will count as no improvement. See min_delta in EarlyStopping')
 
     # TODO: choices? tuned hyperparam
     parser.add_argument('--dataset', type=str, default='tor', #required=True,
-                         help='dataset to use')
-    # TODO datetime
-    #parser.add_argument('--exp', type=int, default=0, #required=True,
-    #                     help='Experiment index')
+                        choices=['tor', 'nontor_tor'],
+                        help='dataset to use')
+    
+    parser.add_argument('--number_of_summary_trials', type=int, default=2,
+                         help='The number of best hyperparameters to save.')
     parser.add_argument('--gpu', action='store_true',
-                         help='turn on gpu')
+                         help='Turn on gpu')
     parser.add_argument('--dry_run', action='store_true',
                          help='For testing. Execute without running or saving data and verify output paths')
     return parser
@@ -523,71 +599,119 @@ def parse_args():
     Create and parse the command line args parser for the experiment
     @return: the parsed arguments object
     '''
-    parser = create_parser()
+    parser = create_argsparser()
     args = parser.parse_args()
     return args
 
 def args2string(args):
-    ''' TODO
-    Translate the current set of arguments into a string
-    @param args: Command line arguments object
-
-    @return: string with the command line arguments
     '''
-    ctime = time.time()
-    ctime = datetime.datetime.fromtimestamp(ctime).strftime("%Y_%b_%d_%H_%M_%S")
+    Translate the current set of arguments into a string
+    @param args: the command line args object. See create_argsparser() for
+            details about the command line arguments
+            Command line arguments relevant to this method:
 
-    args_str = ''
+
+    @return: string with the formated command line arguments
+    '''
+    cdatetime = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+
+    args_str = f'{cdatetime}_'
     for arg, val in vars(args).items(): 
-        if isinstance(val, int):
-            args_str += f'_{arg}={val:04d}'
-        else: args_str += f'_{arg}={val}'
+        if arg in ['in_dir', 'in_dir_val', 'out_dir', 'project_name_prefix', 
+                   'overwrite']:
+            continue
+        if isinstance(val, bool):
+            args_str += f'{arg}={val:1d}_'
+        elif isinstance(val, int):
+            if arg in ['max_retries_per_trial', 'max_consecutive_failed_trials', 'executions_per_trial', 
+            'number_of_summary_trials', 'n_labels']:
+                args_str += f'{arg}={val:02d}_'
+            elif arg == 'patience':
+                args_str += f'{arg}={val:03d}_'
+            else:
+                args_str += f'{arg}={val:04d}_'
+        elif isinstance(val, float):
+            args_str += f'{arg}={val:06f}_'
+        elif isinstance(val, list) or isinstance(val, tuple):
+            valstrs = [f'{i:03d}' for i in val]
+            fullstr = '_'.join(valstrs)
+            args_str += f'{arg}={fullstr}_'
+        else: args_str += f'{arg}={val}_'
 
-    return args_str
+    args_str = args_str[:-1]
+    if args.dry_run:
+        print(args_str, "\n")
+    return args_str # remove last underscore
 
 
 if __name__ == "__main__":
     args = parse_args()
+    argstr = args2string(args)
 
-    tuner, hypermodel = create_tuner(args)
+    #GRAB GPU0
+    if args.gpu: py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
-    # TODO: load data
+    tuner, hypermodel = create_tuner(args, DB=args.dry_run)
+
     ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
-
-    execute_search(args, tuner, ds_train, X_val=ds_val, callbacks=None)
 
     PROJ_NAME_PREFIX = args.project_name_prefix
     PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
 
-
     # If a tuner is specified, run the hyperparameter search
-    if not args.tuner == 'none':
-        execute_search(args, tuner, callbacks=None)
+    if not args.tuner is None:
+        execute_search(args, tuner, ds_train, X_val=ds_val, 
+                       callbacks=None, DB=args.dry_run)
     # Load the latest model
     else:
         #TODO
-        latest = tf.train.latest_checkpoint(f'{args.out_dir}/tuners/{PROJ_NAME}/checkpoints')
+        cp_path = os.path.join(args.out_dir, PROJ_NAME)
+        latest = tf.train.latest_checkpoint(cp_path) 
+        #latest = tf.train.latest_checkpoint(f'{args.out_dir}/{PROJ_NAME}') 
+        #f'{args.out_dir}/checkpoints/{PROJ_NAME}'
 
     # Report results
-    N_SUMMARY_TRIALS = 5 #MAX_TRIALS
+    print('')
+    N_SUMMARY_TRIALS = args.number_of_summary_trials #5 #MAX_TRIALS
     tuner.results_summary(N_SUMMARY_TRIALS)
-    best_hp = tuner.get_best_hyperparameters(num_trials=N_SUMMARY_TRIALS)
-    print(best_hp[0].values)
+    best_hps = tuner.get_best_hyperparameters(num_trials=N_SUMMARY_TRIALS)
+    print(best_hps[0].values)
 
     # Retrieve the best model.
     best_model = tuner.get_best_models(num_models=1)[0]
     best_model.summary()
 
-    # Save best models and hyperparams
+    # Save best hyperparams
+    df = pd.Dataframe(best_hps)
+    dirpath = os.path.join(args.out_dir, PROJ_NAME)
+    hp_fnpath = os.path.join(dirpath, f"hps_{argstr}.csv")
+    #hp_fnpath = f"{args.out_dir}/{PROJ_NAME}/hps_{argstr}.csv"
+    print(f"Saving top {N_SUMMARY_TRIALS:02d} hyperparameter")
+    print(hp_fnpath)
+    #TODO: df.to_csv(hp_fnpath)
 
-    '''plot_model(best_model, to_file=f"tuners/best_model__{args.tuner}.png",  
+    # Save best model
+    model_fnpath = os.path.join(dirpath, f"model_00_{argstr}.h5")
+    print(f"Saving top model")
+    print(model_fnpath)
+    #f'{args.out_dir}/{PROJ_NAME}/model_00_{argstr}.h5'
+    #TODO: hypermodel.save_model(model_fnpath, weights=True, 
+    #                      model=best_model, save_traces=True)
+
+    '''
+    diagram_fnpath = os.path.join(dirpath, f"model_00_{argstr}.png")
+    #f"tuners/best_model__{args.tuner}.png"
+    plot_model(best_model, to_file=diagram_fnpath,  
             show_dtype=True, show_shapes=True, expand_nested=False)
-    plot_model(best_model, to_file=f"tuners/best_model__{args.tuner}_expanded.png",  
+    diagram_fnpath = os.path.join(dirpath, f"model_00_{argstr}_expanded.png")
+    #f"tuners/best_model__{args.tuner}_expanded.png"
+    plot_model(best_model, to_file=diagram_fnpath,  
             show_dtype=True, show_shapes=True, expand_nested=True)
     '''
 
     # Predict with best model
     '''print("-------------------------")
+    # Load test set
     print("PREDICTION")
     xtrain_recon = best_model.predict(X_train, batch_size=BATCH_SIZE)
     xval_recon = best_model.predict(X_val, batch_size=BATCH_SIZE)
@@ -620,3 +744,4 @@ if __name__ == "__main__":
     xtest_recon = model.predict(X_test) #, batch_size=BS)
     '''
 
+    print('DONE.\n')
