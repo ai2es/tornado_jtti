@@ -1,20 +1,19 @@
 #!/bin/bash
 
-#SBATCH --partition=debug_gpu
-#SBATCH --time=00:30:00
-##SBATCH --partition=gpu_kepler
-##SBATCH --time=48:00:00
+##SBATCH --partition=debug_gpu
+##SBATCH --time=00:30:00
+#SBATCH --partition=gpu
+#SBATCH --time=2:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=20  #-n 20
 #SBATCH --mem=10G
-#SBATCH --job-name=tuning_JTTI
+#SBATCH --job-name=tuning_tests
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/debug__%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/debug__%x_%j.err
-#SBATCH --array=0
-##SBATCH --array=0-1000%20
-#SBATCH --mail-user=$USREMAIL
+#SBATCH --mail-user=$USEREMAIL
 #SBATCH --mail-type=ALL
+##SBATCH --array=0-1000%20
 
 ##########################################################
 
@@ -32,10 +31,14 @@ echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_tor/training_ZH_only.tf" \
 --in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_tor/validation1_ZH_only.tf" \
---out_dir="/home/momoshog/Tornado/test_data/tmp" \
+--out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
+--out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
+--overwrite \
+--gpu \
 --dry_run \
-rand
+hyper
 
+#--out_dir="/home/momoshog/Tornado/test_data/tmp" \
 #tornado_jtti/unet/ZH_only/initialrun_model8/' \
 #python -u lydia_scripts/scripts_tensorboard/tuning_JTTI.py \
 #--input_dir="/ourdisk/hpc/ai2es/tornado/wofs_patched/size_32/" \

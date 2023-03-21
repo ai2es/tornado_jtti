@@ -80,7 +80,7 @@ class UNetHyperModel(HyperModel):
     @param tune_optimizer: Whether to tune the choice for the learning 
                 optimizer. False by default and uses Adam
     """
-    def __init__(self, input_shape, n_labels=None, name='', tune_optimizer=False):
+    def __init__(self, input_shape, n_labels=None, name='', tune_optimizer=False, DB=False):
         '''
         Class constructor
         '''
@@ -90,6 +90,7 @@ class UNetHyperModel(HyperModel):
         self.n_labels = n_labels if not n_labels is None or n_labels > 0 else 1
         self.name = name
         self.tune_optimizer = tune_optimizer
+        self.DB = DB
         super().__init__(name=name) #, tunable=True)
 
     def save_model(self, filepath, weights=True, model=None, save_traces=True):
@@ -256,7 +257,7 @@ class UNetHyperModel(HyperModel):
 
         # Build and return the model
         model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
-        model.summary()
+        if self.DB: model.summary()
         return model
 
 def create_tuner(args, DB=1):
@@ -287,10 +288,12 @@ def create_tuner(args, DB=1):
 
     @return: tuple containing the configured tuner object and the hypermodel
     '''
-    hypermodel = UNetHyperModel(input_shape=args.x_shape, n_labels=args.n_labels)
+    hypermodel = UNetHyperModel(input_shape=args.x_shape, n_labels=args.n_labels, DB=0)
     #weights = dummy_loader(model_old_path)
     #model_new = swin_transformer_model(...)
     #model_new.set_weights(weights)
+
+    tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
 
     tuner_args = {
         'objective': args.objective, #'val_MaxCriticalSuccessIndex', name of objective to optimize (whether to minimize or maximize is automatically inferred for built-in metrics)
@@ -300,7 +303,7 @@ def create_tuner(args, DB=1):
         'logger': None, #TODO Optional instance of kerastuner.Logger class for streaming logs for monitoring.
         'tuner_id': None, #TODO Optional string, used as the ID of this Tuner.
         'overwrite': args.overwrite, #TODO: If False, reload existing project. Otherwise, overwrite the project.
-        'directory': args.out_dir #TODO: f"{args.out_dir}/tuners/{PROJ_NAME}". relative path to the working directory.
+        'directory': tuner_dir #args.out_dir #TODO: relative path to working dir
     }
         #'seed': None,
         #'hyperparameters': None,
@@ -357,6 +360,7 @@ def create_tuner(args, DB=1):
 
     if DB:
         print(' ')
+        print('==============================')
         tuner.search_space_summary()
         print(' ')
 
@@ -388,16 +392,17 @@ def execute_search(args, tuner, X_train, X_val=None,
     NEPOCHS = args.epochs 
     PROJ_NAME_PREFIX = args.project_name_prefix
     PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
+    
+    tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
 
     if callbacks is None:
         # TODO: separate arg for objective and monitor?
         es = EarlyStopping(monitor=args.objective, #start_from_epoch=10, 
                             patience=args.patience, min_delta=args.min_delta, 
-                            restore_best_weights=True) #"val_loss"
-        tb_path = os.path.join(args.out_dir, PROJ_NAME, 'tb')
-        tb = TensorBoard(tb_path)
-        #tb = TensorBoard(f"{args.out_dir}/{PROJ_NAME}/tb") # TODO tensorboard --logdir=bayes_opt
-        #cp = ModelCheckpoint(filepath=f"{args.out_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
+                            restore_best_weights=True)
+        tb_path = os.path.join(tuner_dir, PROJ_NAME, 'tb')
+        tb = TensorBoard(tb_path) #--logdir=
+        #cp = ModelCheckpoint(filepath=f"{tuner_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
         #manager = tf.train.CheckpointManager(ckpt, './tf_ckpts', max_to_keep=3)
         callbacks = [es, tb]
 
@@ -417,7 +422,6 @@ def execute_search(args, tuner, X_train, X_val=None,
 def load_data(args):
     pass
 
-# TODO
 def prep_data(args, n_labels=None, DB=1):
     """ 
     Load and prepare the data.
@@ -441,12 +445,12 @@ def prep_data(args, n_labels=None, DB=1):
     #if loss == 'binary_focal_crossentropy':
     if n_labels == 1:        
         #y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
-        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64), 
-                     tf.TensorSpec(shape=y_shape, dtype=tf.int64))
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
+                     tf.TensorSpec(shape=y_shape, dtype=tf.int64, name='Y'))
 
         #y_shape_val = args.y_shape #(32, 32, 1)
-        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64), 
-                         tf.TensorSpec(shape=y_shape_val, dtype=tf.int64))
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
+                         tf.TensorSpec(shape=y_shape_val, dtype=tf.int64, name='Y'))
 
         # Pick out the correct dataset paths
         if args.dataset == 'tor':
@@ -457,12 +461,12 @@ def prep_data(args, n_labels=None, DB=1):
     else:
         # Define the dataset size
         #y_shape = (None, 32, 32, 2)
-        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64), 
-                     tf.TensorSpec(shape=y_shape, dtype=tf.float32))
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
+                     tf.TensorSpec(shape=y_shape, dtype=tf.float32, name='Y'))
 
         #y_shape_val = y_shape[1:] #(32, 32, 2)
-        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64), 
-                         tf.TensorSpec(shape=y_shape_val, dtype=tf.float32))
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
+                         tf.TensorSpec(shape=y_shape_val, dtype=tf.float32, name='Y'))
 
     # Pick out the correct dataset paths
     #hparams[HP_DATA_PATCHES_TYPE]
@@ -484,6 +488,7 @@ def prep_data(args, n_labels=None, DB=1):
         '''
         return x[1:], y[1:]
     ds_train = tf.data.Dataset.load(args.in_dir, specs)
+    ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
     #ds_train = ds_train.shuffle(x_shape[0], seed=24)
     #ds_train = ds_train.batch(args.batch_size)
     #ds_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
@@ -494,11 +499,95 @@ def prep_data(args, n_labels=None, DB=1):
     #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
     ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val)
     ds_val = ds_val.batch(args.batch_size)
+    ds_val = ds_val.prefetch(tf.data.AUTOTUNE)
     if DB:
         print("Training Dataset Specs:", specs)
         print("Validation Dataset Specs:", specs_val)
 
     return (ds_train, ds_val)
+
+def fvaf(y_true, y_pred):
+    ''' TODO
+    Fraction of variance accounted for (FVAF) ranges (−inf, 1]. 
+    1 FVAF represents a total reconstruction. 
+    0 represents a reconstruction that's as good as using the average of the signal as predictor
+    negative FVAF even worse reconstructions than using the average signal as the predictor
+    1 - MSE / VAR =
+    1 - (sum[(y_true - y_pred)**2]) / (sum[(y_true - y_mean)**2])
+    '''
+    tf_mse = tf.keras.losses.MeanSquaredError()
+    MSE = tf_mse(y_true, y_pred).numpy()
+    VAR = np.var(y_true.flatten()) #tf.math.reduce_variance(y_true)
+    return 1. - MSE / VAR
+
+def plot_learning_loss(history, fname, save=False, dpi=220):
+    '''
+    Plot the juxtaposition of the training and validation loss
+    @param history: history object returned from model.fit()
+    @return: the figure
+    '''
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+
+    plt.plot(loss, label='Training Loss')
+    plt.plot(val_loss, label='Validation Loss')
+    plt.xlabel("Learning Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    if save:
+        print("Saving history plot")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return plt.gcf()
+
+def plot_predictions(y_preds, y_preds_val, fname, figsize=(10, 10), save=False, dpi=220):
+    '''
+    '''
+    from matplotlib import colors
+    
+    fig, axs = plt.subplots(2, 2, figsize=figsize)
+    axs = axs.ravel()
+
+    # TRAIN SET
+    y_train = y_preds.ravel()
+    axs[0].hist(y_train, density=True, label='Train Set', norm=colors.LogNorm())
+    axs[0].set_xlabel('Probability')
+    axs[0].set_ylabel('density')
+    axs[0].set_xlim([0, 1])
+    axs[0].legend()
+
+    axs[1].hist(y_train, density=True, cumulative=True, 
+                label='Train Set', norm=colors.LogNorm())
+    axs[1].set_xlabel('Probability')
+    axs[1].set_ylabel('cumulative density')
+    axs[1].set_xlim([0, 1])
+    axs[1].legend()
+
+    # VAL SET
+    y_val = y_preds_val.ravel()
+    axs[2].hist(y_val, density=True, label='Val Set', norm=colors.LogNorm())
+    axs[2].set_xlabel('Probability')
+    axs[2].set_ylabel('density')
+    axs[2].set_xlim([0, 1])
+    axs[2].legend()
+
+    axs[3].hist(y_val, density=True, cumulative=True, 
+                label='Val Set', norm=colors.LogNorm())
+    axs[3].set_xlabel('Probability')
+    axs[3].set_ylabel('cumulative density')
+    axs[3].set_xlim([0, 1])
+    axs[3].legend()
+
+    plt.suptitle("Tornado Prediction")
+
+    if save:
+        print("Saving history plot")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, axs
 
 def create_argsparser():
     '''
@@ -514,6 +603,8 @@ def create_argsparser():
                          help='Input directory where the validation data are stored')
     parser.add_argument('--out_dir', type=str, required=True,
                          help='Output directory for results, models, hyperparameters, etc.')
+    parser.add_argument('--out_dir_tuning', type=str, #required=True,
+                         help='(optional) Output directory for training and tuning checkpoints. Defaults to --out_dir if not specified')
     
 
     # Tuner hyperparameter search arguments
@@ -547,11 +638,11 @@ def create_argsparser():
                          help='Balance exploration v exploitation. Larger is more explorative')
     # HYPERBAND
     prsr_hyper = tunersparsers.add_parser('hyperband', aliases=['hyper'], help='Use hyperband seach for tuning')
-    prsr_hyper.add_argument('--max_epochs', type=int, default=10,
+    prsr_hyper.add_argument('--max_epochs', type=int, default=4,
                          help='max number of epochs to train one model. recommended to set slightly higher than the expected epochs to convergence ')
     prsr_hyper.add_argument('--factor', type=int, default=3, 
                          help='Reduction factor for the number of epochs and number of models for each bracket')
-    prsr_hyper.add_argument('--hyperband_iterations', type=int, default=2, 
+    prsr_hyper.add_argument('--hyperband_iterations', type=int, default=1, 
                          help='At least 1. Number of times to iterate over the full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. It is recommended to set this to as high a value as is within your resource budget. ')
     # TODO
     prsr_custom = tunersparsers.add_parser('custom', help='Use custom tuner class')
@@ -569,7 +660,7 @@ def create_argsparser():
                          help='The size of the output patches')
     parser.add_argument('--epochs', type=int, default=5, #required=True,
                          help='Number of epochs to train the model')
-    parser.add_argument('--batch_size', type=int, default=128, #required=True,
+    parser.add_argument('--batch_size', type=int, default=128, #=128,required=True,
                          help='Number of examples in each training batch')
     parser.add_argument('--lrate', type=float, default=1e-3, #required=True,
                          help='Learning rate')
@@ -615,16 +706,16 @@ def args2string(args):
     '''
     cdatetime = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 
-    args_str = f'{cdatetime}_'
+    args_str = '' #f'{cdatetime}_'
     for arg, val in vars(args).items(): 
-        if arg in ['in_dir', 'in_dir_val', 'out_dir', 'project_name_prefix', 
-                   'overwrite']:
+        if arg in ['in_dir', 'in_dir_val', 'out_dir', 'out_dir_tuning',
+                   'project_name_prefix', 'overwrite']:
             continue
         if isinstance(val, bool):
             args_str += f'{arg}={val:1d}_'
         elif isinstance(val, int):
             if arg in ['max_retries_per_trial', 'max_consecutive_failed_trials', 'executions_per_trial', 
-            'number_of_summary_trials', 'n_labels']:
+            'number_of_summary_trials', 'n_labels', 'factor']:
                 args_str += f'{arg}={val:02d}_'
             elif arg == 'patience':
                 args_str += f'{arg}={val:03d}_'
@@ -638,15 +729,15 @@ def args2string(args):
             args_str += f'{arg}={fullstr}_'
         else: args_str += f'{arg}={val}_'
 
-    args_str = args_str[:-1]
+    args_str = args_str[:-1] # remove last underscore
     if args.dry_run:
         print(args_str, "\n")
-    return args_str # remove last underscore
+    return cdatetime, args_str
 
 
 if __name__ == "__main__":
     args = parse_args()
-    argstr = args2string(args)
+    cdatetime, argstr = args2string(args)
 
     #GRAB GPU0
     if args.gpu: py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
@@ -662,61 +753,116 @@ if __name__ == "__main__":
     if not args.tuner is None:
         execute_search(args, tuner, ds_train, X_val=ds_val, 
                        callbacks=None, DB=args.dry_run)
+
+        # Report results
+        print('\n====================================')
+        N_SUMMARY_TRIALS = args.number_of_summary_trials #5 #MAX_TRIALS
+        tuner.results_summary(N_SUMMARY_TRIALS)
+
+        # Retrieve best hyperparams
+        best_hps_obj = tuner.get_best_hyperparameters(num_trials=N_SUMMARY_TRIALS)
+        best_hps = [hp.values for hp in best_hps_obj]
+        #print("best_hp", best_hps[0].values)
+
+        # Retrieve best model
+        best_model = tuner.get_best_models(num_models=1)[0]
+
+        # Save best hyperparams
+        df = pd.DataFrame(best_hps)
+        df['args'] = [argstr] * N_SUMMARY_TRIALS
+        dirpath = os.path.join(args.out_dir, PROJ_NAME)
+        hp_fnpath = os.path.join(dirpath, f"hps_{cdatetime}.csv")
+        #hp_fnpath = f"{args.out_dir}/{PROJ_NAME}/hps_{argstr}.csv"
+        print(f"Saving top {N_SUMMARY_TRIALS:02d} hyperparameter")
+        print(hp_fnpath)
+        # Display entire dataframe
+        pd.set_option('display.max_rows', None)
+        pd.set_option('display.max_columns', None)
+        print(df)
+        df.to_csv(hp_fnpath)
+
+        # Train with best hyperparameters
+        BATCH_SIZE = args.batch_size
+        print("-------------------------")
+        print("Training Best Model")
+        model = tuner.hypermodel.build(best_hps_obj[0])
+        es = EarlyStopping(monitor=args.objective, patience=args.patience,  
+                            min_delta=args.min_delta, restore_best_weights=True)
+        H = model.fit(ds_train, validation_data=ds_val, 
+                      batch_size=BATCH_SIZE, epochs=args.epochs, 
+                      callbacks=[es]) #, verbose=1)
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_learning_plot.png")
+        plot_learning_loss(H, fname, save=True)
+        #print(H.history.keys())
+        #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
+
+        # Predict with trained model
+        print("PREDICTION")
+        xtrain_preds = best_model.predict(ds_train)
+        xval_preds = best_model.predict(ds_val)
+        #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
+        #print("FVAF::", fvaf(xtrain_recon, X_train), fvaf(xval_recon, X_val), fvaf(xtest_recon, X_test))
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_preds_distr.png")
+        plot_predictions(xtrain_preds, xval_preds, fname, save=True)
+
+        # Evaluate trained model
+        print("EVALUATION")
+        xtrain_eval = model.evaluate(ds_train)
+        xval_eval = model.evaluate(ds_val)
+        #xtest_recon = model.evaluate(ds_test)
+        print("T EVAL::", xtrain_eval)
+        print("V EVAL", xval_eval)
+
+        # TODO: CSI plot
+        # TODO: performance_plot
+        # TODO: reliablitiy curve
+        # TODO: ROC
+        # TODO: ROC - PR
+
+
+        # Save best model from hyperparam search
+        model_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.h5")
+        print(f"Saving top model")
+        print(model_fnpath)
+        best_model.summary()
+        #f'{args.out_dir}/{PROJ_NAME}/model00_{argstr}.h5'
+        #TODO:
+        hypermodel.save_model(model_fnpath, weights=True, 
+                              model=best_model, save_traces=True)
+
+        # Save diagram of model architecture
+        diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.png")
+        #f"tuners/best_model__{args.tuner}.png"
+        plot_model(best_model, to_file=diagram_fnpath,  
+                    show_dtype=True, show_shapes=True, expand_nested=False)
+        # Save expanded diagram
+        diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}_expanded.png")
+        plot_model(best_model, to_file=diagram_fnpath,  
+                    show_dtype=True, show_shapes=True, expand_nested=True)
+
     # Load the latest model
     else:
         #TODO
-        cp_path = os.path.join(args.out_dir, PROJ_NAME)
-        latest = tf.train.latest_checkpoint(cp_path) 
+        cp_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
+        cp_path = os.path.join(cp_dir, PROJ_NAME)
+        #latest = tf.train.latest_checkpoint(cp_path) 
         #latest = tf.train.latest_checkpoint(f'{args.out_dir}/{PROJ_NAME}') 
         #f'{args.out_dir}/checkpoints/{PROJ_NAME}'
+        #latest = tf.keras.models.load_model(cp_path, compile=False)
+        #latest_hps = df.read_csv(hp_fnpath)
+        #best_hp = df.iloc[0]
 
-    # Report results
-    print('')
-    N_SUMMARY_TRIALS = args.number_of_summary_trials #5 #MAX_TRIALS
-    tuner.results_summary(N_SUMMARY_TRIALS)
-    best_hps = tuner.get_best_hyperparameters(num_trials=N_SUMMARY_TRIALS)
-    print(best_hps[0].values)
 
-    # Retrieve the best model.
-    best_model = tuner.get_best_models(num_models=1)[0]
-    best_model.summary()
-
-    # Save best hyperparams
-    df = pd.Dataframe(best_hps)
-    dirpath = os.path.join(args.out_dir, PROJ_NAME)
-    hp_fnpath = os.path.join(dirpath, f"hps_{argstr}.csv")
-    #hp_fnpath = f"{args.out_dir}/{PROJ_NAME}/hps_{argstr}.csv"
-    print(f"Saving top {N_SUMMARY_TRIALS:02d} hyperparameter")
-    print(hp_fnpath)
-    #TODO: df.to_csv(hp_fnpath)
-
-    # Save best model
-    model_fnpath = os.path.join(dirpath, f"model_00_{argstr}.h5")
-    print(f"Saving top model")
-    print(model_fnpath)
-    #f'{args.out_dir}/{PROJ_NAME}/model_00_{argstr}.h5'
-    #TODO: hypermodel.save_model(model_fnpath, weights=True, 
-    #                      model=best_model, save_traces=True)
+    # TODO: Load test set
 
     '''
-    diagram_fnpath = os.path.join(dirpath, f"model_00_{argstr}.png")
-    #f"tuners/best_model__{args.tuner}.png"
-    plot_model(best_model, to_file=diagram_fnpath,  
-            show_dtype=True, show_shapes=True, expand_nested=False)
-    diagram_fnpath = os.path.join(dirpath, f"model_00_{argstr}_expanded.png")
-    #f"tuners/best_model__{args.tuner}_expanded.png"
-    plot_model(best_model, to_file=diagram_fnpath,  
-            show_dtype=True, show_shapes=True, expand_nested=True)
-    '''
-
-    # Predict with best model
-    '''print("-------------------------")
-    # Load test set
+    # Predict with latest model
+    print("-------------------------")
     print("PREDICTION")
-    xtrain_recon = best_model.predict(X_train, batch_size=BATCH_SIZE)
-    xval_recon = best_model.predict(X_val, batch_size=BATCH_SIZE)
-    xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
-    print("FVAF::", fvaf(xtrain_recon, X_train), fvaf(xval_recon, X_val), fvaf(xtest_recon, X_test))
+    xtrain_recon = best_model.predict(ds_train, batch_size=BATCH_SIZE)
+    xval_recon = best_model.predict(ds_val, batch_size=BATCH_SIZE)
+    xtest_recon = best_model.predict(ds_test, batch_size=BATCH_SIZE)
+    #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
 
     # Evaluate the best model
     print("-------------------------")
@@ -725,23 +871,6 @@ if __name__ == "__main__":
     res_val = best_model.evaluate(X_val, X_val)
     res_test = best_model.evaluate(X_test, X_test)
     print(res_train, res_val, res_test)
-    '''
-
-    '''
-    print("[INFO] training the best model...")
-    model = tuner.hypermodel.build(best_hp)
-    H = model.fit(X_train, X_train,
-                validation_data=(X_val, X_val), batch_size=BS,
-                epochs=NEPOCHS, callbacks=[es], verbose=1)
-    plot_learning_loss(H)
-    print(H.history.keys())
-
-    # evaluate the network
-    print("[INFO] evaluating network...")
-    print(best_hp.values)
-    xtrain_recon = model.predict(X_train) #, batch_size=BS)
-    xval_recon = model.predict(X_val) #, batch_size=BS)
-    xtest_recon = model.predict(X_test) #, batch_size=BS)
     '''
 
     print('DONE.\n')
