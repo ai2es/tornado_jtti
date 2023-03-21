@@ -18,3 +18,4 @@ dependencies:
   - pyyaml
   - pyproj
   - py3nvml
+  - pydot
