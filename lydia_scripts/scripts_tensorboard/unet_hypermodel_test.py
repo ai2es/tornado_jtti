@@ -131,11 +131,30 @@ class TestUNetHyperModel(unittest.TestCase):
     def test_prep_data(self):
         tuner, hypermodel = uh.create_tuner(self.args)
         ds_train, ds_val = uh.prep_data(self.args, n_labels=hypermodel.n_labels)
-        self.assertEqual('foo'.upper(), 'FOO')
+        self.assertEqual(ds_train.element_spec[0].shape, (None, 32, 32, 12), 
+                         msg='Training Dataset input shape was not (None, 32, 32, 12)')
+        self.assertEqual(ds_train.element_spec[1].shape, (None, 32, 32, 1), 
+                         msg='Training Dataset output shape was not (None, 32, 32, 1)')
+        self.assertEqual(ds_val.element_spec[0].shape, (None, 32, 32, 12), 
+                         msg='Validation Dataset input shape was not (None, 32, 32, 12)')
+        self.assertEqual(ds_val.element_spec[1].shape, (None, 32, 32, 1), 
+                         msg='Validation Dataset output shape was not (None, 32, 32, 1)')
 
-    def test_build(self):
-        self.assertTrue('FOO'.isupper())
-        self.assertFalse('Foo'.isupper())
+    def test_search(self):
+        args = self.args
+
+        tuner, hypermodel = uh.create_tuner(args, DB=args.dry_run)
+        ds_train, ds_val = uh.prep_data(args, n_labels=hypermodel.n_labels)
+
+        PROJ_NAME_PREFIX = args.project_name_prefix
+        PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
+
+        # If a tuner is specified, run the hyperparameter search
+        if not args.tuner is None:
+            uh.execute_search(args, tuner, ds_train, X_val=ds_val, 
+                              callbacks=None, DB=args.dry_run)
+        #self.assertTrue('FOO'.isupper())
+        #self.assertFalse('Foo'.isupper())
 
 def create_args():
     parser = uh.create_argsparser()

@@ -814,8 +814,8 @@ if __name__ == "__main__":
         print("V EVAL", xval_eval)
 
         # TODO: CSI plot
-        # TODO: performance_plot
         # TODO: reliablitiy curve
+        # TODO: performance_plot
         # TODO: ROC
         # TODO: ROC - PR
 
@@ -825,20 +825,17 @@ if __name__ == "__main__":
         print(f"Saving top model")
         print(model_fnpath)
         best_model.summary()
-        #f'{args.out_dir}/{PROJ_NAME}/model00_{argstr}.h5'
-        #TODO:
-        hypermodel.save_model(model_fnpath, weights=True, 
+        hypermodel.save_model(model_fnpath, weights=True, #argstr
                               model=best_model, save_traces=True)
 
         # Save diagram of model architecture
         diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.png")
-        #f"tuners/best_model__{args.tuner}.png"
         plot_model(best_model, to_file=diagram_fnpath,  
                     show_dtype=True, show_shapes=True, expand_nested=False)
-        # Save expanded diagram
-        diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}_expanded.png")
-        plot_model(best_model, to_file=diagram_fnpath,  
-                    show_dtype=True, show_shapes=True, expand_nested=True)
+        # REDUNDANT Save expanded diagram
+        #diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}_expanded.png")
+        #plot_model(best_model, to_file=diagram_fnpath,  
+        #            show_dtype=True, show_shapes=True, expand_nested=True)
 
     # Load the latest model
     else:
