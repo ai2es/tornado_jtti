@@ -9,6 +9,10 @@ Expected working directory is tornado_jtti/
 
 GridRad /ourdisk/hpc/ai2es/tornado/gridrad_gridded/ ??
 /ourdisk/hpc/ai2es/tornado/storm_mask_unet/ ??
+
+Windows tensorboard
+python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
+
 """
 
 import os, io, sys, random, shutil
@@ -79,8 +83,13 @@ class UNetHyperModel(HyperModel):
                 identify the exact name of each layer. Empty by default
     @param tune_optimizer: Whether to tune the choice for the learning 
                 optimizer. False by default and uses Adam
+    @param distribution_strategy: Optional instance of tf.distribute.Strategy. 
+                Same as that used by the tuner object. Here it is used for any 
+                custom metrics or losses such that they are declared under the 
+                same scope as the model. See Keras Tuner for details.
     """
-    def __init__(self, input_shape, n_labels=None, name='', tune_optimizer=False, DB=False):
+    def __init__(self, input_shape, n_labels=None, name='', tune_optimizer=False, 
+                 distribution_strategy=None, DB=False):
         '''
         Class constructor
         '''
@@ -90,6 +99,7 @@ class UNetHyperModel(HyperModel):
         self.n_labels = n_labels if not n_labels is None or n_labels > 0 else 1
         self.name = name
         self.tune_optimizer = tune_optimizer
+        self.distribution_strategy = distribution_strategy
         self.DB = DB
         super().__init__(name=name) #, tunable=True)
 
@@ -125,7 +135,7 @@ class UNetHyperModel(HyperModel):
 
         @return: compiled Keras model.
         """
-        print("BUILDING UNET HYPERMODEL")
+        if self.DB: print("BUILDING UNET HYPERMODEL")
         # Set our random seed
         rng = None if seed is None else random.Random(seed)
 
@@ -169,10 +179,10 @@ class UNetHyperModel(HyperModel):
             with hp.conditional_scope("n_labels", [None]): 
                 n_labels = hp.Int("n_labels", min_value=1, step=1, max_value=2)
 
-        # TODO HyperParameters.Fixed(name, value, parent_name=None, parent_values=None)
         loss = 'binary_focal_crossentropy'
-        metrics = [MaxCriticalSuccessIndex(), AUC(num_thresholds=100, curve='ROC'), 
-                    AUC(num_thresholds=100, curve='PR')] #"categorical_accuracy"
+        #MCSI = MaxCriticalSuccessIndex() #, MCSI.tp, MCSI.fp, MCSI.fn
+        metrics = [MaxCriticalSuccessIndex(), AUC(num_thresholds=100, curve='ROC', name='auc_roc'),
+                    AUC(num_thresholds=100, curve='PR', name='auc_pr')] #"categorical_accuracy"
         if n_labels == 1: 
             #TODO: keras.activations.linear
             output_activation = hp.Choice("out_activation", values=['Sigmoid', 'Snake'])
@@ -249,18 +259,18 @@ class UNetHyperModel(HyperModel):
         # Optimization
         lr = hp.Choice("learning_rate", values=[1e-3, 1e-4, 1e-5, 1e-6])
         #hp.Float('learning_rate',min_value=1e-4, max_value=1e-2, sampling='LOG', default=1e-3)
-        optimizer = Adam(learning_rate=lr) if not self.tune_optimizer else []
+        optimizer = Adam(learning_rate=lr) #TODO (MAYBE): if not self.tune_optimizer else hp.Choice("optimizer", values=[Adagrad(learning_rate=lr), SGD(learning_rate=lr), RMSprop(learning_rate=lr)])
         # TODO ?
-        # hp.Choice("optimizer", values=[Adagrad(learning_rate=learning_rate),
-        #                                    SGD(learning_rate=learning_rate),
-        #                                    RMSprop(learning_rate=learning_rate)]
+        # hp.Choice("optimizer", values=[Adagrad(learning_rate=lr),
+        #                                    SGD(learning_rate=lr),
+        #                                    RMSprop(learning_rate=lr)]
 
         # Build and return the model
         model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
         if self.DB: model.summary()
         return model
 
-def create_tuner(args, DB=1):
+def create_tuner(args, strategy=None, DB=1, **kwargs):
     '''
     Create the Keras Tuner. Tuner can be instance of RandomSearch, Hyperband, 
     BayeOpt, custom or Tuner (the base Tuner class) when no tuner is selected.
@@ -288,7 +298,8 @@ def create_tuner(args, DB=1):
 
     @return: tuple containing the configured tuner object and the hypermodel
     '''
-    hypermodel = UNetHyperModel(input_shape=args.x_shape, n_labels=args.n_labels, DB=0)
+    hypermodel = UNetHyperModel(input_shape=args.x_shape, n_labels=args.n_labels, 
+                                distribution_strategy=strategy, DB=0)
     #weights = dummy_loader(model_old_path)
     #model_new = swin_transformer_model(...)
     #model_new.set_weights(weights)
@@ -296,6 +307,7 @@ def create_tuner(args, DB=1):
     tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
 
     tuner_args = {
+        'distribution_strategy': strategy, #TODO 
         'objective': args.objective, #'val_MaxCriticalSuccessIndex', name of objective to optimize (whether to minimize or maximize is automatically inferred for built-in metrics)
         'max_retries_per_trial': args.max_retries_per_trial,
         'max_consecutive_failed_trials': args.max_consecutive_failed_trials,
@@ -400,8 +412,8 @@ def execute_search(args, tuner, X_train, X_val=None,
         es = EarlyStopping(monitor=args.objective, #start_from_epoch=10, 
                             patience=args.patience, min_delta=args.min_delta, 
                             restore_best_weights=True)
-        tb_path = os.path.join(tuner_dir, PROJ_NAME, 'tb')
-        tb = TensorBoard(tb_path) #--logdir=
+        tb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_tb')
+        tb = TensorBoard(tb_path, histogram_freq=5) #--logdir=
         #cp = ModelCheckpoint(filepath=f"{tuner_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
         #manager = tf.train.CheckpointManager(ckpt, './tf_ckpts', max_to_keep=3)
         callbacks = [es, tb]
@@ -409,14 +421,14 @@ def execute_search(args, tuner, X_train, X_val=None,
     # Perform the hyperparameter search
     #https://www.tensorflow.org/tutorials/structured_data/imbalanced_data
     # TODO: dataset split
-    print("[INFO] performing hyperparameter search...")
-    tuner.search(X_train, #X_train,
-                validation_data=X_val, #(X_val, X_val), 
-                validation_batch_size=None, #validation_split=.1
+    print("\nExecuting hyperparameter search...")
+    tuner.search(X_train, 
+                validation_data=X_val, 
+                validation_batch_size=None, 
                 batch_size=BATCH_SIZE, epochs=NEPOCHS, 
                 shuffle=False, callbacks=callbacks,
-                steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, 
-                workers=1, use_multiprocessing=False) 
+                steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, workers=1, 
+                use_multiprocessing=False) 
 
 # TODO
 def load_data(args):
@@ -477,25 +489,14 @@ def prep_data(args, n_labels=None, DB=1):
     else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
         
     # Read tensorflow datasets
-    '''ds_train = tf.data.experimental.load("/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf', elem_spec)
-    ds_val = tf.data.experimental.load('/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf', elem_spec_val)
-    ds_train = tf.data.experimental.load(args.in_dir, elem_spec)
-    ds_val = tf.data.experimental.load(args.in_dir_val, elem_spec_val)
     '''
-    def drop_dim(x, y):
-        '''
-        Remove None dimension
-        '''
-        return x[1:], y[1:]
+    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf'
+    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf'
+    '''
+
     ds_train = tf.data.Dataset.load(args.in_dir, specs)
     ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
-    #ds_train = ds_train.shuffle(x_shape[0], seed=24)
-    #ds_train = ds_train.batch(args.batch_size)
-    #ds_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
-    #ds_train = ds_train.shuffle(x_train.shape[0], seed=24).batch(args.batch_size)
-    #ds_train.save(path)
     #xy_train = np.array(list(ds_train.as_numpy_iterator()))
-    #ds_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
     #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
     ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val)
     ds_val = ds_val.batch(args.batch_size)
@@ -542,48 +543,71 @@ def plot_learning_loss(history, fname, save=False, dpi=220):
 
     return plt.gcf()
 
-def plot_predictions(y_preds, y_preds_val, fname, figsize=(10, 10), save=False, dpi=220):
+def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12, 8), alpha=.5, save=False, dpi=220):
     '''
     '''
-    from matplotlib import colors
-    
-    fig, axs = plt.subplots(2, 2, figsize=figsize)
+    fig, axs = plt.subplots(1, 2, figsize=figsize)
     axs = axs.ravel()
 
-    # TRAIN SET
-    y_train = y_preds.ravel()
-    axs[0].hist(y_train, density=True, label='Train Set', norm=colors.LogNorm())
-    axs[0].set_xlabel('Probability')
-    axs[0].set_ylabel('density')
-    axs[0].set_xlim([0, 1])
-    axs[0].legend()
+    if use_seaborn:
+        from seaborn import histplot
 
-    axs[1].hist(y_train, density=True, cumulative=True, 
-                label='Train Set', norm=colors.LogNorm())
-    axs[1].set_xlabel('Probability')
-    axs[1].set_ylabel('cumulative density')
-    axs[1].set_xlim([0, 1])
-    axs[1].legend()
+        Y = {'Train': y_preds, 'Val': y_preds_val}
 
-    # VAL SET
-    y_val = y_preds_val.ravel()
-    axs[2].hist(y_val, density=True, label='Val Set', norm=colors.LogNorm())
-    axs[2].set_xlabel('Probability')
-    axs[2].set_ylabel('density')
-    axs[2].set_xlim([0, 1])
-    axs[2].legend()
+        histplot(data=Y, stat='probability', label='Train Set', legend=True, 
+                 ax=axs[0], alpha=alpha, common_norm=False)
+        axs[0].set_xlabel('Tornado Predicted Probability')
+        axs[0].set_xlim([0, 1])
 
-    axs[3].hist(y_val, density=True, cumulative=True, 
-                label='Val Set', norm=colors.LogNorm())
-    axs[3].set_xlabel('Probability')
-    axs[3].set_ylabel('cumulative density')
-    axs[3].set_xlim([0, 1])
-    axs[3].legend()
+        histplot(data=Y, stat='probability', label='Train Set', legend=True, 
+                 ax=axs[1], alpha=alpha, common_norm=False, cumulative=True, 
+                 element="step", fill=False)
+        axs[1].set_xlabel('Tornado Predicted Probability')
+        axs[1].set_xlim([0, 1])
+        '''
+        histplot(data=y_preds_val, stat='probability', label='Val Set', legend=True, ax=axs[2])
+        axs[2].set_xlabel('Probability')
+        axs[2].set_xlim([0, 1])
 
-    plt.suptitle("Tornado Prediction")
+        histplot(data=y_preds_val, stat='probability', label='Val Set', legend=True, ax=axs[3], cumulative=True, element="step", fill=False)
+        axs[3].set_xlabel('Probability')
+        axs[3].set_xlim([0, 1])
+        '''
+    else:
+        from matplotlib import colors
+
+        # TRAIN SET
+        y_train = y_preds.ravel()
+        axs[0].hist(y_train, density=True, label='Train Set') #, norm=colors.LogNorm())
+        axs[0].set_xlabel('Probability')
+        axs[0].set_ylabel('density')
+        axs[0].set_xlim([0, 1])
+        axs[0].legend()
+
+        axs[1].hist(y_train, density=True, cumulative=True, label='Train Set', histtype='step') #, norm=colors.LogNorm())
+        axs[1].set_xlabel('Probability')
+        axs[1].set_ylabel('cumulative density')
+        axs[1].set_xlim([0, .6])
+        axs[1].legend()
+
+        # VAL SET
+        y_val = y_preds_val.ravel()
+        axs[2].hist(y_val, density=True, label='Val Set') #, norm=colors.LogNorm())
+        axs[2].set_xlabel('Probability')
+        axs[2].set_ylabel('density')
+        axs[2].set_xlim([0, 1])
+        axs[2].legend()
+
+        axs[3].hist(y_val, density=True, cumulative=True, label='Val Set', histtype='step') #, norm=colors.LogNorm())
+        axs[3].set_xlabel('Probability')
+        axs[3].set_ylabel('cumulative density')
+        axs[3].set_xlim([0, .6])
+        axs[3].legend()
+
+    plt.suptitle("Tornado Prediction Probabilities")
 
     if save:
-        print("Saving history plot")
+        print("Saving prediction histograms")
         print(fname)
         plt.savefig(fname, dpi=dpi)
 
@@ -683,6 +707,10 @@ def create_argsparser():
                          help='Turn on gpu')
     parser.add_argument('--dry_run', action='store_true',
                          help='For testing. Execute without running or saving data and verify output paths')
+    parser.add_argument('--nogo', action='store_true',
+                         help='For testing. Do NOT execute any experiements')
+    parser.add_argument('--save', type=int, default=0,
+                         help='Specify data to save. 0 indicates save nothing. >=1 to save best hyperparameters and results in text format. >=2 save figures')
     return parser
 
 def parse_args():
@@ -709,7 +737,7 @@ def args2string(args):
     args_str = '' #f'{cdatetime}_'
     for arg, val in vars(args).items(): 
         if arg in ['in_dir', 'in_dir_val', 'out_dir', 'out_dir_tuning',
-                   'project_name_prefix', 'overwrite']:
+                   'project_name_prefix', 'overwrite', 'dry_run', 'nogo', 'save']:
             continue
         if isinstance(val, bool):
             args_str += f'{arg}={val:1d}_'
@@ -739,10 +767,22 @@ if __name__ == "__main__":
     args = parse_args()
     cdatetime, argstr = args2string(args)
 
-    #GRAB GPU0
+    # Grab select GPU(s)
     if args.gpu: py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
+    physical_devices = tf.config.get_visible_devices('GPU')
+    n_physical_devices = len(physical_devices)
+    # make sure all devices you are using have the same memory growth flag
+    for physical_device in physical_devices:
+        tf.config.experimental.set_memory_growth(physical_device, False)
+    # Verify number of GPUs
+    print(f'We have {n_physical_devices} GPUs\n')
 
-    tuner, hypermodel = create_tuner(args, DB=args.dry_run)
+    if args.nogo:
+        print('NOGO.')
+        exit()
+
+    tuner, hypermodel = create_tuner(args, DB=args.dry_run, 
+                                     strategy=tf.distribute.MirroredStrategy())
 
     ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
 
@@ -755,7 +795,8 @@ if __name__ == "__main__":
                        callbacks=None, DB=args.dry_run)
 
         # Report results
-        print('\n====================================')
+        print('\n=====================================================')
+        print('\n=====================================================')
         N_SUMMARY_TRIALS = args.number_of_summary_trials #5 #MAX_TRIALS
         tuner.results_summary(N_SUMMARY_TRIALS)
 
@@ -764,26 +805,25 @@ if __name__ == "__main__":
         best_hps = [hp.values for hp in best_hps_obj]
         #print("best_hp", best_hps[0].values)
 
-        # Retrieve best model
-        best_model = tuner.get_best_models(num_models=1)[0]
-
         # Save best hyperparams
         df = pd.DataFrame(best_hps)
         df['args'] = [argstr] * N_SUMMARY_TRIALS
         dirpath = os.path.join(args.out_dir, PROJ_NAME)
         hp_fnpath = os.path.join(dirpath, f"hps_{cdatetime}.csv")
         #hp_fnpath = f"{args.out_dir}/{PROJ_NAME}/hps_{argstr}.csv"
-        print(f"Saving top {N_SUMMARY_TRIALS:02d} hyperparameter")
+        print(f"\nSaving top {N_SUMMARY_TRIALS:02d} hyperparameter")
         print(hp_fnpath)
         # Display entire dataframe
         pd.set_option('display.max_rows', None)
         pd.set_option('display.max_columns', None)
         print(df)
-        df.to_csv(hp_fnpath)
+        if args.save > 0:
+            print("Saving", hp_fnpath)
+            df.to_csv(hp_fnpath)
 
         # Train with best hyperparameters
         BATCH_SIZE = args.batch_size
-        print("-------------------------")
+        print("\n-------------------------")
         print("Training Best Model")
         model = tuner.hypermodel.build(best_hps_obj[0])
         es = EarlyStopping(monitor=args.objective, patience=args.patience,  
@@ -792,26 +832,43 @@ if __name__ == "__main__":
                       batch_size=BATCH_SIZE, epochs=args.epochs, 
                       callbacks=[es]) #, verbose=1)
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_learning_plot.png")
-        plot_learning_loss(H, fname, save=True)
+        plot_learning_loss(H, fname, save=(args.save >= 2))
         #print(H.history.keys())
         #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
 
+        if args.save >= 2:
+            diagram_fnpath = os.path.join(dirpath, f"hp_model00_{cdatetime}_architecture.png")
+            print("Saving", diagram_fnpath)
+            plot_model(model, to_file=diagram_fnpath, show_dtype=True,  
+                    show_shapes=True, expand_nested=False)
+
+        #model_fnpath = os.path.join(dirpath, f"hp_model00_{cdatetime}.h5")
+        #hypermodel.save_model(model_fnpath, weights=True, #argstr
+        #                      model=model, save_traces=True)
+
         # Predict with trained model
-        print("PREDICTION")
-        xtrain_preds = best_model.predict(ds_train)
-        xval_preds = best_model.predict(ds_val)
+        print("\nPREDICTION")
+        xtrain_preds = model.predict(ds_train)
+        xval_preds = model.predict(ds_val)
         #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
         #print("FVAF::", fvaf(xtrain_recon, X_train), fvaf(xval_recon, X_val), fvaf(xtest_recon, X_test))
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_preds_distr.png")
-        plot_predictions(xtrain_preds, xval_preds, fname, save=True)
+        plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=(args.save >= 2))
 
         # Evaluate trained model
-        print("EVALUATION")
-        xtrain_eval = model.evaluate(ds_train)
-        xval_eval = model.evaluate(ds_val)
+        print("\nEVALUATION")
+        train_eval = model.evaluate(ds_train)
+        val_eval = model.evaluate(ds_val)
         #xtest_recon = model.evaluate(ds_test)
-        print("T EVAL::", xtrain_eval)
-        print("V EVAL", xval_eval)
+        metrics = H.history.keys()
+        evals = [ {k: v for k, v in zip(metrics, train_eval)} ]
+        evals.append( {k: v for k, v in zip(metrics, val_eval)} )
+        df_eval = pd.DataFrame(evals, index=['train', 'val'])
+        print(df_eval)
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_eval.csv")
+        if args.save > 0: 
+            print("Saving", fname)
+            df_eval.to_csv(fname)
 
         # TODO: CSI plot
         # TODO: reliablitiy curve
@@ -820,9 +877,18 @@ if __name__ == "__main__":
         # TODO: ROC - PR
 
 
+        '''
+        # Retrieve best model
+        print("\n-------------------------")
+        best_model = tuner.get_best_models(num_models=1)[0]
+        in_shape = ds_train.element_spec[0].shape
+        best_model.build(input_shape=in_shape)
+        Hb = best_model.fit(ds_train, validation_data=ds_val, callbacks=[es],
+                            batch_size=args.batch_size, epochs=args.epochs)
+
         # Save best model from hyperparam search
         model_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.h5")
-        print(f"Saving top model")
+        print(f"\nSaving top model")
         print(model_fnpath)
         best_model.summary()
         hypermodel.save_model(model_fnpath, weights=True, #argstr
@@ -836,7 +902,7 @@ if __name__ == "__main__":
         #diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}_expanded.png")
         #plot_model(best_model, to_file=diagram_fnpath,  
         #            show_dtype=True, show_shapes=True, expand_nested=True)
-
+        '''
     # Load the latest model
     else:
         #TODO
