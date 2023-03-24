@@ -3,11 +3,17 @@ Unit tests for U-net hypermodel for tuning the U-net
 hyperparameters.
 
 execute:
->> python -m unittest 
+>> python -m unittest -v lydia_scripts/scripts_tensorboard/unet_hypermodel_test.py [METHOD]
 """
 
-import sys, unittest, argparse
+import os, sys, unittest, argparse
+import pandas as pd
+
+sys.path.append("lydia_scripts/scripts_tensorboard")
 import unet_hypermodel as uh
+
+#from tensorflow import distribute #import MirroredStrategy
+from tensorflow.keras.callbacks import EarlyStopping #, TensorBoard, ModelCheckpoint 
 
 from keras_tuner.tuners import RandomSearch, Hyperband, BayesianOptimization
 from keras_tuner.engine import tuner as tuner_module
@@ -59,29 +65,48 @@ class TestUNetHyperModel(unittest.TestCase):
                         '--dry_run',
                         'bayes'
                     ]
-
-        sys.argv[1:] = ['--in_dir', '../../../test_data/3D_light/training_int_tor/training_ZH_only.tf', 
+        self.cmdline['oscer_t00'] = ['--in_dir', '../../../test_data/3D_light/training_int_tor/training_ZH_only.tf', 
                         #f'/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_{path}/training_ZH_only.tf'
                         '--in_dir_val', '../../../test_data/3D_light/validation_int_tor/validation_ZH_only.tf', 
                         #f'/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_{path}/validation_ZH_only.tf'
                         '--out_dir', '../../../test_data/tmp',
                         '--dry_run'] 
+
+        sys.argv[1:] = ['--in_dir', '../test_data/3D_light/training_ZH_only.tf', 
+                        '--in_dir_val', '../test_data/3D_light/validation1_ZH_only.tf', 
+                        '--out_dir', '../test_data/tmp',
+                        '--out_dir_tuning', '../test_data/tn',
+                        #'--overwrite',
+                        '--epochs', '3',
+                        '--batch_size', '256',
+                        '--dry_run',
+                        '--gpu',
+                        'hyper',
+                        '--max_epochs', '5', #slightly higher than expected epochs to convergence for your largest Model
+                        '--factor', '3'] 
         self.args = uh.parse_args()
 
     def test_args2string(self):
         self.maxDiff = None 
 
         # T00
-        argstr = uh.args2string(self.args)
-        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=03_max_consecutive_failed_trials=03_executions_per_trial=01_tuner=None_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0005_batch_size=0128_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_gpu=0_dry_run=0',
-        msg='')
+        _, argstr = uh.args2string(self.args)
+        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=hyper_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0003_batch_size=0256_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=1_max_epochs=0005_factor=03_hyperband_iterations=0001',
+        msg='args main. ') #gpu=1_dry_run=1_
+
+        # OSCER T00
+        sys.argv[1:] = self.cmdline['oscer_t00']
+        args = uh.parse_args()
+        _, argstr = uh.args2string(args)
+        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=None_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0005_batch_size=0128_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=0',
+        msg='args oscer_t00. ') #gpu=0_dry_run=1
 
         # T01
         sys.argv[1:] = self.cmdline['t00_rand']
         args = uh.parse_args()
-        argstr = uh.args2string(args)
-        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=03_max_consecutive_failed_trials=03_executions_per_trial=01_tuner=rand_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0005_batch_size=0128_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_gpu=0_dry_run=1',
-        msg='')
+        _, argstr = uh.args2string(args)
+        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=rand_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0005_batch_size=0128_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=0',
+        msg='args t00_rand. ') #gpu=0_dry_run=1
 
     def test_create_tuner(self):
         tuner, hypermodel = uh.create_tuner(self.args)
@@ -97,7 +122,6 @@ class TestUNetHyperModel(unittest.TestCase):
         args = uh.parse_args()
         argstr = uh.args2string(args)
         tuner, hypermodel = uh.create_tuner(args)
-        print(tuner)
         isRandomSearch = isinstance(tuner, RandomSearch)
         self.assertTrue(isRandomSearch, msg=f'not an instance of RandomSearch. type is {type(tuner)}. args.tuner is {args.tuner}')
         isUNetHyperModel = isinstance(hypermodel, uh.UNetHyperModel)
@@ -139,11 +163,12 @@ class TestUNetHyperModel(unittest.TestCase):
                          msg='Validation Dataset input shape was not (None, 32, 32, 12)')
         self.assertEqual(ds_val.element_spec[1].shape, (None, 32, 32, 1), 
                          msg='Validation Dataset output shape was not (None, 32, 32, 1)')
+        #inspect.signature() or inspect.getfullargspec()
 
     def test_search(self):
         args = self.args
 
-        tuner, hypermodel = uh.create_tuner(args, DB=args.dry_run)
+        tuner, hypermodel = uh.create_tuner(args, DB=args.dry_run) #, strategy=distribute.MirroredStrategy()
         ds_train, ds_val = uh.prep_data(args, n_labels=hypermodel.n_labels)
 
         PROJ_NAME_PREFIX = args.project_name_prefix
@@ -151,8 +176,59 @@ class TestUNetHyperModel(unittest.TestCase):
 
         # If a tuner is specified, run the hyperparameter search
         if not args.tuner is None:
+            #tuner.tuner_id = 'tid'
             uh.execute_search(args, tuner, ds_train, X_val=ds_val, 
                               callbacks=None, DB=args.dry_run)
+
+            print(" ")
+            tuner.results_summary(2)
+
+            # HPS
+            print('-------------------------------------------')
+            print("Training with best hyperparameters")
+            best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+            model = tuner.hypermodel.build(best_hps)
+            es = EarlyStopping(monitor=args.objective, patience=args.patience,  
+                               min_delta=args.min_delta, restore_best_weights=True)
+            H = model.fit(ds_train, validation_data=ds_val, callbacks=[es],
+                          batch_size=args.batch_size, epochs=args.epochs)
+            fname = os.path.join(args.out_dir, f"hp_model00_learning_plot.png")
+            uh.plot_learning_loss(H, fname, save=True)
+
+            train_preds = model.predict(ds_train)
+            val_preds = model.predict(ds_val)
+            fname = os.path.join(args.out_dir, f"hp_model00_preds_distr.png")
+            uh.plot_predictions(train_preds.ravel(), val_preds.ravel(), fname, save=True)
+
+            train_eval = model.evaluate(ds_train)
+            val_eval = model.evaluate(ds_val)
+            metrics = H.history.keys()
+            evals = [ {k: v for k, v in zip(metrics, train_eval)} ]
+            evals.append( {k: v for k, v in zip(metrics, val_eval)} )
+            df_eval = pd.DataFrame(evals, index=['train', 'val'])
+            print(df_eval)
+            fname = os.path.join(args.out_dir, f"hp_model00_eval.csv")
+            df_eval.to_csv(fname)
+
+
+            # MODEL
+            '''
+            print('-------------------------------------------')
+            best_model = tuner.get_best_models(num_models=1)[0]
+            best_model.summary()
+            best_model.build(input_shape=ds_train.element_spec[0].shape) #(None, 28, 28))
+            Hb = best_model.fit(ds_train, validation_data=ds_val, callbacks=[es],
+                                batch_size=args.batch_size, epochs=args.epochs)
+
+            train_preds = best_model.predict(ds_train)
+            val_preds = best_model.predict(ds_val)
+
+            train_eval = best_model.evaluate(ds_train)
+            val_eval = best_model.evaluate(ds_val)
+            print("M T EVAL", train_eval)
+            print("M V EVAL", val_eval)
+            '''
+
         #self.assertTrue('FOO'.isupper())
         #self.assertFalse('Foo'.isupper())
 
