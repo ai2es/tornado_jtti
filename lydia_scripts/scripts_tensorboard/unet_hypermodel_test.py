@@ -7,7 +7,9 @@ execute:
 """
 
 import os, sys, unittest, argparse
+import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 sys.path.append("lydia_scripts/scripts_tensorboard")
 import unet_hypermodel as uh
@@ -77,8 +79,8 @@ class TestUNetHyperModel(unittest.TestCase):
                         '--out_dir', '../test_data/tmp',
                         '--out_dir_tuning', '../test_data/tn',
                         #'--overwrite',
-                        '--epochs', '3',
-                        '--batch_size', '256',
+                        '--epochs', '2',
+                        '--batch_size', '300',
                         '--dry_run',
                         '--gpu',
                         'hyper',
@@ -86,12 +88,28 @@ class TestUNetHyperModel(unittest.TestCase):
                         '--factor', '3'] 
         self.args = uh.parse_args()
 
+        # Grab select GPU(s)
+        from py3nvml import grab_gpus
+        #if self.args.gpu: grab_gpus(num_gpus=1, gpu_select=[0])
+
+        from tensorflow.debugging import set_log_device_placement
+        if self.args.dry_run: set_log_device_placement(True)
+
+        from tensorflow.config import get_visible_devices
+        physical_devices = get_visible_devices('GPU')
+        n_physical_devices = len(physical_devices)
+
+        from tensorflow.config.experimental import set_memory_growth
+        for physical_device in physical_devices:
+            set_memory_growth(physical_device, False)
+        print(f'We have {n_physical_devices} GPUs\n')
+
     def test_args2string(self):
         self.maxDiff = None 
 
         # T00
         _, argstr = uh.args2string(self.args)
-        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=hyper_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0003_batch_size=0256_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=1_max_epochs=0005_factor=03_hyperband_iterations=0001',
+        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=hyper_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0002_batch_size=0300_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=1_max_epochs=0005_factor=03_hyperband_iterations=0001',
         msg='args main. ') #gpu=1_dry_run=1_
 
         # OSCER T00
@@ -166,6 +184,8 @@ class TestUNetHyperModel(unittest.TestCase):
         #inspect.signature() or inspect.getfullargspec()
 
     def test_search(self):
+        import time
+        t0 = time.time()
         args = self.args
 
         tuner, hypermodel = uh.create_tuner(args, DB=args.dry_run) #, strategy=distribute.MirroredStrategy()
@@ -191,15 +211,63 @@ class TestUNetHyperModel(unittest.TestCase):
             es = EarlyStopping(monitor=args.objective, patience=args.patience,  
                                min_delta=args.min_delta, restore_best_weights=True)
             H = model.fit(ds_train, validation_data=ds_val, callbacks=[es],
-                          batch_size=args.batch_size, epochs=args.epochs)
+                          batch_size=args.batch_size, epochs=args.epochs)#, steps_per_epoch=80)
             fname = os.path.join(args.out_dir, f"hp_model00_learning_plot.png")
             uh.plot_learning_loss(H, fname, save=True)
 
+            #del tuner
+
+            # Predictions
+            print("predicting...")
             train_preds = model.predict(ds_train)
             val_preds = model.predict(ds_val)
+            print(train_preds.shape)
+            #print(val_preds.shape)
             fname = os.path.join(args.out_dir, f"hp_model00_preds_distr.png")
             uh.plot_predictions(train_preds.ravel(), val_preds.ravel(), fname, save=True)
 
+            # CSI Curve
+            y_train = np.concatenate([y for x, y in ds_train])
+            y_val = np.concatenate([y for x, y in ds_val])
+            fname = os.path.join(args.out_dir, f"hp_model00_csi_train_val.png")
+            fig, ax = uh.plot_csi(y_train.ravel(), train_preds.ravel(), fname, label='Train', show_cb=False)
+            uh.plot_csi(y_val.ravel(), val_preds.ravel(), fname, label='Val', color='orange', save=True, fig_ax=(fig, ax))
+            plt.close(fig)
+            del fig, ax
+
+            # TODO: Reliability Curve
+            fname = os.path.join(args.out_dir, f"hp_model00_reliability_train_val.png")
+            fig, ax = uh.plot_reliabilty_curve(y_train.ravel(), train_preds.ravel(),  
+                                     fname, save=False, label='Train')
+            uh.plot_reliabilty_curve(y_val.ravel(), val_preds.ravel(), fname, 
+                                     fig_ax=(fig, ax), save=True, label='Val', c='orange')
+            plt.close(fig)
+            del fig, ax
+
+            # PRC
+            fname = os.path.join(args.out_dir, f"hp_model00_prc_train_val.png")
+            fig, ax = uh.plot_prc(y_train.ravel(), train_preds.ravel(), fname, save=False, label='Train')
+            #fname = os.path.join(args.out_dir, f"hp_model00_roc_val.png")
+            uh.plot_prc(y_val.ravel(), val_preds.ravel(), fname, fig_ax=(fig, ax), save=True, label='Val', c='orange')
+            plt.close(fig)
+            del fig, ax
+
+            # ROC
+            fname = os.path.join(args.out_dir, f"hp_model00_roc_train_val.png")
+            fig, ax = uh.plot_roc(y_train.ravel(), train_preds.ravel(), fname, save=False, label='Train')
+            #fname = os.path.join(args.out_dir, f"hp_model00_roc_val.png")
+            uh.plot_roc(y_val.ravel(), val_preds.ravel(), fname, fig_ax=(fig, ax), save=True, label='Val', c='orange')
+            plt.close(fig)
+            del fig, ax
+
+            # Confusion Matrix
+            fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_train.png")
+            uh.plot_confusion_matrix(y_train.ravel(), train_preds.ravel(), fname, p=0.12, save=True)
+            fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_val.png")
+            uh.plot_confusion_matrix(y_val.ravel(), val_preds.ravel(), fname, p=0.12, save=True)
+
+            # Evaluate
+            print("evaluating...")
             train_eval = model.evaluate(ds_train)
             val_eval = model.evaluate(ds_val)
             metrics = H.history.keys()
@@ -210,6 +278,8 @@ class TestUNetHyperModel(unittest.TestCase):
             fname = os.path.join(args.out_dir, f"hp_model00_eval.csv")
             df_eval.to_csv(fname)
 
+            t1 = time.time()
+            print(f"Elapsed {(t1-t0)/60}min")
 
             # MODEL
             '''

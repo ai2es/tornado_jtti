@@ -40,6 +40,9 @@ font = {#'family' : 'normal',
         'size'   : 14}
 matplotlib.rc('font', **font)
 
+from sklearn.metrics import confusion_matrix, roc_curve, precision_recall_curve
+from sklearn.calibration import calibration_curve
+
 import tensorflow as tf
 print("tensorflow version", tf.__version__)
 from tensorflow import keras
@@ -379,7 +382,7 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
     return tuner, hypermodel
 
 def execute_search(args, tuner, X_train, X_val=None, 
-                   callbacks=None, DB=0, **kwargs):
+                   callbacks=None, cdatetime='', DB=0, **kwargs):
     ''' TODO
     Execute the hyperparameter search. Calls tuner.search()
     @param args: the command line args object. See create_argsparser() for
@@ -396,7 +399,8 @@ def execute_search(args, tuner, X_train, X_val=None,
     @param X_train: Tensorflow Dataset
     @param X_val: optional Tensorflow Dataset
     @params callbacks: overwrite the default callbacks. Default callbacks are 
-            EarlyStopping and Tensorboard. (TODO: ModelCheckpoint)
+            EarlyStopping and Tensorboard. (TODO: [Maybe] ModelCheckpoint)
+    @param cdatetime: formatted datetime string appended to Tensorboard directory name
     @param DB: debug flag to print the resulting hyperparam search space
     @param kwargs: additional keyword arguments
     '''
@@ -412,7 +416,7 @@ def execute_search(args, tuner, X_train, X_val=None,
         es = EarlyStopping(monitor=args.objective, #start_from_epoch=10, 
                             patience=args.patience, min_delta=args.min_delta, 
                             restore_best_weights=True)
-        tb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_tb')
+        tb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_tb{cdatetime}')
         tb = TensorBoard(tb_path, histogram_freq=5) #--logdir=
         #cp = ModelCheckpoint(filepath=f"{tuner_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
         #manager = tf.train.CheckpointManager(ckpt, './tf_ckpts', max_to_keep=3)
@@ -430,9 +434,48 @@ def execute_search(args, tuner, X_train, X_val=None,
                 steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, workers=1, 
                 use_multiprocessing=False) 
 
-# TODO
-def load_data(args):
-    pass
+def get_rotation_indicies(args, nfolds, DB=0):
+    ''' TODO TEST
+    Get the fold indicies for each rotations.
+    @param args:
+    @param nfolds: number of folds for the data
+    @return: 3-tuple with the 2D numpy arrays of the train, val, and test sets.
+            Each column is a fold index. Each row is a rotation.
+    '''
+    # List of fodl indicies
+    folds = np.arange(nfolds).reshape(1,-1)
+
+    # Matrix of rotations of the folds
+    folds_mesh = np.repeat(folds, folds, axis=0)
+
+    # Rotate folds
+    offset = np.arange(nfolds).reshape(-1,1)
+    folds_mesh += offset # shift fold index based on rotation (i.e. row)
+    folds_mesh = folds_mesh % nfolds # wrap fold indicies
+
+    train_inds = folds_mesh[:, :-2]
+    val_inds = folds_mesh[:, -2]
+    test_inds = folds_mesh[:, -1]
+
+    if DB:
+        print("TRAIN SET\n", train_inds)
+        print("VAL SET\n", val_inds)
+        print("TEST SET\n", test_inds)
+    return train_inds, val_inds, test_inds
+
+def take_rotation_data(args, data, folds, r=0):
+    ''' TODO
+    #def take_rotation_date(args, itrain, ival, itest):
+    Grab the actual data based on the fold indicies for a specific rotation
+    @param args: the command line args. See create_argsparser() for more details
+    @param data: the data to partition
+    @param folds: the 2D array of fold indicies. row is the rotation. col is the
+            fold index
+    @param r: the rotation to select
+    '''
+    #ins_validation = np.concatenate(np.take(ins, folds_validation), axis=0)
+    #outs_validation = np.concatenate(np.take(outs, folds_validation), axis=0)
+    return np.concatenate(np.take(data, folds[r]), axis=0)        
 
 def prep_data(args, n_labels=None, DB=1):
     """ 
@@ -499,7 +542,7 @@ def prep_data(args, n_labels=None, DB=1):
     #xy_train = np.array(list(ds_train.as_numpy_iterator()))
     #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
     ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val)
-    ds_val = ds_val.batch(args.batch_size)
+    ds_val = ds_val.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
     ds_val = ds_val.prefetch(tf.data.AUTOTUNE)
     if DB:
         print("Training Dataset Specs:", specs)
@@ -521,7 +564,75 @@ def fvaf(y_true, y_pred):
     VAR = np.var(y_true.flatten()) #tf.math.reduce_variance(y_true)
     return 1. - MSE / VAR
 
-def plot_learning_loss(history, fname, save=False, dpi=220):
+def csi_from_sr_and_pod(success_ratio_array, pod_array):
+    """
+    Based on method from Dr. Ryan Laguerquist and found originally in his 
+    gewitter repo (https://github.com/thunderhoser/GewitterGefahr).
+    Computes CSI (critical success index) from success ratio and POD.
+    POD = probability of detection
+    :param success_ratio_array: np array (any shape) of success ratios.
+    :param pod_array: np array (same shape) of POD values.
+    :return: csi_array: np array (same shape) of CSI values.
+    """
+    return (success_ratio_array ** -1 + pod_array ** -1 - 1.) ** -1
+
+def frequency_bias_from_sr_and_pod(success_ratio_array, pod_array):
+    """
+    Based on method from Dr. Ryan Laguerquist and found originally in his 
+    gewitter repo (https://github.com/thunderhoser/GewitterGefahr).
+    Computes frequency bias from success ratio and POD.
+    POD = probability of detection
+    :param success_ratio_array: np array (any shape) of success ratios.
+    :param pod_array: np array (same shape) of POD values.
+    :return: frequency_bias_array: np array (same shape) of frequency biases.
+    """
+    return pod_array / success_ratio_array
+
+def contingency_curves(y, y_preds, threshs):
+    '''
+    Compute the contingency/confusion matrix for multiple thresholds to use in
+    various types of performance curves
+    '''
+    tp = tf.keras.metrics.TruePositives(thresholds=threshs)
+    fp = tf.keras.metrics.FalsePositives(thresholds=threshs)
+    fn = tf.keras.metrics.FalseNegatives(thresholds=threshs)
+    tn = tf.keras.metrics.TrueNegatives(thresholds=threshs)
+
+    # Get tp, fp and fn 
+    tp.reset_state()
+    fp.reset_state()
+    fn.reset_state()
+    tn.reset_state()
+
+    tps = tp(y, y_preds)
+    fps = fp(y, y_preds)
+    fns = fn(y, y_preds)
+    tns = tn(y, y_preds)
+    return tps, fps, fns, tns
+
+def get_max_csi(y, y_preds, thresh=np.arange(0.05, 1.05, 0.05)):
+    '''
+    @param y: true output
+    @param y_preds: predicted output
+    @param thresh: probability threholds 
+    '''
+    #tp = tf.keras.metrics.TruePositives(thresholds=thresh.tolist())
+    #fp = tf.keras.metrics.FalsePositives(thresholds=thresh.tolist())
+    #fn = tf.keras.metrics.FalseNegatives(thresholds=thresh.tolist())
+    #mcsi = MaxCriticalSuccessIndex(tp, fp, fn)
+    mcsi = MaxCriticalSuccessIndex()
+    mcsi.reset_state()
+    mcsis = mcsi(y, y_preds).numpy()
+
+    # TODO
+    tp = mcsis.tp
+    fp = mcsis.fp
+    fn = mcsis.fn
+    tn = 0 #TODO mcsis.tn  thresholds
+
+    return mcsis, tp, fp, fn, tn
+
+def plot_learning_loss(history, fname, save=False, dpi=180):
     '''
     Plot the juxtaposition of the training and validation loss
     @param history: history object returned from model.fit()
@@ -543,8 +654,9 @@ def plot_learning_loss(history, fname, save=False, dpi=220):
 
     return plt.gcf()
 
-def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12, 8), alpha=.5, save=False, dpi=220):
+def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12, 8), alpha=.5, save=False, dpi=180):
     '''
+    @return: tuple with the fig and axes objects
     '''
     fig, axs = plt.subplots(1, 2, figsize=figsize)
     axs = axs.ravel()
@@ -612,6 +724,271 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
         plt.savefig(fname, dpi=dpi)
 
     return fig, axs
+
+def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), save=False, 
+                          thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
+    '''
+    Compute and plot the confusion matrix based on the cutoff p.
+    Based on method from Tensorflow docs.
+
+    @param y: true output
+    @param y_preds: predicted output
+    @param fname: file name to save the figure as
+    @param p: cutoff probability above which is labelled 1
+    @param thresh: list of the thresholds for other performance plots
+    @param figsize: tuple with the width and height of the figure
+    @param save: bool flag whether to save the figure
+    @param dpi: integer resolution of the saved figure in dots per inch
+
+    @return: tuple with the fig and axes objects
+    '''
+    from seaborn import heatmap
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    #axs = axs.ravel()
+
+    cm = confusion_matrix(y, y_preds > p)
+    heatmap(cm, annot=True, fmt="d", ax=ax)
+    ax.set_title(f'Confusion matrix @{p:.2f}')
+    ax.set_xlabel('Predicted label')
+    ax.set_ylabel('Actual label')
+    ax.set_aspect('equal')
+
+    print(" ")
+    print('TN: ', cm[0, 0])
+    print('FP: ', cm[0, 1])
+    print('FN: ', cm[1, 0])
+    print('TP: ', cm[1, 1])
+    print('Total: ', cm.sum())
+
+    #TODO: mcsis, tp, fp, fn, tn = get_max_csi(y, y_preds, thresh=thresh)
+
+    if save:
+        print("Saving confusion matrix")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, ax
+
+def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=180, **kwargs):
+    '''
+    Plot the Reciever Operating Characteristic (ROC) Curve
+    @param y: true output
+    @param y_preds: predicted output
+    @param fname: file name to save the figure as
+    @param fig_ax: (optional) tuple with existing figure and axes objects to use
+    @param figsize: tuple with the width and height of the figure
+    @param save: bool flag whether to save the figure
+    @param dpi: integer resolution of the saved figure in dots per inch
+    @param **kwargs: additional keyword arguments from Axes.plot()
+    @return: tuple with the fig and axes objects
+    '''
+    fig = None
+    ax = None
+    if fig_ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fig_ax
+
+    fpr, tpr, _ = roc_curve(y, y_preds)
+
+    ax.plot(fpr, tpr, linewidth=2, **kwargs)
+    ax.plot([0, 1], [0, 1], '--')
+    #ax.plot(100*fp, 100*tp, label=name, linewidth=2, **kwargs)
+    ax.set(xlabel='FPR', ylabel='TPR')
+    ax.set(xlim=[0, 1], ylim=[0, 1])
+    ax.grid(True)
+    ax.legend()
+    ax.set_aspect('equal')
+
+    if save:
+        print("Saving ROC plot")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, ax
+
+def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=180, **kwargs):
+    '''
+    Plot the Precision Recall Curve (PRC)
+    @param y: true output
+    @param y_preds: predicted output
+    @param fname: file name to save the figure as
+    @param fig_ax: (optional) tuple with existing figure and axes objects to use
+    @param figsize: tuple with the width and height of the figure
+    @param save: bool flag whether to save the figure
+    @param dpi: integer resolution of the saved figure in dots per inch
+    @param **kwargs: additional keyword arguments from Axes.plot()
+    @return: tuple with the fig and axes objects
+    '''
+    fig = None
+    ax = None
+    if fig_ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fig_ax
+
+    precision, recall, _ = precision_recall_curve(y, y_preds)
+
+    ax.plot(precision, recall, linewidth=2, **kwargs)
+    ax.plot([0, 1], [1, 0], '--')
+    ax.set(xlabel='Precision', ylabel='Recall')
+    #ax.set(xlim=[0, 1], ylim=[0, 1])
+    ax.grid(True)
+    ax.legend()
+    ax.set_aspect('equal')
+
+    if save:
+        print("Saving PRC plot")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, ax
+
+def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, fig_ax=None, 
+                          figsize=(10, 10), save=False, dpi=180, **kwargs):
+    '''
+    Plot the reliability curve. Perfect model follows the y = x line. This curve
+    compares the quality of probabilistic predictions of binary classifiers by
+    plotting the true frequency of the positive label against its predicted 
+    probability. See calibration_curve in Sci-kit (sklearn) for more details
+    @param y: true output
+    @param y_preds: predicted output
+    @param fname: file name to save the figure as
+    @param fig_ax: (optional) tuple with existing figure and axes objects to use
+    @param figsize: tuple with the width and height of the figure
+    @param save: bool flag whether to save the figure
+    @param dpi: integer resolution of the saved figure in dots per inch
+    @param **kwargs: additional keyword arguments from Axes.plot()
+    @return: tuple with the fig and axes objects
+    '''
+    fig = None
+    ax = None
+    if fig_ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fig_ax
+
+    # Calculate observed frequency and predicted probabilities
+    prob, prob_preds = calibration_curve(y, y_preds, n_bins=n_bins)
+
+    ax.plot(prob, prob_preds, **kwargs)
+    ax.plot([0, 1], linestyle='--')
+    ax.set_xlabel("Predicted Probability")
+    ax.set_ylabel("Observed Frequency")
+    ax.grid(True)
+    ax.legend()
+    ax.set_aspect('equal')
+    #plt.tight_layout()
+
+    if save:
+        print("Saving reliability plot")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, ax
+
+def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True, 
+                  csi_cmap='Greys_r', show_cb=True, fb_strfmt='%.2f', fb_padding=5):
+    '''
+    Based on make_performance_diagram_axis() from Dr. Ryan Laguerquist and found 
+    originally in his gewitter repo (https://github.com/thunderhoser/GewitterGefahr).
+    Helper function to make the axes for the performance plot of the CSI. 
+    @param ax: matplotlib axes object to use
+    @param figsize: tuple with the width and height of the figure
+    @param show_csi: bool whether to plot the CSI contours
+    @param show_fb: bool whether to plot the frequency bias lines
+    @param csi_cmap: color map to use for the CSI contours
+    @param show_cb: bool whether to show the CSI colorbar
+    @param fb_strfmt: string format for the frequency bias values
+    @param fb_padding: space in pixels on each side of the frequency bias labels
+    '''
+    # For text outlines
+    import matplotlib.patheffects as path_effects
+    pe = [path_effects.withStroke(linewidth=2, foreground="k")]
+    pe2 = [path_effects.withStroke(linewidth=2, foreground="w")]
+
+    if ax is None:
+        fig=plt.figure(figsize=figsize)
+        fig.set_facecolor('w')
+        ax = plt.gca()
+    
+    if show_csi:
+        sr_array = np.linspace(0.001, 1, 200)
+        pod_array = np.linspace(0.001, 1, 200)
+        X, Y = np.meshgrid(sr_array, pod_array)
+        csi_vals = csi_from_sr_and_pod(X, Y)
+        pm = ax.contourf(X, Y, csi_vals, levels=np.arange(0,1.1,0.1), cmap=csi_cmap)
+        if show_cb: plt.colorbar(pm, ax=ax, label='CSI')
+    
+    if show_fb:
+        fb = frequency_bias_from_sr_and_pod(X, Y)
+        bias = ax.contour(X, Y, fb, levels=[.25,.5,.75,1,1.5,2,3,5], 
+                          linestyles='--', colors='Grey')
+        plt.clabel(bias, inline=True, inline_spacing=fb_padding, 
+                   fmt=fb_strfmt, fontsize=15, colors='Grey')
+    
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+    ax.set_xlabel('SR')
+    ax.set_ylabel('POD')
+    return ax
+
+def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=None, 
+             color='dodgerblue', figsize=(10, 10), save=False, dpi=180, **csiargs):#, **plotargs):
+    ''' TODO TEST
+    Plot the performance curve. This relates to the Critical Success Index (CSI).
+    The top right corner shows increasingly better predictions, and where 
+    CSI = 1. (this curve is highly senstive to event freq)
+    @param csiargs: keyword args for make_csi_axis()
+    '''
+    fig = None
+    ax = None
+    if fig_ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fig_ax
+
+    # Calculate performance diagram 
+    tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
+    srs = np.asarray(tps / (tps + fps))
+    pods = np.asarray(tps / (tps + fns))
+    csis = tps / (tps + fns + fps)
+
+    #TODO: Plot star of
+    xi = np.argmax(csis)
+    thres_of_maxcsi = threshs[xi]
+    sr_of_maxcsi = srs[xi]
+    pod_of_maxcsi = pods[xi]
+
+    ax = make_csi_axis(ax=ax, **csiargs)
+    ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label)#, **plotargs)
+    ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15) 
+    #ax.plot(srs,pods,'-',color='r',markerfacecolor='w',lw=2, label='Testing: Max CSI = %.2f' % maxcsi)
+    #ax.plot(srs_val,pods_val,'-',color='red',markerfacecolor='w',lw=2,label='Validation')
+    ax.legend(loc='upper right')
+    ax.set_aspect('equal')
+
+    #threshs = np.linspace(0, 1, 11)
+    #thresh = np.arange(0.05, 1.05, 0.05)
+    # For text outlines 
+    import matplotlib.patheffects as path_effects
+    pe1 = [path_effects.withStroke(linewidth=1.5, foreground="k")]
+    pe2 = [path_effects.withStroke(linewidth=1.5, foreground="w")]
+
+    for i,t in enumerate(threshs):
+        if np.isnan(srs[i]) or np.isnan(pods[i]): continue
+        text = np.char.ljust(str(np.round(t,2)), width=4, fillchar='0')
+        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=9, color='white')
+        #ax.text(srs[i]+0.02,pods[i]+0.02,text,fontsize=9,color='white')
+
+    #plt.tight_layout()
+    if save:
+        print("Saving performance (CSI) plot")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, ax
 
 def create_argsparser():
     '''
@@ -769,13 +1146,18 @@ if __name__ == "__main__":
 
     # Grab select GPU(s)
     if args.gpu: py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
+    if args.dry_run: tf.debugging.set_log_device_placement(True)
+
     physical_devices = tf.config.get_visible_devices('GPU')
     n_physical_devices = len(physical_devices)
-    # make sure all devices you are using have the same memory growth flag
+
+    # Ensure all devices used have the same memory growth flag
     for physical_device in physical_devices:
         tf.config.experimental.set_memory_growth(physical_device, False)
+
     # Verify number of GPUs
     print(f'We have {n_physical_devices} GPUs\n')
+    #print("# GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 
     if args.nogo:
         print('NOGO.')
@@ -791,8 +1173,8 @@ if __name__ == "__main__":
 
     # If a tuner is specified, run the hyperparameter search
     if not args.tuner is None:
-        execute_search(args, tuner, ds_train, X_val=ds_val, 
-                       callbacks=None, DB=args.dry_run)
+        execute_search(args, tuner, ds_train, X_val=ds_val, callbacks=None, 
+                       cdatetime=cdatetime, DB=args.dry_run)
 
         # Report results
         print('\n=====================================================')
@@ -833,7 +1215,6 @@ if __name__ == "__main__":
                       callbacks=[es]) #, verbose=1)
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_learning_plot.png")
         plot_learning_loss(H, fname, save=(args.save >= 2))
-        #print(H.history.keys())
         #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
 
         if args.save >= 2:
@@ -842,7 +1223,7 @@ if __name__ == "__main__":
             plot_model(model, to_file=diagram_fnpath, show_dtype=True,  
                     show_shapes=True, expand_nested=False)
 
-        #model_fnpath = os.path.join(dirpath, f"hp_model00_{cdatetime}.h5")
+        #if args.save >= 3: model_fnpath = os.path.join(dirpath, f"hp_model00_{cdatetime}.h5")
         #hypermodel.save_model(model_fnpath, weights=True, #argstr
         #                      model=model, save_traces=True)
 
@@ -851,9 +1232,40 @@ if __name__ == "__main__":
         xtrain_preds = model.predict(ds_train)
         xval_preds = model.predict(ds_val)
         #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
-        #print("FVAF::", fvaf(xtrain_recon, X_train), fvaf(xval_recon, X_val), fvaf(xtest_recon, X_test))
+        #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_preds_distr.png")
         plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=(args.save >= 2))
+        plt.close()
+
+        # Confusion Matrix
+        y_train = np.concatenate([y for x, y in ds_train])
+        y_val = np.concatenate([y for x, y in ds_val])
+        threshs = np.linspace(0, 1, 51)
+        tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs)
+        csis = tps / (tps + fns + fps)
+        xi = np.argmax(csis)
+        cutoff_probab = threshs[xi] #.12 #TODO: cutoff with heightest CSI
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_train_val.png")
+        fig, ax = plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, save=False)        
+        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), p=cutoff_probab, save=(args.save >= 2))
+        plt.close(fig)
+        del fig, ax
+
+        # ROC
+        y_train = np.concatenate([y for x, y in ds_train])
+        y_val = np.concatenate([y for x, y in ds_val])
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_roc_train_val.png")
+        fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
+        plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
+        plt.close()
+        del fig, ax
+
+        # PRC
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_prc_train_val.png")
+        fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
+        plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
+        plt.close()
+        del fig, ax
 
         # Evaluate trained model
         print("\nEVALUATION")
@@ -870,11 +1282,23 @@ if __name__ == "__main__":
             print("Saving", fname)
             df_eval.to_csv(fname)
 
-        # TODO: CSI plot
-        # TODO: reliablitiy curve
-        # TODO: performance_plot
-        # TODO: ROC
-        # TODO: ROC - PR
+        # CSI Curve
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_csi_train_val.png")
+        fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                           label='Train', show_cb=False)
+        plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
+                           color='orange', save=True, fig_ax=(fig, ax))
+        plt.close(fig)
+        del fig, ax
+
+        # Reliability Curve
+        fname = os.path.join(dirpath, f"hp_model00_reliability_train_val.png")
+        fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
+                                    fname, save=False, label='Train')
+        plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
+                                    fig_ax=(fig, ax), save=True, label='Val', c='orange')
+        plt.close(fig)
+        del fig, ax
 
 
         '''
@@ -918,22 +1342,5 @@ if __name__ == "__main__":
 
     # TODO: Load test set
 
-    '''
-    # Predict with latest model
-    print("-------------------------")
-    print("PREDICTION")
-    xtrain_recon = best_model.predict(ds_train, batch_size=BATCH_SIZE)
-    xval_recon = best_model.predict(ds_val, batch_size=BATCH_SIZE)
-    xtest_recon = best_model.predict(ds_test, batch_size=BATCH_SIZE)
-    #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
-
-    # Evaluate the best model
-    print("-------------------------")
-    print("EVALUATION")
-    res_train = best_model.evaluate(X_train, X_train)
-    res_val = best_model.evaluate(X_val, X_val)
-    res_test = best_model.evaluate(X_test, X_test)
-    print(res_train, res_val, res_test)
-    '''
 
     print('DONE.\n')
