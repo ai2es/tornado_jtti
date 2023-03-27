@@ -5,8 +5,9 @@
 ##SBATCH --partition=gpu_a100
 ##SBATCH --time=1:00:00
 #SBATCH -p ai2es
-#SBATCH --time=2:00:00
-##SBATCH --nodelist=c733
+#SBATCH --time=24:00:00
+#SBATCH --nodelist=c731
+#SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1  #-n 20
 ##SBATCH --cpus-per-task=5
@@ -19,7 +20,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --verbose
 ##SBATCH --array=0-1000%20
-##SBATCH --profile=Task      #data collection on  (I/O, Memory, ...) data is collected. stored in an HDF5 file for the job
+##SBATCH --profile=Task   #data collection on  (I/O, Memory, ...) data is collected. stored in an HDF5 file for the job
 
 
 ##########################################################
@@ -58,17 +59,18 @@ python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_tor/validation1_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
---tuner_id="debug" \
---epochs=6 \
+--epochs=1000 \
 --batch_size=300 \
---number_of_summary_trials=3 \
+--lrate=2e-4 \
 --overwrite \
---dry_run \
+--number_of_summary_trials=3 \
 --gpu \
---save=0 \
+--save=2 \
 hyper \
---max_epochs=6 \
+--max_epochs=1000 \
 --factor=3 
+#--tuner_id="debug" \
+#--dry_run \
 #--nogo \
 
 
