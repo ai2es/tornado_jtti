@@ -373,11 +373,9 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
             #**tuner_args
         )
 
-    if DB:
-        print(' ')
-        print('==============================')
-        tuner.search_space_summary()
-        print(' ')
+    print('\n==============================')
+    tuner.search_space_summary()
+    print(' ')
 
     return tuner, hypermodel
 
@@ -564,6 +562,16 @@ def fvaf(y_true, y_pred):
     VAR = np.var(y_true.flatten()) #tf.math.reduce_variance(y_true)
     return 1. - MSE / VAR
 
+def compute_csi(tps, fns, fps):
+    '''
+    Compute the CSI from a scalars or lists of the true positives (TPs), false negatives (FNs), and the false positives (FPs)
+    @param tps: scalar or numpy array of true positives
+    @param fns: scalar or numpy array of false negatives
+    @param fps: scalar or numpy array of false positives
+    @return: scalar or numpy array for the CSI (critical success index)
+    '''
+    return tps / (tps + fns + fps)
+
 def csi_from_sr_and_pod(success_ratio_array, pod_array):
     """
     Based on method from Dr. Ryan Laguerquist and found originally in his 
@@ -725,7 +733,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), save=False, 
+def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), save=False, 
                           thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
@@ -737,19 +745,26 @@ def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), save=False,
     @param p: cutoff probability above which is labelled 1
     @param thresh: list of the thresholds for other performance plots
     @param figsize: tuple with the width and height of the figure
+    @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param save: bool flag whether to save the figure
     @param dpi: integer resolution of the saved figure in dots per inch
 
     @return: tuple with the fig and axes objects
     '''
     from seaborn import heatmap
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    
+    fig = None
+    ax = None
+    if fig_ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fig_ax
+    #fig, ax = plt.subplots(1, 1, figsize=figsize)
     #axs = axs.ravel()
 
     cm = confusion_matrix(y, y_preds > p)
     heatmap(cm, annot=True, fmt="d", ax=ax)
-    ax.set_title(f'Confusion matrix @{p:.2f}')
+    ax.set_title(f'p > {p:.2f}')
     ax.set_xlabel('Predicted label')
     ax.set_ylabel('Actual label')
     ax.set_aspect('equal')
@@ -953,7 +968,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
     srs = np.asarray(tps / (tps + fps))
     pods = np.asarray(tps / (tps + fns))
-    csis = tps / (tps + fns + fps)
+    csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
 
     #TODO: Plot star of
     xi = np.argmax(csis)
@@ -1145,19 +1160,24 @@ if __name__ == "__main__":
     cdatetime, argstr = args2string(args)
 
     # Grab select GPU(s)
-    if args.gpu: py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
-    if args.dry_run: tf.debugging.set_log_device_placement(True)
+    if args.gpu: 
+        print("Attempting to grab GPU")
+        py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
-    physical_devices = tf.config.get_visible_devices('GPU')
-    n_physical_devices = len(physical_devices)
+        '''
+        physical_devices = tf.config.get_visible_devices('GPU')
+        n_physical_devices = len(physical_devices)
 
-    # Ensure all devices used have the same memory growth flag
-    for physical_device in physical_devices:
-        tf.config.experimental.set_memory_growth(physical_device, False)
+        # Ensure all devices used have the same memory growth flag
+        for physical_device in physical_devices:
+            tf.config.experimental.set_memory_growth(physical_device, False)
+        print(f'We have {n_physical_devices} GPUs\n')
+        '''
 
-    # Verify number of GPUs
-    print(f'We have {n_physical_devices} GPUs\n')
-    #print("# GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+    #if args.dry_run: 
+    tf.debugging.set_log_device_placement(True)
+
+    print("GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 
     if args.nogo:
         print('NOGO.')
@@ -1178,8 +1198,8 @@ if __name__ == "__main__":
 
         # Report results
         print('\n=====================================================')
-        print('\n=====================================================')
-        N_SUMMARY_TRIALS = args.number_of_summary_trials #5 #MAX_TRIALS
+        print('=====================================================')
+        N_SUMMARY_TRIALS = args.number_of_summary_trials
         tuner.results_summary(N_SUMMARY_TRIALS)
 
         # Retrieve best hyperparams
@@ -1240,20 +1260,23 @@ if __name__ == "__main__":
         # Confusion Matrix
         y_train = np.concatenate([y for x, y in ds_train])
         y_val = np.concatenate([y for x, y in ds_val])
-        threshs = np.linspace(0, 1, 51)
+        threshs = np.linspace(0, 1, 51).tolist()
         tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs)
-        csis = tps / (tps + fns + fps)
+        csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
         xi = np.argmax(csis)
-        cutoff_probab = threshs[xi] #.12 #TODO: cutoff with heightest CSI
+        cutoff_probab = threshs[xi] # cutoff with heightest CSI
+        print(f"Max CSI: {csis[xi]}  Thres: {cutoff_probab}  Index: {xi}")
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_train_val.png")
-        fig, ax = plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, save=False)        
-        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), p=cutoff_probab, save=(args.save >= 2))
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+        axs = axs.ravel()
+        #plt.subplots_adjust(wspace=.1)
+        plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)   
+        #fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_val.png")     
+        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[1]), save=True)
         plt.close(fig)
-        del fig, ax
+        del fig, axs
 
         # ROC
-        y_train = np.concatenate([y for x, y in ds_train])
-        y_val = np.concatenate([y for x, y in ds_val])
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_roc_train_val.png")
         fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
         plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')

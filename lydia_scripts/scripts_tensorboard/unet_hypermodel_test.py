@@ -79,12 +79,12 @@ class TestUNetHyperModel(unittest.TestCase):
                         '--out_dir', '../test_data/tmp',
                         '--out_dir_tuning', '../test_data/tn',
                         #'--overwrite',
-                        '--epochs', '2',
-                        '--batch_size', '300',
+                        '--epochs', '6',
+                        '--batch_size', '320',
                         '--dry_run',
                         '--gpu',
                         'hyper',
-                        '--max_epochs', '5', #slightly higher than expected epochs to convergence for your largest Model
+                        '--max_epochs', '6', #slightly higher than expected epochs to convergence for your largest Model
                         '--factor', '3'] 
         self.args = uh.parse_args()
 
@@ -109,7 +109,7 @@ class TestUNetHyperModel(unittest.TestCase):
 
         # T00
         _, argstr = uh.args2string(self.args)
-        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=hyper_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0002_batch_size=0300_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=1_max_epochs=0005_factor=03_hyperband_iterations=0001',
+        self.assertEqual(argstr, 'objective=val_loss_max_trials=0005_max_retries_per_trial=00_max_consecutive_failed_trials=01_executions_per_trial=01_tuner=hyper_n_labels=01_x_shape=032_032_012_y_shape=032_032_001_epochs=0006_batch_size=0320_lrate=0.001000_patience=010_min_delta=0.000100_dataset=tor_number_of_summary_trials=02_gpu=1_max_epochs=0006_factor=03_hyperband_iterations=0001',
         msg='args main. ') #gpu=1_dry_run=1_
 
         # OSCER T00
@@ -235,12 +235,49 @@ class TestUNetHyperModel(unittest.TestCase):
             plt.close(fig)
             del fig, ax
 
+            # Confusion Matrix
+            threshs = np.linspace(0, 1, 51).tolist()
+            tps, fps, fns, tns = uh.contingency_curves(y_val, val_preds, threshs)
+            csis = uh.compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
+            xi = np.argmax(csis)
+            cutoff_probab = threshs[xi] #.12 #cutoff with heightest CSI
+            print(f"Max CSI: {csis[xi]}  Thres: {cutoff_probab}  Index: {xi}")
+            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+            axs = axs.ravel()
+            plt.subplots_adjust(wspace=.1)
+            fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_train_val.png")
+            uh.plot_confusion_matrix(y_train.ravel(), train_preds.ravel(), fname, 
+                            p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)  
+            #fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_train_val.png")      
+            uh.plot_confusion_matrix(y_val.ravel(), val_preds.ravel(), fname, 
+                            p=cutoff_probab, fig_ax=(fig, axs[1]), save=True)
+            plt.close(fig)
+            del fig, axs
+            '''fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_train.png")
+            uh.plot_confusion_matrix(y_train.ravel(), train_preds.ravel(), fname, p=0.12, save=True)
+            fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_val.png")
+            uh.plot_confusion_matrix(y_val.ravel(), val_preds.ravel(), fname, p=0.12, save=True)'''
+
             # TODO: Reliability Curve
+            print("train > 1", np.any(train_preds.ravel() > 1))
+            print("val > 1", np.any(val_preds.ravel() > 1))
+            print("train < 0", np.any(train_preds.ravel() < 0))
+            print("val < 0", np.any(val_preds.ravel() < 0))
+            to_one = np.where(train_preds.ravel() > 1)[0]
+            to_zero = np.where(train_preds.ravel() < 0)[0]
+            tt = train_preds.ravel().copy()
+            tt[to_one] = 1
+            tt[to_zero] = 0
+            to_one = np.where(val_preds.ravel() > 1)[0]
+            to_zero = np.where(val_preds.ravel() < 0)[0]
+            vv = val_preds.ravel().copy()
+            vv[to_one] = 1
+            vv[to_zero] = 0
             fname = os.path.join(args.out_dir, f"hp_model00_reliability_train_val.png")
-            fig, ax = uh.plot_reliabilty_curve(y_train.ravel(), train_preds.ravel(),  
+            fig, ax = uh.plot_reliabilty_curve(y_train.ravel(), tt, #train_preds.ravel(),  
                                      fname, save=False, label='Train')
-            uh.plot_reliabilty_curve(y_val.ravel(), val_preds.ravel(), fname, 
-                                     fig_ax=(fig, ax), save=True, label='Val', c='orange')
+            uh.plot_reliabilty_curve(y_val.ravel(), vv, #val_preds.ravel(), 
+                                     fname, fig_ax=(fig, ax), save=True, label='Val', c='orange')
             plt.close(fig)
             del fig, ax
 
@@ -260,12 +297,6 @@ class TestUNetHyperModel(unittest.TestCase):
             plt.close(fig)
             del fig, ax
 
-            # Confusion Matrix
-            fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_train.png")
-            uh.plot_confusion_matrix(y_train.ravel(), train_preds.ravel(), fname, p=0.12, save=True)
-            fname = os.path.join(args.out_dir, f"hp_model00_confusion_matrix_val.png")
-            uh.plot_confusion_matrix(y_val.ravel(), val_preds.ravel(), fname, p=0.12, save=True)
-
             # Evaluate
             print("evaluating...")
             train_eval = model.evaluate(ds_train)
@@ -279,7 +310,7 @@ class TestUNetHyperModel(unittest.TestCase):
             df_eval.to_csv(fname)
 
             t1 = time.time()
-            print(f"Elapsed {(t1-t0)/60}min")
+            print(f"Elapsed {(t1-t0)/60:02f}min")
 
             # MODEL
             '''
