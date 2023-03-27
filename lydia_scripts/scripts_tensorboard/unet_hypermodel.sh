@@ -9,49 +9,28 @@
 #SBATCH --nodelist=c731
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --ntasks=1  #-n 20
-##SBATCH --cpus-per-task=5
+#SBATCH --ntasks=20  #-n 20
 #SBATCH --mem=10G
 #SBATCH --job-name=tuning_tests
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/debug__%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/debug__%x_%j.err
-#SBATCH --mail-user=monique.shotande@ou.edu
+#SBATCH --mail-user=$USEREMAIL
 #SBATCH --mail-type=ALL
-#SBATCH --verbose
 ##SBATCH --array=0-1000%20
 ##SBATCH --profile=Task   #data collection on  (I/O, Memory, ...) data is collected. stored in an HDF5 file for the job
-
 
 ##########################################################
 
 # Source conda
-#source ~/.bashrc
-#bash 
+source ~/.bashrc
+bash 
 # TODO: if conda env tornado does not exist
 #conda env create --name tornado --file environment.yml
-#conda activate tf_tornado
-#conda install -c anaconda -y tensorflow-gpu
-
-. /home/fagg/tf_setup.sh
-conda activate tf
-#conda env export --from-history > fagg_env.yml
+conda activate tf_tornado
 
 python --version
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
-echo "SLURM_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK" # # threads job has bee allocated
-echo "SLURM_JOB_NUM_NODES=$SLURM_JOB_NUM_NODES" # count of nodes actually allocated
-echo "SLURM_CPUS_ON_NODE=$SLURM_CPUS_ON_NODE" # # CPUs allocated
-echo "SLURM_JOB_CPUS_PER_NODE=$SLURM_JOB_CPUS_PER_NODE" # # available CPUs to  the job on the allocated nodes. format: CPU_count[(xnumber_of_nodes)][,CPU_count [(xnumber_of_nodes)] ...].
-echo "SLURM_GPUS=$SLURM_GPUS"
-echo "SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST"
-#echo "SBATCH_MEM_PER_CPU=$SBATCH_MEM_PER_CPU"
-#echo "SBATCH_MEM_PER_GPU=$SBATCH_MEM_PER_GPU"
-#echo "SBATCH_MEM_PER_NODE=$SBATCH_MEM_PER_NODE" # Same as --mem
-#SBATCH_PROFILE
-#SLURM_JOB_NODELIST
-#set -x; cat /proc/cpuinfo | grep processor | wc
-
 
 # Run hyperparameter search
 python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \

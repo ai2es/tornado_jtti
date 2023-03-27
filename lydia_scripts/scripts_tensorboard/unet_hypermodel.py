@@ -755,7 +755,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), fig_ax=None, save=False, 
+def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), save=False,
                           thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
@@ -1192,7 +1192,7 @@ if __name__ == "__main__":
     if args.gpu: 
         print("Attempting to grab GPU")
         py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
-        
+
         '''
         physical_devices = tf.config.get_visible_devices('GPU')
         n_physical_devices = len(physical_devices)
@@ -1203,10 +1203,10 @@ if __name__ == "__main__":
         print(f'We have {n_physical_devices} GPUs\n')
         '''
 
-    #if args.dry_run:
+    #if args.dry_run: 
     tf.debugging.set_log_device_placement(True)
 
-    print('GPUs Available: ', tf.config.list_physical_devices('GPU'))
+    print("GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 
     if args.nogo:
         print('NOGO.')
@@ -1292,8 +1292,8 @@ if __name__ == "__main__":
             return y
         y_train = np.concatenate([y for x, y in ds_train]) #ds.map(get_y)
         y_val = np.concatenate([y for x, y in ds_val])
-        threshs = np.linspace(0, 1, 51)
-        tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs.tolist())
+        threshs = np.linspace(0, 1, 51).tolist()
+        tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs)
         csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
         xi = np.argmax(csis)
         cutoff_probab = threshs[xi] # cutoff with heightest CSI

@@ -19,6 +19,3 @@ dependencies:
   - pyproj
   - py3nvml
   - pydot
-  - wandb
-  - seaborn
-
