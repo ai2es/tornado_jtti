@@ -563,13 +563,33 @@ def fvaf(y_true, y_pred):
     VAR = np.var(y_true.flatten()) #tf.math.reduce_variance(y_true)
     return 1. - MSE / VAR
 
+def compute_sr(tps, fps):
+    '''
+    Compute the SR (success ration) from a scalars or lists of true positives
+    (TPs) and false negatives (FNs)
+    @param tps: scalar or numpy array of true positives
+    @param fps: scalar or numpy array of false positives
+    @return: scalar or numpy array for the SR
+    '''
+    return tps / (tps + fps)
+
+def compute_pod(tps, fns):
+    '''
+    Compute the probability of detection (POD) also the true positive rate (TPR)
+    @param tps: scalar or numpy array of true positives
+    @param fns: scalar or numpy array of false negatives
+    @return: scalar or numpy array for the POD
+    '''
+    return tps / (tps + fns)
+
 def compute_csi(tps, fns, fps):
     '''
-    Compute the CSI from a scalars or lists of the true positives (TPs), false negatives (FNs), and the false positives (FPs)
+    Compute the CSI (crtical success index) from a scalars or lists of the true 
+    positives (TPs), false negatives (FNs), and the false positives (FPs)
     @param tps: scalar or numpy array of true positives
     @param fns: scalar or numpy array of false negatives
     @param fps: scalar or numpy array of false positives
-    @return: scalar or numpy array for the CSI (critical success index)
+    @return: scalar or numpy array for the CSI
     '''
     return tps / (tps + fns + fps)
 
@@ -620,7 +640,7 @@ def contingency_curves(y, y_preds, threshs):
     return tps, fps, fns, tns
 
 def get_max_csi(y, y_preds, thresh=np.arange(0.05, 1.05, 0.05)):
-    '''
+    ''' TODO
     @param y: true output
     @param y_preds: predicted output
     @param thresh: probability threholds 
@@ -675,15 +695,16 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
 
         Y = {'Train': y_preds, 'Val': y_preds_val}
 
-        histplot(data=Y, stat='probability', label='Train Set', legend=True, 
+        histplot(data=Y, stat='probability', legend=True, #, label='Train Set'
                  ax=axs[0], alpha=alpha, common_norm=False)
         axs[0].set_xlabel('Tornado Predicted Probability')
         axs[0].set_xlim([0, 1])
 
-        histplot(data=Y, stat='probability', label='Train Set', legend=True, 
+        histplot(data=Y, stat='probability', legend=True, #, label='Train Set'
                  ax=axs[1], alpha=alpha, common_norm=False, cumulative=True, 
                  element="step", fill=False)
         axs[1].set_xlabel('Tornado Predicted Probability')
+        axs[1].set_ylabel('Cumulative Probability')
         axs[1].set_xlim([0, 1])
         '''
         histplot(data=y_preds_val, stat='probability', label='Val Set', legend=True, ax=axs[2])
@@ -952,7 +973,7 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
 
 def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=None, 
              color='dodgerblue', figsize=(10, 10), save=False, dpi=180, **csiargs):#, **plotargs):
-    ''' TODO TEST
+    '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
     CSI = 1. (this curve is highly senstive to event freq)
@@ -965,36 +986,40 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     else:
         fig, ax = fig_ax
 
-    # Calculate performance diagram 
-    tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
-    srs = np.asarray(tps / (tps + fps))
-    pods = np.asarray(tps / (tps + fns))
-    csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
-
-    #TODO: Plot star of
-    xi = np.argmax(csis)
-    thres_of_maxcsi = threshs[xi]
-    sr_of_maxcsi = srs[xi]
-    pod_of_maxcsi = pods[xi]
-
-    ax = make_csi_axis(ax=ax, **csiargs)
-    ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label)#, **plotargs)
-    ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15) 
-    #ax.plot(srs,pods,'-',color='r',markerfacecolor='w',lw=2, label='Testing: Max CSI = %.2f' % maxcsi)
-    #ax.plot(srs_val,pods_val,'-',color='red',markerfacecolor='w',lw=2,label='Validation')
-    ax.legend(loc='upper right')
-    ax.set_aspect('equal')
-
-    #threshs = np.linspace(0, 1, 11)
-    #thresh = np.arange(0.05, 1.05, 0.05)
     # For text outlines 
     import matplotlib.patheffects as path_effects
     pe1 = [path_effects.withStroke(linewidth=1.5, foreground="k")]
     pe2 = [path_effects.withStroke(linewidth=1.5, foreground="w")]
 
-    for i,t in enumerate(threshs):
+    # Calculate performance diagram 
+    tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
+    srs = compute_sr(tps, fps) #np.asarray(tps / (tps + fps))
+    pods = compute_pod(tps, fns) #np.asarray(tps / (tps + fns))
+    csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
+
+    #Plot star of
+    xi = np.argmax(csis)
+    max_csi = csis[xi]
+    thres_of_maxcsi = threshs[xi]
+    sr_of_maxcsi = srs[xi]
+    pod_of_maxcsi = pods[xi]
+
+    ax = make_csi_axis(ax=ax, **csiargs)
+    ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label) #, lw=2, **plotargs)
+    ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
+    text = f'{max_csi:02f}'
+    ax.text(sr_of_maxcsi-0.02, pod_of_maxcsi-0.02, text, path_effects=pe1, fontsize=14, color='white')
+    ax.legend(loc='upper right')
+    ax.set_aspect('equal')
+
+    #threshs = np.linspace(0, 1, 11)
+    #thresh = np.arange(0.05, 1.05, 0.05)
+
+    nthreshs = threshs.size
+    for i, t in enumerate(threshs):
         if np.isnan(srs[i]) or np.isnan(pods[i]): continue
-        text = np.char.ljust(str(np.round(t,2)), width=4, fillchar='0')
+        if i % 2 and i != nthreshs - 1: continue # skip every other threshold except the last
+        text = np.char.ljust(f'{t:02f}', width=4, fillchar='0') #str(np.round(t, 2))
         ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=9, color='white')
         #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
@@ -1040,13 +1065,13 @@ def create_argsparser():
     parser.add_argument('--executions_per_trial', type=int, default=1, #required=True,
                          help='Number of executions (training a model from scratch, starting from a new initialization) to run per trial (model configuration). See keras tuner for more information')
     parser.add_argument('--tuner_id', type=str, default=None,
-                    help='Name identitfying the tuner')
+                         help='Name identitfying the tuner. See Keras Tuner documentation')
     #parser.add_argument('-t', '--tuner', default='none', choices=['none', 'random', 'hyperband', 'bayesian', 'custom'],
     #                    help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
     tunersparsers = parser.add_subparsers(title='tuners', dest='tuner', help='tuner selection')
     #prsr_none = tunersparsers.add_parser('no_tuner', help='Hyperparameter search is not performed')
     prsr_rand = tunersparsers.add_parser('random', aliases=['rand'], 
-                    help='Use random search')
+                         help='Use random search')
     # BAYESOPT
     prsr_bayes = tunersparsers.add_parser('bayesian', aliases=['bayes'], help='Use bayesian optimization for tuning')
     prsr_bayes.add_argument('--num_initial_points', type=int, default=5, #required=True,
@@ -1086,7 +1111,7 @@ def create_argsparser():
 
     # Callbacks
     # EarlyStopping
-    parser.add_argument('--patience', type=int, default=10, #required=True,
+    parser.add_argument('--patience', type=int, default=8, #required=True,
                          help='Number of epochs with no improvement after which training will be stopped. See patience in EarlyStopping')
     parser.add_argument('--min_delta', type=float, default=1e-4, #required=True,
                          help='Absolute change of less than min_delta will count as no improvement. See min_delta in EarlyStopping')
@@ -1101,11 +1126,11 @@ def create_argsparser():
     parser.add_argument('--gpu', action='store_true',
                          help='Turn on gpu')
     parser.add_argument('--dry_run', action='store_true',
-                         help='For testing. Execute without running or saving data and verify output paths')
+                         help='For testing. Execute with only 5 steps per epoch and print some extra debugging info')
     parser.add_argument('--nogo', action='store_true',
                          help='For testing. Do NOT execute any experiements')
     parser.add_argument('--save', type=int, default=0,
-                         help='Specify data to save. 0 indicates save nothing. >=1 to save best hyperparameters and results in text format. >=2 save figures')
+                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.')
     return parser
 
 def parse_args():
@@ -1161,6 +1186,7 @@ def args2string(args):
 if __name__ == "__main__":
     args = parse_args()
     cdatetime, argstr = args2string(args)
+    #if args.dry_run: print(cdatetime, argstr)
 
     # Grab select GPU(s)
     if args.gpu: 
@@ -1213,7 +1239,7 @@ if __name__ == "__main__":
         df = pd.DataFrame(best_hps)
         df['args'] = [argstr] * N_SUMMARY_TRIALS
         dirpath = os.path.join(args.out_dir, PROJ_NAME)
-        hp_fnpath = os.path.join(dirpath, f"hps_{cdatetime}.csv")
+        hp_fnpath = os.path.join(dirpath, f"{cdatetime}_hps.csv")
         #hp_fnpath = f"{args.out_dir}/{PROJ_NAME}/hps_{argstr}.csv"
         print(f"\nSaving top {N_SUMMARY_TRIALS:02d} hyperparameter")
         print(hp_fnpath)
@@ -1221,7 +1247,7 @@ if __name__ == "__main__":
         pd.set_option('display.max_rows', None)
         pd.set_option('display.max_columns', None)
         print(df)
-        if args.save > 0:
+        if args.save in [1, 2, 4]: #args.save > 0:
             print("Saving", hp_fnpath)
             df.to_csv(hp_fnpath)
 
@@ -1235,19 +1261,20 @@ if __name__ == "__main__":
         H = model.fit(ds_train, validation_data=ds_val, 
                       batch_size=BATCH_SIZE, epochs=args.epochs, 
                       callbacks=[es]) #, verbose=1)
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_learning_plot.png")
-        plot_learning_loss(H, fname, save=(args.save >= 2))
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_learning_plot.png")
+        plot_learning_loss(H, fname, save=(args.save in [2, 4])) #(args.save >= 2)
         #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
 
         if args.save >= 2:
-            diagram_fnpath = os.path.join(dirpath, f"hp_model00_{cdatetime}_architecture.png")
+            diagram_fnpath = os.path.join(dirpath, f"{cdatetime}_hp_model00_architecture.png")
             print("Saving", diagram_fnpath)
             plot_model(model, to_file=diagram_fnpath, show_dtype=True,  
                     show_shapes=True, expand_nested=False)
 
-        #if args.save >= 3: model_fnpath = os.path.join(dirpath, f"hp_model00_{cdatetime}.h5")
-        #hypermodel.save_model(model_fnpath, weights=True, #argstr
-        #                      model=model, save_traces=True)
+        if args.save >= 3: 
+            model_fnpath = os.path.join(dirpath, f"{cdatetime}_hp_model00.h5")
+            hypermodel.save_model(model_fnpath, weights=True, #argstr
+                                  model=model, save_traces=True)
 
         # Predict with trained model
         print("\nPREDICTION")
@@ -1255,12 +1282,15 @@ if __name__ == "__main__":
         xval_preds = model.predict(ds_val)
         #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
         #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_preds_distr.png")
-        plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=(args.save >= 2))
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_preds_distr.png")
+        plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=(args.save in [2, 4])) #args.save >= 2
         plt.close()
 
         # Confusion Matrix
-        y_train = np.concatenate([y for x, y in ds_train])
+        def get_y(x, y):
+            ''' Get y from tuple Dataset '''
+            return y
+        y_train = np.concatenate([y for x, y in ds_train]) #ds.map(get_y)
         y_val = np.concatenate([y for x, y in ds_val])
         threshs = np.linspace(0, 1, 51)
         tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs.tolist())
@@ -1268,27 +1298,32 @@ if __name__ == "__main__":
         xi = np.argmax(csis)
         cutoff_probab = threshs[xi] # cutoff with heightest CSI
         print(f"Max CSI: {csis[xi]}  Thres: {cutoff_probab}  Index: {xi}")
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_train_val.png")
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_confusion_matrix_train_val.png")
         fig, axs = plt.subplots(1, 2, figsize=(12, 6))
         axs = axs.ravel()
         #plt.subplots_adjust(wspace=.1)
-        plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
-        #fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_val.png")
-        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[1]), save=(args.save >= 2))
+        plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                            p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
+        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
+                            p=cutoff_probab, fig_ax=(fig, axs[1]), save=(args.save in [2, 4])) #args.save >= 2
         plt.close(fig)
         del fig, axs
 
         # ROC
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_roc_train_val.png")
-        fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
-        plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_roc_train_val.png")
+        fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                           save=False, label='Train')
+        plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
+                          save=(args.save in [2, 4]), label='Val', c='orange') #args.save >= 2
         plt.close(fig)
         del fig, ax
 
         # PRC
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_prc_train_val.png")
-        fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
-        plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_prc_train_val.png")
+        fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                           save=False, label='Train')
+        plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
+                           save=(args.save in [2, 4]), label='Val', c='orange') #args.save >= 2
         plt.close(fig)
         del fig, ax
         
@@ -1302,26 +1337,27 @@ if __name__ == "__main__":
         evals.append( {k: v for k, v in zip(metrics, val_eval)} )
         df_eval = pd.DataFrame(evals, index=['train', 'val'])
         print(df_eval)
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_eval.csv")
-        if args.save > 0: 
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_eval.csv")
+        if args.save in [1, 2, 4]: #args.save > 0
             print("Saving", fname)
             df_eval.to_csv(fname)
 
         # CSI Curve
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_csi_train_val.png")
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_csi_train_val.png")
         fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
                            label='Train', show_cb=False)
         plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
-                           color='orange', save=(args.save >= 2), fig_ax=(fig, ax))
+                           color='orange', save=(args.save in [2, 4]), fig_ax=(fig, ax)) #args.save >= 2
         plt.close(fig)
         del fig, ax
 
         # Reliability Curve
-        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_reliability_train_val.png")
+        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_reliability_train_val.png")
         fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
                                     fname, save=False, label='Train')
         plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
-                                    fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
+                                    fig_ax=(fig, ax), save=(args.save in [2, 4]), #args.save >= 2
+                                    label='Val', c='orange')
         plt.close(fig)
         del fig, ax
 
@@ -1363,6 +1399,12 @@ if __name__ == "__main__":
         #latest = tf.keras.models.load_model(cp_path, compile=False)
         #latest_hps = df.read_csv(hp_fnpath)
         #best_hp = df.iloc[0]
+
+        # Load hyperparameters
+        dirpath = os.path.join(args.out_dir, PROJ_NAME)
+        hp_fnpath = os.path.join(dirpath, f"{cdatetime}_hps.csv")
+        df_hps = pd.read_csv(hp_fnpath)
+        best_hps = df_hps.iloc[0][:-1]
 
 
     # TODO: Load test set
