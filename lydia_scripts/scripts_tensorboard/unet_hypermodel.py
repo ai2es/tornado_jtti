@@ -287,6 +287,7 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
                 max_retries_per_trial
                 max_consecutive_failed_trials
                 executions_per_trial
+                tuner_id
                 overwrite
                 out_dir
                 project_name_prefix
@@ -312,11 +313,11 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
     tuner_args = {
         'distribution_strategy': strategy, #TODO 
         'objective': args.objective, #'val_MaxCriticalSuccessIndex', name of objective to optimize (whether to minimize or maximize is automatically inferred for built-in metrics)
-        'max_retries_per_trial': args.max_retries_per_trial,
-        'max_consecutive_failed_trials': args.max_consecutive_failed_trials,
+        #'max_retries_per_trial': args.max_retries_per_trial,
+        #'max_consecutive_failed_trials': args.max_consecutive_failed_trials,
         'executions_per_trial': args.executions_per_trial, #3
         'logger': None, #TODO Optional instance of kerastuner.Logger class for streaming logs for monitoring.
-        'tuner_id': None, #TODO Optional string, used as the ID of this Tuner.
+        'tuner_id': args.tuner_id, # Optional string, used as ID of this Tuner.
         'overwrite': args.overwrite, #TODO: If False, reload existing project. Otherwise, overwrite the project.
         'directory': tuner_dir #args.out_dir #TODO: relative path to working dir
     }
@@ -357,8 +358,8 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
             project_name=PROJ_NAME,
             **tuner_args
         )
-    #TODO
     elif args.tuner == 'custom': 
+        #TODO
         pass
     else:
         tuner = tuner_module.Tuner(
@@ -373,11 +374,9 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
             #**tuner_args
         )
 
-    if DB:
-        print(' ')
-        print('==============================')
-        tuner.search_space_summary()
-        print(' ')
+    print('\n==============================')
+    tuner.search_space_summary()
+    print(' ')
 
     return tuner, hypermodel
 
@@ -564,6 +563,16 @@ def fvaf(y_true, y_pred):
     VAR = np.var(y_true.flatten()) #tf.math.reduce_variance(y_true)
     return 1. - MSE / VAR
 
+def compute_csi(tps, fns, fps):
+    '''
+    Compute the CSI from a scalars or lists of the true positives (TPs), false negatives (FNs), and the false positives (FPs)
+    @param tps: scalar or numpy array of true positives
+    @param fns: scalar or numpy array of false negatives
+    @param fps: scalar or numpy array of false positives
+    @return: scalar or numpy array for the CSI (critical success index)
+    '''
+    return tps / (tps + fns + fps)
+
 def csi_from_sr_and_pod(success_ratio_array, pod_array):
     """
     Based on method from Dr. Ryan Laguerquist and found originally in his 
@@ -725,7 +734,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), save=False, 
+def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), fig_ax=None, save=False, 
                           thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
@@ -737,19 +746,26 @@ def plot_confusion_matrix(y, y_preds, fname, p=.5, figsize=(5, 5), save=False,
     @param p: cutoff probability above which is labelled 1
     @param thresh: list of the thresholds for other performance plots
     @param figsize: tuple with the width and height of the figure
+    @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param save: bool flag whether to save the figure
     @param dpi: integer resolution of the saved figure in dots per inch
 
     @return: tuple with the fig and axes objects
     '''
     from seaborn import heatmap
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    
+    fig = None
+    ax = None
+    if fig_ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fig_ax
+    #fig, ax = plt.subplots(1, 1, figsize=figsize)
     #axs = axs.ravel()
 
     cm = confusion_matrix(y, y_preds > p)
     heatmap(cm, annot=True, fmt="d", ax=ax)
-    ax.set_title(f'Confusion matrix @{p:.2f}')
+    ax.set_title(f'p > {p:.2f}')
     ax.set_xlabel('Predicted label')
     ax.set_ylabel('Actual label')
     ax.set_aspect('equal')
@@ -953,7 +969,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
     srs = np.asarray(tps / (tps + fps))
     pods = np.asarray(tps / (tps + fns))
-    csis = tps / (tps + fns + fps)
+    csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
 
     #TODO: Plot star of
     xi = np.argmax(csis)
@@ -980,7 +996,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
         if np.isnan(srs[i]) or np.isnan(pods[i]): continue
         text = np.char.ljust(str(np.round(t,2)), width=4, fillchar='0')
         ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=9, color='white')
-        #ax.text(srs[i]+0.02,pods[i]+0.02,text,fontsize=9,color='white')
+        #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
     #plt.tight_layout()
     if save:
@@ -1023,6 +1039,8 @@ def create_argsparser():
                          help='Maximum number of consecutive failed Trials. When this number is reached, the search will be stopped. A Trial is marked as failed when none of the retries succeeded. See keras tuner for more information')
     parser.add_argument('--executions_per_trial', type=int, default=1, #required=True,
                          help='Number of executions (training a model from scratch, starting from a new initialization) to run per trial (model configuration). See keras tuner for more information')
+    parser.add_argument('--tuner_id', type=str, default=None,
+                    help='Name identitfying the tuner')
     #parser.add_argument('-t', '--tuner', default='none', choices=['none', 'random', 'hyperband', 'bayesian', 'custom'],
     #                    help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
     tunersparsers = parser.add_subparsers(title='tuners', dest='tuner', help='tuner selection')
@@ -1145,26 +1163,30 @@ if __name__ == "__main__":
     cdatetime, argstr = args2string(args)
 
     # Grab select GPU(s)
-    if args.gpu: py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
-    if args.dry_run: tf.debugging.set_log_device_placement(True)
+    if args.gpu: 
+        print("Attempting to grab GPU")
+        py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
+        
+        '''
+        physical_devices = tf.config.get_visible_devices('GPU')
+        n_physical_devices = len(physical_devices)
 
-    physical_devices = tf.config.get_visible_devices('GPU')
-    n_physical_devices = len(physical_devices)
+        # Ensure all devices used have the same memory growth flag
+        for physical_device in physical_devices:
+            tf.config.experimental.set_memory_growth(physical_device, False)
+        print(f'We have {n_physical_devices} GPUs\n')
+        '''
 
-    # Ensure all devices used have the same memory growth flag
-    for physical_device in physical_devices:
-        tf.config.experimental.set_memory_growth(physical_device, False)
+    #if args.dry_run:
+    tf.debugging.set_log_device_placement(True)
 
-    # Verify number of GPUs
-    print(f'We have {n_physical_devices} GPUs\n')
-    #print("# GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+    print('GPUs Available: ', tf.config.list_physical_devices('GPU'))
 
     if args.nogo:
         print('NOGO.')
         exit()
 
-    tuner, hypermodel = create_tuner(args, DB=args.dry_run, 
-                                     strategy=tf.distribute.MirroredStrategy())
+    tuner, hypermodel = create_tuner(args, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
 
     ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
 
@@ -1178,8 +1200,8 @@ if __name__ == "__main__":
 
         # Report results
         print('\n=====================================================')
-        print('\n=====================================================')
-        N_SUMMARY_TRIALS = args.number_of_summary_trials #5 #MAX_TRIALS
+        print('=====================================================')
+        N_SUMMARY_TRIALS = args.number_of_summary_trials
         tuner.results_summary(N_SUMMARY_TRIALS)
 
         # Retrieve best hyperparams
@@ -1241,32 +1263,35 @@ if __name__ == "__main__":
         y_train = np.concatenate([y for x, y in ds_train])
         y_val = np.concatenate([y for x, y in ds_val])
         threshs = np.linspace(0, 1, 51)
-        tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs)
-        csis = tps / (tps + fns + fps)
+        tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs.tolist())
+        csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
         xi = np.argmax(csis)
-        cutoff_probab = threshs[xi] #.12 #TODO: cutoff with heightest CSI
+        cutoff_probab = threshs[xi] # cutoff with heightest CSI
+        print(f"Max CSI: {csis[xi]}  Thres: {cutoff_probab}  Index: {xi}")
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_train_val.png")
-        fig, ax = plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, save=False)        
-        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), p=cutoff_probab, save=(args.save >= 2))
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+        axs = axs.ravel()
+        #plt.subplots_adjust(wspace=.1)
+        plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
+        #fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_val.png")
+        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[1]), save=(args.save >= 2))
         plt.close(fig)
-        del fig, ax
+        del fig, axs
 
         # ROC
-        y_train = np.concatenate([y for x, y in ds_train])
-        y_val = np.concatenate([y for x, y in ds_val])
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_roc_train_val.png")
         fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
         plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
-        plt.close()
+        plt.close(fig)
         del fig, ax
 
         # PRC
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_prc_train_val.png")
         fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
         plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
-        plt.close()
+        plt.close(fig)
         del fig, ax
-
+        
         # Evaluate trained model
         print("\nEVALUATION")
         train_eval = model.evaluate(ds_train)
@@ -1287,16 +1312,16 @@ if __name__ == "__main__":
         fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
                            label='Train', show_cb=False)
         plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
-                           color='orange', save=True, fig_ax=(fig, ax))
+                           color='orange', save=(args.save >= 2), fig_ax=(fig, ax))
         plt.close(fig)
         del fig, ax
 
         # Reliability Curve
-        fname = os.path.join(dirpath, f"hp_model00_reliability_train_val.png")
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_reliability_train_val.png")
         fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
                                     fname, save=False, label='Train')
         plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
-                                    fig_ax=(fig, ax), save=True, label='Val', c='orange')
+                                    fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
         plt.close(fig)
         del fig, ax
 
