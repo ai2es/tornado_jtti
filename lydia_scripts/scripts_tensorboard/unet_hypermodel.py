@@ -287,6 +287,7 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
                 max_retries_per_trial
                 max_consecutive_failed_trials
                 executions_per_trial
+                tuner_id
                 overwrite
                 out_dir
                 project_name_prefix
@@ -312,11 +313,11 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
     tuner_args = {
         'distribution_strategy': strategy, #TODO 
         'objective': args.objective, #'val_MaxCriticalSuccessIndex', name of objective to optimize (whether to minimize or maximize is automatically inferred for built-in metrics)
-        'max_retries_per_trial': args.max_retries_per_trial,
-        'max_consecutive_failed_trials': args.max_consecutive_failed_trials,
+        #'max_retries_per_trial': args.max_retries_per_trial,
+        #'max_consecutive_failed_trials': args.max_consecutive_failed_trials,
         'executions_per_trial': args.executions_per_trial, #3
         'logger': None, #TODO Optional instance of kerastuner.Logger class for streaming logs for monitoring.
-        'tuner_id': None, #TODO Optional string, used as the ID of this Tuner.
+        'tuner_id': args.tuner_id, # Optional string, used as ID of this Tuner.
         'overwrite': args.overwrite, #TODO: If False, reload existing project. Otherwise, overwrite the project.
         'directory': tuner_dir #args.out_dir #TODO: relative path to working dir
     }
@@ -357,8 +358,8 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
             project_name=PROJ_NAME,
             **tuner_args
         )
-    #TODO
     elif args.tuner == 'custom': 
+        #TODO
         pass
     else:
         tuner = tuner_module.Tuner(
@@ -733,7 +734,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), save=False, 
+def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), save=False,
                           thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
@@ -995,7 +996,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
         if np.isnan(srs[i]) or np.isnan(pods[i]): continue
         text = np.char.ljust(str(np.round(t,2)), width=4, fillchar='0')
         ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=9, color='white')
-        #ax.text(srs[i]+0.02,pods[i]+0.02,text,fontsize=9,color='white')
+        #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
     #plt.tight_layout()
     if save:
@@ -1038,6 +1039,8 @@ def create_argsparser():
                          help='Maximum number of consecutive failed Trials. When this number is reached, the search will be stopped. A Trial is marked as failed when none of the retries succeeded. See keras tuner for more information')
     parser.add_argument('--executions_per_trial', type=int, default=1, #required=True,
                          help='Number of executions (training a model from scratch, starting from a new initialization) to run per trial (model configuration). See keras tuner for more information')
+    parser.add_argument('--tuner_id', type=str, default=None,
+                    help='Name identitfying the tuner')
     #parser.add_argument('-t', '--tuner', default='none', choices=['none', 'random', 'hyperband', 'bayesian', 'custom'],
     #                    help='Include flag to run the hyperparameter tuner. Otherwise load the top five previous models')
     tunersparsers = parser.add_subparsers(title='tuners', dest='tuner', help='tuner selection')
@@ -1183,8 +1186,7 @@ if __name__ == "__main__":
         print('NOGO.')
         exit()
 
-    tuner, hypermodel = create_tuner(args, DB=args.dry_run, 
-                                     strategy=tf.distribute.MirroredStrategy())
+    tuner, hypermodel = create_tuner(args, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
 
     ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
 
@@ -1272,7 +1274,7 @@ if __name__ == "__main__":
         #plt.subplots_adjust(wspace=.1)
         plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)   
         #fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_confusion_matrix_val.png")     
-        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[1]), save=True)
+        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, p=cutoff_probab, fig_ax=(fig, axs[1]), save=(args.save >= 2))
         plt.close(fig)
         del fig, axs
 
@@ -1280,16 +1282,16 @@ if __name__ == "__main__":
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_roc_train_val.png")
         fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
         plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
-        plt.close()
+        plt.close(fig)
         del fig, ax
 
         # PRC
         fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_prc_train_val.png")
         fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, save=False, label='Train')
         plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
-        plt.close()
+        plt.close(fig)
         del fig, ax
-
+        
         # Evaluate trained model
         print("\nEVALUATION")
         train_eval = model.evaluate(ds_train)
@@ -1310,16 +1312,16 @@ if __name__ == "__main__":
         fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
                            label='Train', show_cb=False)
         plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
-                           color='orange', save=True, fig_ax=(fig, ax))
+                           color='orange', save=(args.save >= 2), fig_ax=(fig, ax))
         plt.close(fig)
         del fig, ax
 
         # Reliability Curve
-        fname = os.path.join(dirpath, f"hp_model00_reliability_train_val.png")
+        fname = os.path.join(dirpath, f"hp_model00_{cdatetime}_reliability_train_val.png")
         fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
                                     fname, save=False, label='Train')
         plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
-                                    fig_ax=(fig, ax), save=True, label='Val', c='orange')
+                                    fig_ax=(fig, ax), save=(args.save >= 2), label='Val', c='orange')
         plt.close(fig)
         del fig, ax
 
