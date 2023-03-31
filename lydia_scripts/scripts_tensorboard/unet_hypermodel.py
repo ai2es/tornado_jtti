@@ -1,14 +1,13 @@
 """
-author: Monique Shotande (monique.shotande a ou.edu)
+author: Monique Shotande (monique . shotande a ou . edu)
 
 UNet Hyperparameter Search using keras tuners. 
 A keras_tuner.HyperModel subclass is defined as UNetHyperModel
-that defines how to build various versions of the UNet models
+that defines how to build various versions of UNet models
 
 Expected working directory is tornado_jtti/
 
-GridRad /ourdisk/hpc/ai2es/tornado/gridrad_gridded/ ??
-/ourdisk/hpc/ai2es/tornado/storm_mask_unet/ ??
+Models are trained on GridRad data.
 
 Windows tensorboard
 python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
@@ -553,8 +552,10 @@ def fvaf(y_true, y_pred):
     ''' TODO
     Fraction of variance accounted for (FVAF) ranges (−inf, 1]. 
     1 FVAF represents a total reconstruction. 
-    0 represents a reconstruction that's as good as using the average of the signal as predictor
-    negative FVAF even worse reconstructions than using the average signal as the predictor
+    0 represents a reconstruction that's as good as using the average of the 
+    signal as predictor
+    negative FVAF even worse reconstructions than using the average signal as 
+    the predictor
     1 - MSE / VAR =
     1 - (sum[(y_true - y_pred)**2]) / (sum[(y_true - y_mean)**2])
     '''
@@ -683,11 +684,12 @@ def plot_learning_loss(history, fname, save=False, dpi=180):
 
     return plt.gcf()
 
-def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12, 8), alpha=.5, save=False, dpi=180):
+def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, 
+                     figsize=(10, 8), alpha=.5, save=False, dpi=180):
     '''
     @return: tuple with the fig and axes objects
     '''
-    fig, axs = plt.subplots(1, 2, figsize=figsize)
+    fig, axs = plt.subplots(2, 1, figsize=figsize)
     axs = axs.ravel()
 
     if use_seaborn:
@@ -697,8 +699,9 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
 
         histplot(data=Y, stat='probability', legend=True, #, label='Train Set'
                  ax=axs[0], alpha=alpha, common_norm=False)
-        axs[0].set_xlabel('Tornado Predicted Probability')
+        axs[0].set_xlabel('') #Tornado Predicted Probability
         axs[0].set_xlim([0, 1])
+        axs[0].legend(loc='center right')
 
         histplot(data=Y, stat='probability', legend=True, #, label='Train Set'
                  ax=axs[1], alpha=alpha, common_norm=False, cumulative=True, 
@@ -706,6 +709,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
         axs[1].set_xlabel('Tornado Predicted Probability')
         axs[1].set_ylabel('Cumulative Probability')
         axs[1].set_xlim([0, 1])
+        axs[1].legend(loc='center right')
         '''
         histplot(data=y_preds_val, stat='probability', label='Val Set', legend=True, ax=axs[2])
         axs[2].set_xlabel('Probability')
@@ -724,13 +728,13 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
         axs[0].set_xlabel('Probability')
         axs[0].set_ylabel('density')
         axs[0].set_xlim([0, 1])
-        axs[0].legend()
+        axs[0].legend(loc='center right')
 
         axs[1].hist(y_train, density=True, cumulative=True, label='Train Set', histtype='step') #, norm=colors.LogNorm())
         axs[1].set_xlabel('Probability')
         axs[1].set_ylabel('cumulative density')
         axs[1].set_xlim([0, .6])
-        axs[1].legend()
+        axs[1].legend(loc='center right')
 
         # VAL SET
         y_val = y_preds_val.ravel()
@@ -738,13 +742,13 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, figsize=(12,
         axs[2].set_xlabel('Probability')
         axs[2].set_ylabel('density')
         axs[2].set_xlim([0, 1])
-        axs[2].legend()
+        axs[2].legend(loc='center right')
 
         axs[3].hist(y_val, density=True, cumulative=True, label='Val Set', histtype='step') #, norm=colors.LogNorm())
         axs[3].set_xlabel('Probability')
         axs[3].set_ylabel('cumulative density')
         axs[3].set_xlim([0, .6])
-        axs[3].legend()
+        axs[3].legend(loc='center right')
 
     plt.suptitle("Tornado Prediction Probabilities")
 
@@ -1206,7 +1210,7 @@ if __name__ == "__main__":
     #if args.dry_run: 
     tf.debugging.set_log_device_placement(True)
 
-    print("GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+    print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
 
     if args.nogo:
         print('NOGO.')
