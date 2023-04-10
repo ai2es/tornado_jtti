@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 ##SBATCH -n 20
 #SBATCH --mem-per-cpu=1000
-#SBATCH --job-name=wofs_raw_predictions_test
+#SBATCH --job-name=testing__wofs_raw_predictions_fields
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
@@ -25,7 +25,7 @@ python --version
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 
 WOFS_REL_PATH="2019/20190430/1930/ENS_MEM_2"
-WOFS_FILE="wrfwof_d01_2019-04-30_19:50:00"
+WOFS_FILE="wrfwof_d01_2019-04-30_19:55:00"
 
 #WOFS_REL_PATH="2019/20190517/0300/ENS_MEM_12"
 #WOFS_FILE="wrfwof_d01_2019-05-18_03:15:00"
@@ -37,10 +37,12 @@ python lydia_scripts/wofs_raw_predictions.py \
 --dir_patches="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_patches/${WOFS_REL_PATH}" \
 --dir_figs="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/${WOFS_REL_PATH}/${WOFS_FILE}" \
 --with_nans  \
+--fields U WSPD10MAX W_UP_MAX \
 --loc_model="/ourdisk/hpc/ai2es/tornado/unet/ZH_only/initialrun_model8/initialrun_model8.h5"  \
 --file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
---write=2  \
+--write=4 \
 --dry_run
+#'UP_HELI_MAX', 'U', 'U10', 'V', 'V10
 
 
 #YYYY-MM-DD_hh:mm:ss
