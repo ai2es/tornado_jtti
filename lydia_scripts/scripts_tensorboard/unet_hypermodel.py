@@ -187,12 +187,12 @@ class UNetHyperModel(HyperModel):
                     AUC(num_thresholds=100, curve='PR', name='auc_pr')] #"categorical_accuracy"
         if n_labels == 1: 
             #TODO: keras.activations.linear
-            output_activation = hp.Choice("out_activation", values=['Sigmoid', 'Snake'])
+            output_activation = hp.Choice("out_activation", values=['Sigmoid']) #, 'Snake'
             metrics.append("binary_accuracy")
         else:
             with hp.conditional_scope("n_labels", ['>=2']): 
                 #TODO: keras.activations.linear
-                output_activation = hp.Choice("out_activation", values=['Softmax', 'Snake']) #'Sigmoid'
+                output_activation = hp.Choice("out_activation", values=['Softmax']) #, 'Snake', 'Sigmoid'
                 loss = hp.Choice("loss", ["binary_focal_crossentropy", "categorical_crossentropy", "fractions_skill_score"])
                 #make_fractions_skill_score(3, 2, c=1.0, cutoff=0.5, want_hard_discretization=False)
                 # TODO: binary v categorical crossentropy math
@@ -421,16 +421,14 @@ def execute_search(args, tuner, X_train, X_val=None,
         callbacks = [es, tb]
 
     # Perform the hyperparameter search
-    #https://www.tensorflow.org/tutorials/structured_data/imbalanced_data
-    # TODO: dataset split
     print("\nExecuting hyperparameter search...")
     tuner.search(X_train, 
                 validation_data=X_val, 
                 validation_batch_size=None, 
                 batch_size=BATCH_SIZE, epochs=NEPOCHS, 
                 shuffle=False, callbacks=callbacks,
-                steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, workers=1, 
-                use_multiprocessing=False) 
+                steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, 
+                workers=2, use_multiprocessing=True) 
 
 def get_rotation_indicies(args, nfolds, DB=0):
     ''' TODO TEST
@@ -477,6 +475,7 @@ def take_rotation_data(args, data, folds, r=0):
 
 def prep_data(args, n_labels=None, DB=1):
     """ 
+    # TODO: dataset split https://www.tensorflow.org/tutorials/structured_data/imbalanced_data
     Load and prepare the data.
     @param args: the command line args object. See create_argsparser() for
             details about the command line arguments
@@ -701,7 +700,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True,
                  ax=axs[0], alpha=alpha, common_norm=False)
         axs[0].set_xlabel('') #Tornado Predicted Probability
         axs[0].set_xlim([0, 1])
-        axs[0].legend(loc='center right')
+        axs[0].legend(list(Y.keys()), loc='center right')
 
         histplot(data=Y, stat='probability', legend=True, #, label='Train Set'
                  ax=axs[1], alpha=alpha, common_norm=False, cumulative=True, 
@@ -709,7 +708,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True,
         axs[1].set_xlabel('Tornado Predicted Probability')
         axs[1].set_ylabel('Cumulative Probability')
         axs[1].set_xlim([0, 1])
-        axs[1].legend(loc='center right')
+        axs[1].legend(list(Y.keys()), loc='center right')
         '''
         histplot(data=y_preds_val, stat='probability', label='Val Set', legend=True, ax=axs[2])
         axs[2].set_xlabel('Probability')
@@ -886,8 +885,9 @@ def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=1
 
     return fig, ax
 
-def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, fig_ax=None, 
-                          figsize=(10, 10), save=False, dpi=180, **kwargs):
+def plot_reliabilty_curve(y, y_preds, fname, n_bins=15, strategy='quantile', 
+                          fig_ax=None, figsize=(10, 10), save=False, dpi=180, 
+                          **kwargs):
     '''
     Plot the reliability curve. Perfect model follows the y = x line. This curve
     compares the quality of probabilistic predictions of binary classifiers by
@@ -911,7 +911,7 @@ def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, fig_ax=None,
         fig, ax = fig_ax
 
     # Calculate observed frequency and predicted probabilities
-    prob, prob_preds = calibration_curve(y, y_preds, n_bins=n_bins)
+    prob, prob_preds = calibration_curve(y, y_preds, n_bins=n_bins, strategy=strategy)
 
     ax.plot(prob, prob_preds, **kwargs)
     ax.plot([0, 1], linestyle='--')
@@ -1012,7 +1012,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label) #, lw=2, **plotargs)
     ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
     text = f'{max_csi:02f}'
-    ax.text(sr_of_maxcsi-0.02, pod_of_maxcsi-0.02, text, path_effects=pe1, fontsize=14, color='white')
+    ax.text(sr_of_maxcsi-0.06, pod_of_maxcsi-0.02, text, path_effects=pe1, fontsize=16, color='white')
     ax.legend(loc='upper right')
     ax.set_aspect('equal')
 
@@ -1022,9 +1022,9 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     nthreshs = threshs.size
     for i, t in enumerate(threshs):
         if np.isnan(srs[i]) or np.isnan(pods[i]): continue
-        if i % 2 and i != nthreshs - 1: continue # skip every other threshold except the last
-        text = np.char.ljust(f'{t:02f}', width=4, fillchar='0') #str(np.round(t, 2))
-        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=9, color='white')
+        if i % 3 and i != nthreshs - 1: continue # skip every other threshold except the last
+        text = np.char.ljust(f'{t:.02f}', width=4, fillchar='0') #str(np.round(t, 2))
+        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=10, color='white')
         #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
     #plt.tight_layout()
@@ -1051,6 +1051,10 @@ def create_argsparser():
                          help='Output directory for results, models, hyperparameters, etc.')
     parser.add_argument('--out_dir_tuning', type=str, #required=True,
                          help='(optional) Output directory for training and tuning checkpoints. Defaults to --out_dir if not specified')
+    parser.add_argument('--hps_index', type=int, #required=True,
+                         help='(optional) Index of top')
+    #parser.add_argument('--hps_datetime', type=str, #required=True,
+    #                     help='(optional) Datetime for the file containing the top hyperparameters')
     
 
     # Tuner hyperparameter search arguments
@@ -1117,7 +1121,7 @@ def create_argsparser():
     # EarlyStopping
     parser.add_argument('--patience', type=int, default=8, #required=True,
                          help='Number of epochs with no improvement after which training will be stopped. See patience in EarlyStopping')
-    parser.add_argument('--min_delta', type=float, default=1e-4, #required=True,
+    parser.add_argument('--min_delta', type=float, default=2e-4, #required=True,
                          help='Absolute change of less than min_delta will count as no improvement. See min_delta in EarlyStopping')
 
     # TODO: choices? tuned hyperparam
@@ -1198,6 +1202,7 @@ if __name__ == "__main__":
         py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
         '''
+        #os.get_env'CUDA_VISIBLE_DEVICES'
         physical_devices = tf.config.get_visible_devices('GPU')
         n_physical_devices = len(physical_devices)
 
@@ -1256,27 +1261,32 @@ if __name__ == "__main__":
             df.to_csv(hp_fnpath)
 
         # Train with best hyperparameters
-        BATCH_SIZE = args.batch_size
         print("\n-------------------------")
         print("Training Best Model")
-        model = tuner.hypermodel.build(best_hps_obj[0])
+
+        hp_index = args.hps_index if not args.hps_index is None  else 0
+        BATCH_SIZE = args.batch_size
+        FN_PREFIX = f"{cdatetime}_hp_model{hp_index:02d}"
+        print(f"TOP HPs INDEX = {hp_index} ** ")
+
+        model = tuner.hypermodel.build(best_hps_obj[hp_index])
         es = EarlyStopping(monitor=args.objective, patience=args.patience,  
                             min_delta=args.min_delta, restore_best_weights=True)
         H = model.fit(ds_train, validation_data=ds_val, 
                       batch_size=BATCH_SIZE, epochs=args.epochs, 
                       callbacks=[es]) #, verbose=1)
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_learning_plot.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_learning_plot.png")
         plot_learning_loss(H, fname, save=(args.save in [2, 4])) #(args.save >= 2)
         #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
 
         if args.save >= 2:
-            diagram_fnpath = os.path.join(dirpath, f"{cdatetime}_hp_model00_architecture.png")
+            diagram_fnpath = os.path.join(dirpath, f"{FN_PREFIX}_architecture.png")
             print("Saving", diagram_fnpath)
             plot_model(model, to_file=diagram_fnpath, show_dtype=True,  
                     show_shapes=True, expand_nested=False)
 
         if args.save >= 3: 
-            model_fnpath = os.path.join(dirpath, f"{cdatetime}_hp_model00.h5")
+            model_fnpath = os.path.join(dirpath, f"{FN_PREFIX}.h5")
             hypermodel.save_model(model_fnpath, weights=True, #argstr
                                   model=model, save_traces=True)
 
@@ -1286,7 +1296,7 @@ if __name__ == "__main__":
         xval_preds = model.predict(ds_val)
         #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
         #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_preds_distr.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_preds_distr.png")
         plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=(args.save in [2, 4])) #args.save >= 2
         plt.close()
 
@@ -1302,7 +1312,7 @@ if __name__ == "__main__":
         xi = np.argmax(csis)
         cutoff_probab = threshs[xi] # cutoff with heightest CSI
         print(f"Max CSI: {csis[xi]}  Thres: {cutoff_probab}  Index: {xi}")
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_confusion_matrix_train_val.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_confusion_matrix_train_val.png")
         fig, axs = plt.subplots(1, 2, figsize=(12, 6))
         axs = axs.ravel()
         #plt.subplots_adjust(wspace=.1)
@@ -1314,7 +1324,7 @@ if __name__ == "__main__":
         del fig, axs
 
         # ROC
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_roc_train_val.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_roc_train_val.png")
         fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, 
                            save=False, label='Train')
         plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
@@ -1323,7 +1333,7 @@ if __name__ == "__main__":
         del fig, ax
 
         # PRC
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_prc_train_val.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_prc_train_val.png")
         fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, 
                            save=False, label='Train')
         plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
@@ -1341,13 +1351,13 @@ if __name__ == "__main__":
         evals.append( {k: v for k, v in zip(metrics, val_eval)} )
         df_eval = pd.DataFrame(evals, index=['train', 'val'])
         print(df_eval)
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_eval.csv")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_eval.csv")
         if args.save in [1, 2, 4]: #args.save > 0
             print("Saving", fname)
             df_eval.to_csv(fname)
 
         # CSI Curve
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_csi_train_val.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_csi_train_val.png")
         fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
                            label='Train', show_cb=False)
         plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
@@ -1356,7 +1366,7 @@ if __name__ == "__main__":
         del fig, ax
 
         # Reliability Curve
-        fname = os.path.join(dirpath, f"{cdatetime}_hp_model00_reliability_train_val.png")
+        fname = os.path.join(dirpath, f"{FN_PREFIX}_reliability_train_val.png")
         fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
                                     fname, save=False, label='Train')
         plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
@@ -1397,18 +1407,17 @@ if __name__ == "__main__":
         #TODO
         cp_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
         cp_path = os.path.join(cp_dir, PROJ_NAME)
-        #latest = tf.train.latest_checkpoint(cp_path) 
+        latest = tf.train.latest_checkpoint(cp_path) 
         #latest = tf.train.latest_checkpoint(f'{args.out_dir}/{PROJ_NAME}') 
-        #f'{args.out_dir}/checkpoints/{PROJ_NAME}'
         #latest = tf.keras.models.load_model(cp_path, compile=False)
-        #latest_hps = df.read_csv(hp_fnpath)
-        #best_hp = df.iloc[0]
 
-        # Load hyperparameters
-        dirpath = os.path.join(args.out_dir, PROJ_NAME)
-        hp_fnpath = os.path.join(dirpath, f"{cdatetime}_hps.csv")
-        df_hps = pd.read_csv(hp_fnpath)
-        best_hps = df_hps.iloc[0][:-1]
+        # Load hyperparameters 
+        #HyperParameters.Fixed(name, value, parent_name=None, parent_values=None)
+        hps_file = args.in_hps if not args.in_hps is None  else args.out_dir
+        df_hps = pd.read_csv(hps_file)
+        best_hps = df_hps.drop(columns='args') #df_hps.iloc[0][:-1]
+        #best_hp = df.iloc[0]
+        #hypermodel.build(best_hps) 
 
 
     # TODO: Load test set

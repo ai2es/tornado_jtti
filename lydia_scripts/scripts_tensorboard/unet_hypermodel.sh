@@ -1,17 +1,16 @@
 #!/bin/bash
 
 ##SBATCH --partition=debug_gpu
-##SBATCH --time=00:30:00
-##SBATCH --partition=gpu_a100
-##SBATCH --time=1:00:00
-#SBATCH -p ai2es_v100
-#SBATCH --time=48:00:00
+##SBATCH --partition=gpu
+##SBATCH --nodelist=c301
+#SBATCH -p ai2es
 #SBATCH --nodelist=c314
+#SBATCH --time=1:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1  #-n 20
 #SBATCH --mem=10G
-#SBATCH --job-name=restart__tuning
+#SBATCH --job-name=tuning_hps1_plots
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
@@ -59,16 +58,17 @@ python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_tor/validation1_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
---overwrite \
+--hps_index=1 \
 --epochs=1000 \
 --batch_size=300 \
 --lrate=2e-4 \
 --number_of_summary_trials=3 \
 --gpu \
---save=2 \
+--save=4 \
 hyper \
---max_epochs=1000 \
---factor=3 
+--max_epochs=400 \
+--factor=10
+#--overwrite \
 #--tuner_id="debug" \
 #--dry_run \
 #--nogo \
