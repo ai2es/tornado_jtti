@@ -1,8 +1,12 @@
 import glob
 import pandas as pd
+print(f"pd {pd.__version__}")
 import netCDF4
+print(f"netCDF4 {netCDF4.__version__}")
 import xarray as xr
+print(f"xr {xr.__version__}")
 import numpy as np
+print(f"np {np.__version__}")
 import os
 import argparse
 import random
@@ -22,7 +26,6 @@ def make_training_patches(radar, storm_mask, xs, ys, n, time, lats, lons):
         i = random.randint(0, xs.shape[0]-1)
         xi = xs[i]
         yi = ys[i]
-        
 
         to_add = xr.Dataset(data_vars=dict(
                            ZH=(["x", "y", "z"], radar.ZH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).values.swapaxes(0,2).swapaxes(1,0)), 
@@ -86,6 +89,10 @@ def get_arguments():
         '--n_patches', type=int, required=True,
         help=PATCHES_NUMBER_HELP_STRING)
 
+    INPUT_ARG_PARSER.add_argument(
+        '--dry_run', action='store_true',
+        help="Boolean flag whether. Use to perform a dry run and only display file paths. No files are actually saved.")
+
     #Pull out all of the input strings from the .sh file
     args = INPUT_ARG_PARSER.parse_args()
     #Index primer indicates the day of data that we are looking at in this particuar run of this code
@@ -107,6 +114,11 @@ def get_arguments():
     global n_patches
     n_patches = getattr(args, 'n_patches')
 
+    global dry_run
+    dry_run = args.dry_run
+
+    return args
+
 
 # Make the directory structure for how we will save out the patches
 # Also calculate the datetime of this day and collect all the storm mask files to patch
@@ -117,30 +129,60 @@ def make_directory_structure(this_storm_mask_dir):
     YYYY = YYYYMMDD_path[:4]
 
     # If this file hasn't already been made, make the proper folders
-    if(not os.path.exists(patches_path)):
-        os.mkdir(patches_path)
+    base_path = patches_path
+    '''if(not os.path.exists(base_path)):
+        print(f"Make directory {base_path} [dry_run={dry_run}]")
+        if not dry_run: os.mkdir(base_path)'''
 
-    if not os.path.exists(patches_path + '/size_' + str(size)):
-        os.mkdir(patches_path + '/size_' + str(size))
-            
-    if not os.path.exists(patches_path + '/size_' + str(size) + '/forecast_window_5'):
-            os.mkdir(patches_path + '/size_' + str(size) + '/forecast_window_5')
+    #print(patches_path + 'size_' + str(size))
+    base_path += f'size_{size}'
+    '''if not os.path.exists(base_path):
+        print(f"Make directory {base_path} [dry_run={dry_run}]")
+        #if not dry_run: os.mkdir(patches_path + '/size_' + str(size))
+        if not dry_run: os.mkdir(base_path)'''
+
+    #print(patches_path + 'size_' + str(size) + '/forecast_window_5')
+    base_path += '/forecast_window_5'
+    '''if not os.path.exists(base_path):
+        print(f"Make directory {base_path} [dry_run={dry_run}]")
+        #if not dry_run: os.mkdir(patches_path + '/size_' + str(size) + '/forecast_window_5')
+        if not dry_run: os.mkdir(base_path)'''
         
-    if not os.path.exists(patches_path + '/size_' + str(size) + '/forecast_window_5' + '/' + YYYY):
-        os.mkdir(patches_path + '/size_' + str(size) + '/forecast_window_5' + '/' + YYYY)
+    #print(patches_path + 'size_' + str(size) + '/forecast_window_5' + '/' + YYYY)
+    base_path += f"/{YYYY}"
+    '''if not os.path.exists(base_path):
+        print(f"Make directory {base_path} [dry_run={dry_run}]")
+        #if not dry_run: os.mkdir(patches_path + '/size_' + str(size) + '/forecast_window_5' + '/' + YYYY)
+        if not dry_run: os.mkdir(base_path)'''
     
-    if not os.path.exists(patches_path + '/size_' + str(size) + '/forecast_window_5' + '/' + YYYY + '/' + YYYYMMDD_path):
-        os.mkdir(patches_path + '/size_' + str(size) + '/forecast_window_5' + '/' + YYYY + '/' + YYYYMMDD_path)
+    #print(patches_path + 'size_' + str(size) + '/forecast_window_5' + '/' + YYYY + '/' + YYYYMMDD_path)
+    base_path += f"/{YYYYMMDD_path}"
+    '''if not os.path.exists(base_path):
+        print(f"Make directory {base_path} [dry_run={dry_run}]")
+        #if not dry_run: os.mkdir(patches_path + '/size_' + str(size) + '/forecast_window_5' + '/' + YYYY + '/' + YYYYMMDD_path)
+        if not dry_run: os.mkdir(base_path)'''
+
+    try:
+        data_dirpath = os.path.join(patches_path, f'size_{size}', 'forecast_window_5', YYYY, YYYYMMDD_path)
+        print(f"oMake directory {base_path} [dry_run={dry_run}]")
+        print(f"nMake directory {data_dirpath} [dry_run={dry_run}]")
+        if not dry_run: 
+            os.makedirs()
+    except OSError as oserr:
+        print(oserr)
           
 
 
 def main():
 
     #get the inputs from the .sh file
-    get_arguments()
+    args = get_arguments()
 
     #find all the days that we have data for
-    all_storm_mask_dirs = glob.glob(storm_mask_path + '*/*/5_min_window/')
+    storm_dirpath = storm_mask_path + '*/*/5_min_window/'
+    print(f"1storm_dirpath {storm_dirpath}")
+    print("old", storm_mask_path + '*/*/5_min_window/')
+    all_storm_mask_dirs = glob.glob(storm_dirpath)
     all_storm_mask_dirs.sort()
     
     #find which day corresponds to index_primer
@@ -151,17 +193,24 @@ def main():
     YYYY = YYYYMMDD_path[:4]
 
     # Find all the files to patch from this day
-    all_masks_day = glob.glob(storm_mask_path + '/' + YYYY + '/' + YYYYMMDD_path + '/5_min_window/*')
+    storm_dirpath = os.path.join(storm_mask_path, YYYY, YYYYMMDD_path, '5_min_window/*')
+    print(f"2storm_dirpath {storm_dirpath}")
+    print("old", storm_mask_path + '/' + YYYY + '/' + YYYYMMDD_path + '/5_min_window/*')
+    #all_masks_day = glob.glob(storm_mask_path + '/' + YYYY + '/' + YYYYMMDD_path + '/5_min_window/*')
+    all_masks_day = glob.glob(storm_dirpath)[:2]
     all_masks_day.sort()
+    print("all_masks_day", all_masks_day)
 
     #make the directory structure for the output files
     make_directory_structure(this_storm_mask_dir)
     
-
-        
+       
     # Initialize empty lists for the patches we will make
+    # No tornado
     output_nt_list = []
+    # Tornado
     output_t_list = []
+    # Significant Tornado
     output_st_list = []
     
     # We want to output the patches by the hour, so '-1' flags that this is the start of the script
@@ -169,6 +218,7 @@ def main():
 
     # Loop through each time and make patches
     for mask_time in all_masks_day:
+        print(f">> {mask_time}")
         # Pull out the times from the file
         # Sometimes the YYYYMMDD in the filepath doesn't match the the YYYYMMDD in the filename
         # They are labeled YYYYMMDD_path and YYYYMMDD_day respectively
@@ -180,22 +230,31 @@ def main():
         
         # Check to see if we have reached the end of the hour. If we have, output the data
         if(last_hr != HH and last_hr != '-1' and len(output_nt_list) != 0):
-            print('Outputing with',len(output_nt_list),'inputs')
+            print('Outputing with', len(output_nt_list), 'inputs')
             output_nt = xr.concat(output_nt_list, dim='patch')
-            output_nt.to_netcdf(patches_path + '/size_' + str(size) + '/forecast_window_' + str(window) + '/' + YYYY + '/' + YYYYMMDD_path + '/patches_nontor_%s_%s.nc' % (YYYYMMDD_day, last_hr))
-            output_nt.close()
+            patches_fname = patches_path + '/size_' + str(size) + '/forecast_window_' + str(window) + '/' + YYYY + '/' + YYYYMMDD_path + '/patches_nontor_%s_%s.nc' % (YYYYMMDD_day, last_hr)
+            print(f"Saving L0 {patches_fname} [dry_run={dry_run}]")
+            if not dry_run: 
+                output_nt.to_netcdf(patches_fname)
+                output_nt.close()
             output_nt_list = []
             
             if(output_t_list != []):
                 output_t = xr.concat(output_t_list, dim='patch')
-                output_t.to_netcdf(patches_path + '/size_' + str(size) + '/forecast_window_' + str(window) + '/' + YYYY + '/' + YYYYMMDD_path + '/patches_tor_%s_%s.nc' % (YYYYMMDD_day, last_hr))
-                output_t.close()
+                patches_fname = patches_path + '/size_' + str(size) + '/forecast_window_' + str(window) + '/' + YYYY + '/' + YYYYMMDD_path + '/patches_tor_%s_%s.nc' % (YYYYMMDD_day, last_hr)
+                print(f"Saving L1 {patches_fname} [dry_run={dry_run}]")
+                if not dry_run: 
+                    output_t.to_netcdf(patches_fname)
+                    output_t.close()
                 output_t_list = []
                 
                 if(output_st_list != []):
                     output_st = xr.concat(output_st_list, dim='patch')
-                    output_st.to_netcdf(patches_path + '/size_' + str(size) + '/forecast_window_' + str(window) + '/' + YYYY + '/' + YYYYMMDD_path + '/patches_sigtor_%s_%s.nc' % (YYYYMMDD_day, last_hr))
-                    output_st.close()
+                    patches_fname = patches_path + '/size_' + str(size) + '/forecast_window_' + str(window) + '/' + YYYY + '/' + YYYYMMDD_path + '/patches_sigtor_%s_%s.nc' % (YYYYMMDD_day, last_hr)
+                    print(f"Saving L2 {patches_fname} [dry_run={dry_run}]")
+                    if not dry_run: 
+                        output_st.to_netcdf(patches_fname)
+                        output_st.close()
                     output_st_list = []
         
         # Update last_hr to be the current hour now that we are past the checkpoint
@@ -217,7 +276,7 @@ def main():
         storm_mask_and_metadata = xr.open_dataset(storm_mask_path + '/%s/%s/5_min_window/storm_mask_%s-%s.nc' % (YYYY, YYYYMMDD_path, YYYYMMDD_day_with_dashes, HHMMSS))
         # Open the corresponding radar file
         radar = xr.open_dataset(input_radar_directory_path + '/%s/%s/nexrad_3d_v4_2_%sT%sZ.nc' % (YYYY, YYYYMMDD_path, YYYYMMDD_day, HHMMSS))
-        
+
         storm_mask = storm_mask_and_metadata.storm_mask[window_idx].values
         time = storm_mask_and_metadata.time.values
         lons = storm_mask_and_metadata.Longitude.values

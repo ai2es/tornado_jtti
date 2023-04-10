@@ -17,5 +17,5 @@ bash
 
 #conda activate hagelslag
 python -u /home/lydiaks2/tornado_project/scripts_data_pipeline/save_light_model_patches.py \
---input_xarray_path="/ourdisk/hpc/ai2es/tornado/learning_patches/xarray/3D/size_32/forecast_window_5/" \
---output_path="/ourdisk/hpc/ai2es/tornado/learning_patches/xarray/3D_light/size_32/forecast_window_5/"
+--input_xarray_path="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D/size_32/forecast_window_5/" \
+--output_path="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D_light/size_32/forecast_window_5/"
