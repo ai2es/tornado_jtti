@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 ##SBATCH -n 20
 #SBATCH --mem-per-cpu=1000
-#SBATCH --job-name=testing__wofs_raw_predictions_fields
+#SBATCH --job-name=wofs_raw_predictions
 #SBATCH --mail-user=USEREMAIL
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
@@ -40,7 +40,7 @@ python lydia_scripts/wofs_raw_predictions.py \
 --fields U WSPD10MAX W_UP_MAX \
 --loc_model="/ourdisk/hpc/ai2es/tornado/unet/ZH_only/initialrun_model8/initialrun_model8.h5"  \
 --file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
---write=4 \
+--write=0 \
 --dry_run
 #'UP_HELI_MAX', 'U', 'U10', 'V', 'V10
 
