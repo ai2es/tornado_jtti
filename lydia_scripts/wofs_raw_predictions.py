@@ -2,7 +2,7 @@
 author: Monique Shotande 
 Functions based on those provided by Lydia
 
-End to end script takes as input the raw WoFS (Warn on Forecast System) data,
+End to end script takes as input the raw WoFS (warn on Forecast System) data,
 and outputs the predictions in the WoFS grid.
 
 General Procedure:
@@ -11,7 +11,7 @@ General Procedure:
 3. construct patches (dependent on patch size)
 4. load ML model
 5. make predictions
-6. interpolate predictions to WoFS grid
+6. interpolate back to WoFS grid
 
 Execution Instructions:
     Conda environment requires are in the environment.yml
@@ -72,8 +72,8 @@ sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
 from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
-#sys.path.append("process_monitoring")
-#from process_monitor import ProcessMonitor
+sys.path.append("process_monitoring")
+from process_monitor import ProcessMonitor
 print(" ")
 import gc
 gc.collect()
@@ -94,7 +94,7 @@ def create_argsparser(args_list=None):
     if not args_list is None:
         sys.argv = args_list
         
-    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from WoFS data', epilog='AI2ES')
+    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
 
     # WoFS file(s) path 
     parser.add_argument('--loc_wofs', type=str, required=True, 
@@ -119,9 +119,9 @@ def create_argsparser(args_list=None):
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
     parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity and updraft data, excluding divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', type=list,
-        help='List of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction.')
+        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
+    parser.add_argument('-f', '--fields', type=str, nargs='+', #type=list,
+        help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
 
     # Model directories and files
     parser.add_argument('--loc_model', type=str, required=True,
@@ -132,7 +132,7 @@ def create_argsparser(args_list=None):
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
     parser.add_argument('-d', '--dry_run', action='store_true',
-        help='For testing and debugging. Execute without displaying output paths')
+        help='For testing and debugging. Execute without running models or saving data and display output paths')
 
     return parser
 
@@ -730,9 +730,9 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
               'n_uh_pixels', 'lat', 'lon', 'time', 'forecast_window']
     if not args.ZH_only:
         fields += ['DIV', 'VOR']
-    if not args.fields is None:
+    '''if not args.fields is None:
         fields += args.fields
-        fields = set(fields)
+        fields = set(fields)'''
     wofs_preds = wofs[fields].copy(deep=True)
 
     dims = dict(wofs.dims)
@@ -767,6 +767,8 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     @param args: command line args. see crate_argsparser()
             Relevant arguements:
                 dir_preds: directory to save the WoFS grid predictions
+                ZH_only: flag whether to only include reflectivity
+                fields: list of additional fields to write
                 write: flag whether to write out the predictions
     @param wofs_orig: original WoFS data prior to interpolating to GridRad. Used 
             to obtain the original WoFS grid spacing
@@ -841,7 +843,22 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
                                             XLONG=(["Time", "south_north", "west_east"], wofs_orig.XLONG.values)),
                             attrs=wofs_orig.attrs
                             )
-    #on_wofsgrid.append(wofs_like)
+
+    # Include select WoFS fields
+    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'Times', 'UP_HELI_MAX']
+    if not args.ZH_only:
+        fields += ['U', 'U10', 'V', 'V10']
+    if not args.fields is None:
+        #, 'REL_VORT', 'W', 'W_UP_MAX'
+        fields += args.fields
+        fields = set(fields)
+    wofs_fields = wofs_orig[fields].copy(deep=True)
+    wofs_like = xr.merge([wofs_like, wofs_fields])
+    if DB:
+        print("dims\n", wofs_like.dims)
+        print("coords\n", wofs_like.coords)
+        print("data_vars\n", wofs_like.data_vars)
+        print("attr 'START_DATE'\n", wofs_like.START_DATE)
 
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
@@ -1068,6 +1085,8 @@ if __name__ == '__main__':
 
     args = parse_args()
     DB = args.dry_run
+
+    if DB: print("FIELDS", args.fields, len(args.fields))
 
     wofs_files = []
     if os.path.isfile(args.loc_wofs):
