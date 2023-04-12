@@ -17,3 +17,7 @@ dependencies:
   - pytest
   - pyyaml
   - pyproj
+  - py3nvml
+  - pydot
+  - wandb
+  - seaborn

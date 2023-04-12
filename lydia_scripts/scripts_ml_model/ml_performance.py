@@ -138,7 +138,7 @@ def plot_performance_diagram(predictions):
 
 
 
-def make_patch_images(predictions):
+def make_patch_images(predictions, write=False):
 
     # Make the directory for the images if it doesn't already exist
     if not os.path.exists(path_to_predictions + '/patch_images/'):
@@ -176,7 +176,10 @@ def make_patch_images(predictions):
         cbar1.set_label('p$_{tor}$', rotation=0)
 
         # Save out the figure
-        plt.savefig(path_to_predictions + '/patch_images/patch_' + str(j) + '.png',dpi=500)
+        if write:
+            fpath = path_to_predictions + '/patch_images/patch_' + str(j) + '.png'
+            print("Saving", fpath)
+            plt.savefig(fpath, dpi=500)
 
 
 def main():

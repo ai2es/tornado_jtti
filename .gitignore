@@ -139,3 +139,7 @@ cython_debug/
 
 # Nano backup files
 *~
+*.save
+
+# VSCode
+.vscode/
