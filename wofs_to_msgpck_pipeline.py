@@ -49,7 +49,7 @@ def test_monitor_queue():
         
         # subprocess.Popen(cmd, shell=False, stdout="/dev/null",
         #                  stderr=subprocess.PIPE).communicate() # Popen will wait until the python process is finished
-        subprocess.run(cmd, shell=False, stdout="/dev/null",
+        subprocess.run(cmd, shell=False, stdout=False,
                        stderr=subprocess.PIPE, check=True).communicate()
     
             # add Monique's pipeline script here (WoFS to WoFS-grid preds and variables)
