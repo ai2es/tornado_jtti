@@ -64,7 +64,7 @@ print("keras version", keras.__version__)
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
+from scripts_data_pipeline.wofs_to_gridrad_idw_azure import calculate_output_lats_lons
 print(" ")
 import gc
 gc.collect()

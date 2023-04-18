@@ -8,9 +8,9 @@ loc_wofs: "/datadrive/wofs/"
 datetime_format: "%Y-%m-%d_%H:%M:%S"
 dir_preds: "/datadrive/wofs_preds/"
 dir_patches: "/datadrive/wofs_patches/"
-with_nans: 0
+with_nans: ~
 fields: "U WSPD10MAX W_UP_MAX"
 loc_model: "/home/ggantos/tornado_jtti/lydia_scripts/models/2023_04_06_18_23_50_hp_model01.h5"
 file_trainset_stats: "/home/ggantos/tornado_jtti/lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc"
 write: 4
-dry_run: 1
+dry_run: ~

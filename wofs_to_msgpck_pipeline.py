@@ -31,24 +31,28 @@ def test_monitor_queue():
                     # save file to temp location
         
         with open("config.yml") as config_file:
-            config = yaml.safe_load(config_file)
+            config = yaml.load(config_file, Loader=yaml.BaseLoader)
             
         cmd = ["python",
-               "wofs_raw_predictions_azure.py",
+               "lydia_scripts/wofs_raw_predictions_azure.py",
                 f"--loc_wofs={config['loc_wofs']}",
                 f"--datetime_format={config['datetime_format']}",
                 f"--dir_preds={config['dir_preds']}",
                 f"--dir_patches={config['dir_patches']}",
                 f"--dir_figs={config['dir_figs']}",
-                f"--with_nans={config['with_nans']}",
                 f"--fields={config['fields']}",
                 f"--loc_model={config['loc_model']}",
                 f"--file_trainset_stats={config['file_trainset_stats']}",
-                f"--write={config['write']}",
-                f"--dry_run={config['dry_run']}"]
+                f"--write={config['write']}"]
         
         # subprocess.Popen(cmd, shell=False, stdout="/dev/null",
         #                  stderr=subprocess.PIPE).communicate() # Popen will wait until the python process is finished
+        try:
+            output = subprocess.check_output(cmd)
+        except subprocess.CalledProcessError as e:
+            print("FAILED")
+            print(e)
+
         subprocess.run(cmd, shell=False, stdout=False,
                        stderr=subprocess.PIPE, check=True).communicate()
     
