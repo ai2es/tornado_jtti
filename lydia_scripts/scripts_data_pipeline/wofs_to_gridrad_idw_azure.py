@@ -428,7 +428,7 @@ def find_wofs_date(all_wofs_days, idx):
     return yyyy, mm, dd
 
 
-def main():    
+def main():
 
     #get the inputs from the .sh file
     args = get_arguments()

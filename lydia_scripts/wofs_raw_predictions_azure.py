@@ -32,7 +32,6 @@ Execution Instructions:
                                                      (--filename_prefix)
                                                      --dir_preds
                                                      (--dir_patches)
-                                                     (--dir_figs)
                                                      --with_nans 
                                                      (--fields)
                                                      --loc_model
@@ -89,6 +88,10 @@ def create_argsparser(args_list=None):
     parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
 
     # WoFS file(s) path 
+    parser.add_argument('--wofs_rel_path', type=str, required=True, 
+        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
+    parser.add_argument('--wofs_file', type=str, required=True, 
+        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
     parser.add_argument('--loc_wofs', type=str, required=True, 
         help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
 
@@ -101,8 +104,6 @@ def create_argsparser(args_list=None):
         help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
     parser.add_argument('--dir_patches', type=str,  
         help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
-    parser.add_argument('--dir_figs', type=str,  
-        help='Top level directory to save any corresponding figures.')
     parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,),
         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
@@ -611,12 +612,12 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
     #ds_patches['Times'] = wofs.Times
     ds_patches.attrs = wofs.attrs
     
-    if args.write in [2, 4] and not args.dir_patches is None:
+    if args.write in [2, 4] and not os.path.join(args.dir_patches, args.wofs_rel_path) is None:
         fname = os.path.basename(wofs.filenamepath)
         fname, _ext = os.path.splitext(fname)
         patch_shape = [f'{c:03d}' for c in args.patch_shape]
         patch_shape_str = '_'.join(patch_shape)
-        savepath = os.path.join(args.dir_patches, f'{fname}_patched_{patch_shape_str}.nc')
+        savepath = os.path.join(args.dir_patches, args.wofs_rel_path, f'{fname}_patched_{patch_shape_str}.nc')
         print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
         ds_patches.to_netcdf(savepath) #, engine='netcdf4'
 
@@ -853,7 +854,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-        savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
+        savepath = os.path.join(args.dir_preds, args.wofs_rel_path, f'{fname}_predictions.nc')
         print(f"Save WoFS grid predictions to {savepath}\n")
         wofs_like.to_netcdf(savepath)
         #wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
@@ -967,12 +968,12 @@ if __name__ == '__main__':
     if DB: print("FIELDS", args.fields, len(args.fields))
 
     wofs_files = []
-    if os.path.isfile(args.loc_wofs):
-        wofs_files = args.loc_wofs
-    #TODO elif os.path.isdir(args.loc_wofs):
-    #    wofs_files = os.listdir(args.loc_wofs)
+    if oargs.wofs_file:
+        wofs_files = os.path.join(args.loc_wofs, args.wofs_rel_path, args.wofs_file)
+    elif os.path.isdir(os.path.join(args.loc_wofs, args.wofs_rel_path)):
+        wofs_files = os.listdir(os.path.join(args.loc_wofs, args.wofs_rel_path))
     else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file, but was {args.loc_wofs}")
+        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory, but was {args.loc_wofs}")
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
