@@ -728,8 +728,6 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
     dims = dict(wofs.dims)
     coords = dict(wofs.coords)
     coords.pop('z')
-    print(wofs.dims)
-    print(wofs.coords)
 
     wofs_preds['ZH_composite'] = xr.DataArray(
         data=wofs.ZH.values.max(axis=3), #["patch", "x", "y"]
@@ -968,7 +966,7 @@ if __name__ == '__main__':
     if DB: print("FIELDS", args.fields, len(args.fields))
 
     wofs_files = []
-    if oargs.wofs_file:
+    if args.wofs_file:
         wofs_files = os.path.join(args.loc_wofs, args.wofs_rel_path, args.wofs_file)
     elif os.path.isdir(os.path.join(args.loc_wofs, args.wofs_rel_path)):
         wofs_files = os.listdir(os.path.join(args.loc_wofs, args.wofs_rel_path))
@@ -989,7 +987,9 @@ if __name__ == '__main__':
                                        datetime_format=datetime_fmt,
                                        seconds_since=SECS_SINCE, 
                                        engine='netcdf4', DB=DB)
-                                       
+    print("DIMENSIONS\n", wofs.dims)
+
+    
     # Interpolate WoFS grid to GridRad grid
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)

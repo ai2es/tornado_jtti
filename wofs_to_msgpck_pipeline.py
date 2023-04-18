@@ -33,29 +33,32 @@ def test_monitor_queue():
         with open("config.yml") as config_file:
             config = yaml.load(config_file, Loader=yaml.BaseLoader)
             
-        cmd = ["python",
-               "lydia_scripts/wofs_raw_predictions_azure.py",
-                f"--loc_wofs={config['loc_wofs']}",
-                f"--datetime_format={config['datetime_format']}",
-                f"--dir_preds={config['dir_preds']}",
-                f"--dir_patches={config['dir_patches']}",
-                f"--dir_figs={config['dir_figs']}",
-                f"--fields={config['fields']}",
-                f"--loc_model={config['loc_model']}",
-                f"--file_trainset_stats={config['file_trainset_stats']}",
-                f"--write={config['write']}"]
-        
-        # subprocess.Popen(cmd, shell=False, stdout="/dev/null",
-        #                  stderr=subprocess.PIPE).communicate() # Popen will wait until the python process is finished
+        cmd = ["/home/miniconda3/envs/jtti_azure/bin/python",
+               "/home/ggantos/tornado_jtti/lydia_scripts/wofs_raw_predictions_azure.py",
+               f"--wofs_rel_path={config['wofs_rel_path']}",
+               f"--wofs_file={config['wofs_file']}",
+               f"--loc_wofs={config['loc_wofs']}",
+               f"--datetime_format={config['datetime_format']}",
+               f"--dir_preds={config['dir_preds']}",
+               f"--dir_patches={config['dir_patches']}",
+               f"--fields={config['fields']}",
+               f"--loc_model={config['loc_model']}",
+               f"--file_trainset_stats={config['file_trainset_stats']}",
+               f"--write={config['write']}"]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(result.stdout)
+
         try:
             output = subprocess.check_output(cmd)
         except subprocess.CalledProcessError as e:
             print("FAILED")
-            print(e)
+            print(e, '\n')
+            print(e.returncode, '\n')
+            print(e.output, '\n')
+            print(e.stdout, '\n')
+            print(e.stderr, '\n')
 
-        subprocess.run(cmd, shell=False, stdout=False,
-                       stderr=subprocess.PIPE, check=True).communicate()
-    
             # add Monique's pipeline script here (WoFS to WoFS-grid preds and variables)
                     # Must save: predictions and radar reflectivity, updraft helcity (0-2),
                     # Must save: updraft helicity (2-5)
