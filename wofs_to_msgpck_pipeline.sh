@@ -48,7 +48,7 @@ def test_monitor_queue():
                f"--dry_run"]
         
         print(cmd)
-        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+        result = subprocess.run(cmd, capture_output=True, shell=False)
         print(result.stdout)
 
         try:
