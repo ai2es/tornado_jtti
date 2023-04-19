@@ -419,6 +419,7 @@ def make_patches(args, radar, window):
                 yi = lon_len - ysize - 1
 
             # Create the patch
+            print("MADE IT HERE")
             data_vars = dict(
                             ZH=(["x", "y", "z"], radar.ZH.isel(Latitude=slice(xi, xi + xsize), 
                                                               Longitude=slice(yi, yi + ysize), 

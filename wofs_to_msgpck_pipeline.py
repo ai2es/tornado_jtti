@@ -32,7 +32,7 @@ def test_monitor_queue():
         
         with open("config.yml") as config_file:
             config = yaml.load(config_file, Loader=yaml.BaseLoader)
-            
+        
         cmd = ["/home/miniconda3/envs/jtti_azure/bin/python",
                "/home/ggantos/tornado_jtti/lydia_scripts/wofs_raw_predictions_azure.py",
                f"--wofs_rel_path={config['wofs_rel_path']}",
@@ -44,9 +44,11 @@ def test_monitor_queue():
                f"--fields={config['fields']}",
                f"--loc_model={config['loc_model']}",
                f"--file_trainset_stats={config['file_trainset_stats']}",
-               f"--write={config['write']}"]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
+               f"--write={config['write']}",
+               f"--dry_run"]
+        
+        print(cmd)
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
         print(result.stdout)
 
         try:

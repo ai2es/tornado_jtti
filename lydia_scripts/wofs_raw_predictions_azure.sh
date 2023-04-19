@@ -1,3 +1,8 @@
+#!/bin/bash -l
+
+echo `which python`
+echo `pwd`
+
 python wofs_raw_predictions_azure.py \
 --wofs_rel_path="2019/20190520/0030/ENS_MEM_1" \
 --wofs_file="wrfwof_d01_2019-05-21_00:30:00" \
