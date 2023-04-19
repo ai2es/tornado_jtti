@@ -117,7 +117,7 @@ def create_argsparser(args_list=None):
 
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
-    parser.add_argument('-d', '--dry_run', action='store_true',
+    parser.add_argument('-d', '--debug_on', action='store_true',
         help='For testing and debugging. Execute without running models or saving data and display output paths')
 
     return parser
@@ -145,7 +145,7 @@ WoFS to GridRad interpolation methods, refactored from lydia_scripts/scripts_dat
 def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None, 
                    datetime_format='%Y-%m-%d_%H:%M:%S', 
                    seconds_since='seconds since 2001-01-01', 
-                   engine='netcdf4', DB=0, **kwargs):
+                   engine='netcdf4', debug=0, **kwargs):
     ''' 
     Load the raw WoFS file as xarray dataset and netcdf dataset
 
@@ -161,12 +161,12 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
             documentation for more information
     @param engine: Engine to use when reading file. see documentation for xarray 
             Dataset
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
     @param kwargs: any additional desired parameters to xarray.open_dataset(...)
     
     @return: tuple with xarray Dataset and netCDF4 Dataset
     '''
-    if DB: print(f"Loading {filepath}")
+    if debug: print(f"Loading {filepath}")
 
     # Create Dataset
     wofs = None
@@ -178,7 +178,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
         wofs_datetime = wofs.Times.data[0].decode('ascii') # decode from binary string to text string
     _datetime, dt_int, dt_str = get_wofs_datetime(filepath, filename_prefix=filename_prefix, 
                                                 wofs_datetime=wofs_datetime, seconds_since=seconds_since, 
-                                                datetime_format=datetime_format, DB=DB)
+                                                datetime_format=datetime_format, debug=debug)
     wofs = wofs.reindex(Time=[dt_int])
     wofs.attrs['FORECAST_DATETIME'] = dt_str
     
@@ -187,7 +187,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
     return wofs, wofs_netcdf
 
 def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4',
-                   seconds_since='seconds since 2001-01-01', DB=0, **kwargs):
+                   seconds_since='seconds since 2001-01-01', debug=0, **kwargs):
     ''' TODO: maybe. stretch
     (not implemented) Load multiple WoFS files
     '''
@@ -198,7 +198,7 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
         wofs_datetime = wofs.Times.data[f]
         _datetime, dt_int, dt_str = get_wofs_datetime(filepath, filename_prefix=filename_prefix, 
                                                 wofs_datetime=wofs_datetime, seconds_since=seconds_since, 
-                                                datetime_format=datetime_format, DB=DB)
+                                                datetime_format=datetime_format, debug=debug)
         wofs = wofs.reindex(Time=[dt_int])
         wofs_netcdf = Dataset(filepath)
 
@@ -206,7 +206,7 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
     pass
 
 def create_wofs_time(year, month, day, hour, min, sec, 
-                     seconds_since='seconds since 2001-01-01', DB=0):
+                     seconds_since='seconds since 2001-01-01', debug=0):
     ''' 
     Create corresponding datatime object and return the date in GridRad time 
     seconds since
@@ -220,18 +220,18 @@ def create_wofs_time(year, month, day, hour, min, sec,
     @param seconds_since: string of the form since describing the time units. 
             can be days, hours, minutes, seconds, milliseconds or microseconds. 
             see netcdf4.date2num() documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: the WoFS datetime as a np.datetime int
     '''
     dtime = datetime.datetime(year, month, day, hour, min, sec)
     dtime = date2num(dtime, seconds_since)
-    if DB: print(f"WoFS time: {dtime}")
+    if debug: print(f"WoFS time: {dtime}")
     return dtime 
 
 def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None, 
                       datetime_format='%Y-%m-%d_%H:%M:%S', 
-                      seconds_since='seconds since 2001-01-01', DB=0):
+                      seconds_since='seconds since 2001-01-01', debug=0):
     ''' 
     Construct a datetime object for the raw WoFS file name. Raw WoFS file names 
     are of the form: wrfwof_d01_2019-05-18_07:35:00 ('YYYY-MM-DD_hh:mm:ss'). 
@@ -250,7 +250,7 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     @param seconds_since: string of the form since describing the time units. 
             can be days, hours, minutes, seconds, milliseconds or microseconds. 
             see netcdf4.date2num() documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: a 3-tuple with the datetime object, the datetime int 
             since seconds_since and the formatted datetime string for the WoFS 
@@ -262,25 +262,25 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     if not filename_prefix is None:
         fname = fname.replace(filename_prefix, '')
         wofs_datetime, _ = parse_date(fname, fuzzy_with_tokens=True)
-        if DB: print(f"Extracted {wofs_datetime} from file {fnpath}:{fname}")
+        if debug: print(f"Extracted {wofs_datetime} from file {fnpath}:{fname}")
 
     datetime_obj = wofs_datetime
     if not isinstance(datetime_obj, datetime):
         # Convert datetime string to datetime object
         datetime_obj = datetime.strptime(wofs_datetime, datetime_fmt)
-        if DB: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
+        if debug: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
 
     # Convert datetime object to np.datetime int
     datetime_int = date2num(datetime_obj, seconds_since)
-    if DB: print(f"Extracted datetime int in {seconds_since}:: {datetime_int} from file {fnpath}({fname})")
+    if debug: print(f"Extracted datetime int in {seconds_since}:: {datetime_int} from file {fnpath}({fname})")
 
     # Convert datetime object to string with the desired format
     datetime_str = datetime_obj.strftime(datetime_format)
-    if DB: print(f"Extracted datetime string:: {datetime_str} from file {fnpath}({fname})\n")
+    if debug: print(f"Extracted datetime string:: {datetime_str} from file {fnpath}({fname})\n")
 
     return datetime_obj, datetime_int, datetime_str
 
-def compute_forecast_window(init_time, forecast_time, DB=0):
+def compute_forecast_window(init_time, forecast_time, debug=0):
     ''' 
     Calculate the forecast window as the time between the WoFS initialization 
     time and the WoFS forecast time.
@@ -288,7 +288,7 @@ def compute_forecast_window(init_time, forecast_time, DB=0):
     @param init_time: string indicating the initialization time of the WoFS 
             simulation.
     @param forecast_time: string indicating the forecast time of the WoFS data
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: integer duration of the forecast window in minutes
     '''
@@ -298,7 +298,7 @@ def compute_forecast_window(init_time, forecast_time, DB=0):
     t1 = time.fromisoformat(forecast_time) 
 
     forecast_window = (t1 - t0).total_seconds() / 60
-    if DB: print(f"Forecast window: {forecast_window} min\n")  
+    if debug: print(f"Forecast window: {forecast_window} min\n")  
 
     return forecast_window
 
@@ -462,7 +462,7 @@ def make_patches(args, radar, window):
     return ds_patches
 
 def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
-               gridrad_heights=np.arange(1, 13, step=1, dtype=int), DB=0):
+               gridrad_heights=np.arange(1, 13, step=1, dtype=int), debug=0):
     '''
     Convert WoFS data into the GridRad grid. If with_nans is set, change grid points 
     with reflectivity=0 to NaN
@@ -472,19 +472,17 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
                 dir_patches: directory to save patched WoFS data in the GridRad grid
                 write: flag whether to the patched data
                 with_nans: flag whether to set reflectivity values that are 0 to NaN
-                dry_run: 
+                debug_on: flag whether to run in debug mode (null) or not (not null)
     @param wofs: xarray Dataset
     @param wofs_netcdf: netcdf Dataset
     @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
             1 / (gridrad_spacing) degrees
     @param gridrad_heights: 1D array of the elevation levels in the GridRad data. 
             Height values we want to interpolate to
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: xarray Dataset with the interpolated and patched data
     '''
-    DB = args.dry_run
-
     # There is a difference sometimes between the day in the filepath and the day in the filename
     # All filepath dates have '_path' and all filename dates have '_day'
     
@@ -602,7 +600,7 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
     datetime_forecast = datetime.fromisoformat(datetime_forecast_str)
     datetime_init = datetime.fromisoformat(wofs.START_DATE) #datetime.fromisoformat(args.datetime_init) #.strftime(datetime_fmt) #datetime.strptime(args.datetime_init, datetime_fmt)
     forecast_window = (datetime_forecast - datetime_init).seconds / 60
-    if DB: print(f"Forecast window: {forecast_window} min\n")
+    if debug: print(f"Forecast window: {forecast_window} min\n")
 
     # Make patches
     ds_patches = make_patches(args, wofs_regridded, forecast_window)
@@ -624,7 +622,7 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
 """
 Tornado prediction methods.
 """
-def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
+def load_trainset_stats(args, engine='netcdf4', debug=0, **kwargs):
     ''' 
     Open args.file_trainset_stats with the mean and std of the training data. These 
     will be used for normalizing the data prior to prediction
@@ -635,21 +633,21 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
                 fields: list of fields
     @param engine: Engine to use when reading file. see xarray Dataset 
             documentation 
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
     @param kwargs: keyword args for xr.open_dataset()
 
     @return: the dataset with the means and stds of the features
     '''
     fpath = args.file_trainset_stats
 
-    if DB: print("Training meta data used:", fpath)
+    if debug: print("Training meta data used:", fpath)
 
     train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load() #, cache=False
     train_stats.close()
 
     return train_stats
 
-def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
+def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     '''
     Load the model and perform the predictions.
     TODO: predict on arbitrary set of fields
@@ -662,7 +660,7 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
             the WoFS fields from the training set data
     @param eval: TODO whether to compute evaluation results. only available if
             the true labels are also available
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
     @param fss_args: keyword args for make_fractions_skill_score()
             default: {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                         'cutoff': 0.5, 'want_hard_discretization': False}
@@ -672,7 +670,7 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
 
     model_path = args.loc_model
 
-    if DB: print("Loading model:", model_path)
+    if debug: print("Loading model:", model_path)
 
     if fss_args is None or fss_args == {}:
         fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
@@ -687,7 +685,7 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
     X = (wofs.ZH - ZH_mu) / ZH_std
 
     # Predict with the data
-    if DB: 
+    if debug: 
         print(f"Performing predictions (wofs dims={wofs.dims}) ...")
         print(f"Performing predictions (wofs coords={wofs.coords}) ...")
     print(f"Performing predictions (input shape={X.shape}) ...")
@@ -696,7 +694,7 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
 
     return preds
 
-def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
+def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), debug=0):
     '''
     Combine the fields of interest with true and predicted data into a single Dataset
     Combine the predictions, reflectivity, U, V.
@@ -709,7 +707,7 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
     @param wofs: xarray Dataset with all the wofs data
     @param preds: the predictions from the reflectivity
     @param gridrad_heights: indicies of the vertical levels 
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: xarray dataset with the combined fields and predictions
     '''
@@ -745,7 +743,7 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
     return wofs_preds
 
 def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
-                 seconds_since='seconds since 2001-01-01', DB=0):
+                 seconds_since='seconds since 2001-01-01', debug=0):
     '''
     Interpolate the WofS predictions data back into the original WoFS grid
 
@@ -765,7 +763,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: a tuple with stitched WoFS prediction patches (in gridrad system), 
             and the WoFS data as an xarray Dataset in the original WoFS grid 
@@ -774,7 +772,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     # Stitch back together the patches of the predictions
     predictions =  stitch_patches(args, wofs_gridrad, stats, 
                                     gridrad_spacing=gridrad_spacing, 
-                                    seconds_since=seconds_since, DB=DB)
+                                    seconds_since=seconds_since, debug=debug)
     
     # Add the stitched file to the list of stitched files     
     #stitched_preds.append(predictions)
@@ -839,7 +837,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
         fields = set(fields)
     wofs_fields = wofs_orig[fields].copy(deep=True)
     wofs_like = xr.merge([wofs_like, wofs_fields])
-    if DB:
+    if debug:
         print("dims\n", wofs_like.dims)
         print("coords\n", wofs_like.coords)
         print("data_vars\n", wofs_like.data_vars)
@@ -857,7 +855,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     return predictions, wofs_like
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
-                   seconds_since='seconds since 2001-01-01', DB=0):
+                   seconds_since='seconds since 2001-01-01', debug=0):
     """ 
     Reconstruct the stitched grid for a single WoFS forecast time
 
@@ -873,7 +871,7 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: xarray Dataset of the stitched WoFS patches
     """
@@ -958,61 +956,46 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
 if __name__ == '__main__':
 
     args = parse_args()
-    DB = args.dry_run
 
-    if DB: print("FIELDS", args.fields, len(args.fields))
+    if args.debug_on: print("NO OF FIELDS: ", en(args.fields))
+    if args.debug_on: print("FIELDS: ", args.fields)
 
-    wofs_files = []
     if os.path.isfile(args.loc_wofs):
-        wofs_files = args.loc_wofs
+        wofs_files = list(args.loc_wofs)
     elif os.path.isdir(args.loc_wofs):
         wofs_files = os.listdir(args.loc_wofs)
     else: 
         raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory, but was {args.loc_wofs}")
-    
-    # Opens all data files into a Dataset
-    print("Open WoFS file(s)", wofs_files)
-
-    #datetime_fmt = '%Y-%m-%d_%H:%M:%S' #YYYY-MM-DD_hh-mm-ss
-    datetime_fmt = args.datetime_format
-    print("Datetime format:", datetime_fmt)
 
     SECS_SINCE = 'seconds since 2001-01-01'
-    ds_load_args = {'cache': False}
-    wofs, wofs_netcdf = load_wofs_file(wofs_files, args.filename_prefix, 
-                                       wofs_datetime=None,
-                                       datetime_format=datetime_fmt,
-                                       seconds_since=SECS_SINCE, 
-                                       engine='netcdf4', DB=DB)
-    print("DIMENSIONS\n", wofs.dims)
-
-    
-    # Interpolate WoFS grid to GridRad grid
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
-    wofs_gridrad = to_gridrad(args, wofs, wofs_netcdf, 
-                              gridrad_spacing=GRIDRAD_SPACING, 
-                              gridrad_heights=GRIDRAD_HEIGHTS, DB=DB)
+    train_stats = load_trainset_stats(args, debug=args.debug_on)
+    
+    for i, file in enumerate(wofs_files):
+        print(f"Opening WoFS file {i+1} of {len(wofs_files)}: {file}")
+        wofs, wofs_netcdf = load_wofs_file(file,
+                                           args.filename_prefix, 
+                                           wofs_datetime=None,
+                                           datetime_format=args.datetime_format,
+                                           seconds_since=SECS_SINCE, 
+                                           engine='netcdf4',
+                                           debug=args.debug_on)
+    
+        # Interpolate WoFS grid to GridRad grid
+        wofs_gridrad = to_gridrad(args, wofs, wofs_netcdf, 
+                                  gridrad_spacing=GRIDRAD_SPACING, 
+                                  gridrad_heights=GRIDRAD_HEIGHTS,
+                                  debug=args.debug_on)
+        # Compute predictions
+        preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
 
-    # Prepare data for prediction
-    # Load training data statistics
-    train_stats = load_trainset_stats(args, DB=DB)
+        # Combine the predictions, reflectivity and select fields into a single dataset
+        wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
 
-    # Compute predictions
-    preds = predict(args, wofs_gridrad, train_stats, DB=DB) #, **fss_args)
+        # Interpolate back to WoFS grid
+        preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
+                                               train_stats, gridrad_spacing=GRIDRAD_SPACING, 
+                                               seconds_since=SECS_SINCE, debug=args.debug_on)
 
-    # TODO: optional display/output performance
-
-    # Combine the predictions, reflectivity and select fields into a single dataset
-    wofs_combo = combine_fields(args, wofs_gridrad, preds, DB=DB)
-
-    # Interpolate back to WoFS grid
-    preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
-                                           train_stats, gridrad_spacing=GRIDRAD_SPACING, 
-                                           seconds_since=SECS_SINCE, DB=DB)
-
-    # Close Datasets
-    #wofs_netcdf.close()
-    #ds_stitched.close()
-    #ds_wofs_as_gridrad.close()
-    print(f"PREDICTIONS COMPLETE FOR {wofs_files}.")
+    print(f"PREDICTIONS COMPLETE FOR {args.loc_wofs}.")
