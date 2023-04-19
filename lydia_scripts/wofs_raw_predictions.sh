@@ -31,7 +31,7 @@ WOFS_FILE="wrfwof_d01_2019-04-30_19:55:00"
 #WOFS_FILE="wrfwof_d01_2019-05-18_03:15:00"
 
 python lydia_scripts/wofs_raw_predictions.py \
---loc_wofs="/ourdisk/hpc/ai2es/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
+--dir_preds="/ourdisk/hpc/ai2es/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
 --dir_preds="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/${WOFS_REL_PATH}"  \
 --dir_patches="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_patches/${WOFS_REL_PATH}" \

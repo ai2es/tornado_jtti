@@ -1,80 +1,25 @@
-import unittest, datetime, sys, os.path, asyncio, json, time, subprocess
-import yaml
+python real_time_scripts/download_wofs.py \
+--acct_url='https://storwofstest003.queue.core.windows.net/?sv=2019-02-02&st=2023-03-09T20%3A39%3A15Z&se=2024-01-01T06%3A00%3A00Z&sp=rp&sig=biy6JZg2n4Wmg%2BLHF4QnVLQvt%2F4W8oYJhXMiaTkyj4U%3D' \
+--queue_name='wofs-ucar'
 
-from azure.storage.queue import (
-    QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
-)
+WOFS_REL_PATH="2019/20190520/0030/ENS_MEM_1"
+WOFS_FILE="wrfwof_d01_2019-05-21_00:30:00"
 
-account_url = 'https://storwofstest003.queue.core.windows.net/?sv=2019-02-02&st=2023-03-09T20%3A39%3A15Z&se=2024-01-01T06%3A00%3A00Z&sp=rp&sig=biy6JZg2n4Wmg%2BLHF4QnVLQvt%2F4W8oYJhXMiaTkyj4U%3D'
+python real_time_scripts/wofs_raw_predictions_azure.py \
+--loc_wofs="/datadrive/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
+--datetime_format="%Y-%m-%d_%H:%M:%S"  \
+--dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/"  \
+--dir_patches="/datadrive/wofs_patches/${WOFS_REL_PATH}/" \
+--with_nans  \
+--fields U WSPD10MAX W_UP_MAX \
+--loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
+--file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
+--write=4 \
+--dry_run
 
 
-def test_monitor_queue():
-#    queue = QueueClient(account_url=account_url,
-#                        queue_name='wofs-ucar',
-#                        message_encode_policy=TextBase64EncodePolicy(),
-#                        message_decode_policy=TextBase64DecodePolicy())
-#    while True:
-#        # Receive messages one-by-one
-#        print('checking for messages...')
-
-#        messages = queue.peek_messages()
-        
-#        if len(messages) == 0:
-#            print('no message, sleeping')
-#            continue
-        
-#        else: 
-#            for message in messages:
-#                body = json.loads(message.content)
-#                print('Processing message:')
-#                for file_string in body['data']:
-                    # save file to temp location
-        
-        with open("config.yml") as config_file:
-            config = yaml.load(config_file, Loader=yaml.BaseLoader)
-        
-        cmd = ["/home/miniconda3/envs/jtti_azure/bin/python",
-               "/home/ggantos/tornado_jtti/lydia_scripts/wofs_raw_predictions_azure.py",
-               f"--wofs_rel_path={config['wofs_rel_path']}",
-               f"--wofs_file={config['wofs_file']}",
-               f"--loc_wofs={config['loc_wofs']}",
-               f"--datetime_format={config['datetime_format']}",
-               f"--dir_preds={config['dir_preds']}",
-               f"--dir_patches={config['dir_patches']}",
-               f"--fields={config['fields']}",
-               f"--loc_model={config['loc_model']}",
-               f"--file_trainset_stats={config['file_trainset_stats']}",
-               f"--write={config['write']}",
-               f"--dry_run"]
-        
-        print(cmd)
-        result = subprocess.run(cmd, capture_output=True, shell=False)
-        print(result.stdout)
-
-        try:
-            output = subprocess.check_output(cmd)
-        except subprocess.CalledProcessError as e:
-            print("FAILED")
-            print(e, '\n')
-            print(e.returncode, '\n')
-            print(e.output, '\n')
-            print(e.stdout, '\n')
-            print(e.stderr, '\n')
-
-            # add Monique's pipeline script here (WoFS to WoFS-grid preds and variables)
-                    # Must save: predictions and radar reflectivity, updraft helcity (0-2),
-                    # Must save: updraft helicity (2-5)
-                    # Must save: archival tier storage blob
-                    # Nice to have: 1) U and V windfields and 2) W if budget allows
-                        # U and V are useful for adding divergence and vorticity later
-                    # Retrieve later from summary files: Cape (mixed layer), Cin, USHR, VSHR
-                                    
-            # add a monitoring line to determine when Monique's script is finished
-                # add Unet outputs to msgpack script here
-                
-            # transfer msgpack files to hot tier data blob
-            
-            # time.sleep(10)
-
-if __name__ == '__main__':
-    test_monitor_queue()
+python real_time_scripts/create_sparse_data.py \
+--dir_preds: "/datadrive/wofs_preds/${WOFS_REL_PATH}/" \
+--dir_preds_msgpck: "/datadrive/wofs_preds_msgpck/${WOFS_REL_PATH}/" \
+--variable: "UH" \
+--threshold: "0.08"

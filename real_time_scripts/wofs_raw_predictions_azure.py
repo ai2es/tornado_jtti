@@ -88,10 +88,6 @@ def create_argsparser(args_list=None):
     parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
 
     # WoFS file(s) path 
-    parser.add_argument('--wofs_rel_path', type=str, required=True, 
-        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
-    parser.add_argument('--wofs_file', type=str, required=True, 
-        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
     parser.add_argument('--loc_wofs', type=str, required=True, 
         help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
 
@@ -613,12 +609,12 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
     #ds_patches['Times'] = wofs.Times
     ds_patches.attrs = wofs.attrs
     
-    if args.write in [2, 4] and not os.path.join(args.dir_patches, args.wofs_rel_path) is None:
+    if args.write in [2, 4] and not os.path.join(args.dir_patches) is None:
         fname = os.path.basename(wofs.filenamepath)
         fname, _ext = os.path.splitext(fname)
         patch_shape = [f'{c:03d}' for c in args.patch_shape]
         patch_shape_str = '_'.join(patch_shape)
-        savepath = os.path.join(args.dir_patches, args.wofs_rel_path, f'{fname}_patched_{patch_shape_str}.nc')
+        savepath = os.path.join(args.dir_patches, f'{fname}_patched_{patch_shape_str}.nc')
         print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
         ds_patches.to_netcdf(savepath) #, engine='netcdf4'
 
@@ -853,7 +849,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-        savepath = os.path.join(args.dir_preds, args.wofs_rel_path, f'{fname}_predictions.nc')
+        savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
         print(f"Save WoFS grid predictions to {savepath}\n")
         wofs_like.to_netcdf(savepath)
         #wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
@@ -968,9 +964,9 @@ if __name__ == '__main__':
 
     wofs_files = []
     if args.wofs_file:
-        wofs_files = os.path.join(args.loc_wofs, args.wofs_rel_path, args.wofs_file)
-    elif os.path.isdir(os.path.join(args.loc_wofs, args.wofs_rel_path)):
-        wofs_files = os.listdir(os.path.join(args.loc_wofs, args.wofs_rel_path))
+        wofs_files = os.path.join(args.loc_wofs)
+    elif os.path.isdir(os.path.join(args.loc_wofs):
+        wofs_files = os.listdir(os.path.join(args.loc_wofs)
     else: 
         raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory, but was {args.loc_wofs}")
     
