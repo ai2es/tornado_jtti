@@ -3,6 +3,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 import msgpack
 import os
+import sys
 import glob
 import argparse
 
@@ -12,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description='Save ML predictions to messagepack')
     parser.add_argument('--dir_preds', type=str, required=True, 
         help='Location of the WoFS prediction file(s). Can be a path to a single file or a directory to several files')
-    parser.add_argument('--dir_preds_msgpck', type=str, required=True, 
+    parser.add_argument('--dir_preds_msgpk', type=str, required=True, 
         help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
     parser.add_argument('--variable', type=str, required=True, 
         help='TODO')
@@ -33,14 +34,15 @@ def main():
 
     ds_list = []
     for i in range(1, 19):
+        os.makedirs(os.path.join(args.dir_preds_msgpk, f"ENS_MEM_{i}"), exist_ok=True)
         files = sorted(glob.glob(os.path.join(args.dir_preds, f"ENS_MEM_{i}", "wrfwof_d01_*")))
         ds_list.append(xr.open_mfdataset(files, concat_dim='Time', combine='nested')[args.variable])
     ds_all = xr.concat(ds_list, dim='member')
-    ds_mean = ds_all.mean(dim='member')[args.variable].load()
-    ds_median = ds_all.median(dim='member')[args.variable].load()
-    ds_max = ds_all.max(dim='member')[args.variable].load()
+    ds_mean = ds_all.mean(dim='member').load()
+    ds_median = ds_all.median(dim='member').load()
+    ds_max = ds_all.max(dim='member').load()
 
-    os.makedirs(arge.dir_preds_msgpck, exist_ok=True)
+    os.makedirs(args.dir_preds_msgpck, exist_ok=True)
     files = sorted(glob.glob(os.path.join(args.dir_preds, f"ENS_MEM_1", "wrfwof_d01_*")))
     for timestep, f in enumerate(files):
         data = {}
@@ -59,9 +61,10 @@ def main():
         data["MEM_median"] = median_sparse_dict
         se_coords = [ds['XLONG'][0, 0, 0].values.tolist(), ds['XLAT'][0, 0, 0].values.tolist()]
         data['se_coords'] = se_coords
-        with open(os.path.join(args.dir_preds_msgpck, f"wofs_sparse_prob_{datetime}.msgpk"), 'wb') as outfile:
+        with open(os.path.join(args.dir_preds_msgpk, f"wofs_sparse_prob_{datetime}.msgpk"), 'wb') as outfile:
             packed = msgpack.packb(data)
             outfile.write(packed)
+            print(f"Saving {outfile}")
             del packed
 
 if __name__ == "__main__":

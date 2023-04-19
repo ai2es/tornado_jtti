@@ -963,10 +963,10 @@ if __name__ == '__main__':
     if DB: print("FIELDS", args.fields, len(args.fields))
 
     wofs_files = []
-    if args.wofs_file:
-        wofs_files = os.path.join(args.loc_wofs)
-    elif os.path.isdir(os.path.join(args.loc_wofs):
-        wofs_files = os.listdir(os.path.join(args.loc_wofs)
+    if os.path.isfile(args.loc_wofs):
+        wofs_files = args.loc_wofs
+    elif os.path.isdir(args.loc_wofs):
+        wofs_files = os.listdir(args.loc_wofs)
     else: 
         raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory, but was {args.loc_wofs}")
     
