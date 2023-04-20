@@ -136,7 +136,6 @@ def parse_args(args_list=None):
     '''
     parser = create_argsparser(args_list=args_list)
     args = parser.parse_args()
-    print("HERE", args.loc_wofs)
     return args
 
 
@@ -416,7 +415,6 @@ def make_patches(args, radar, window):
                 yi = lon_len - ysize - 1
 
             # Create the patch
-            print("MADE IT HERE")
             data_vars = dict(
                             ZH=(["x", "y", "z"], radar.ZH.isel(Latitude=slice(xi, xi + xsize), 
                                                               Longitude=slice(yi, yi + ysize), 
@@ -686,12 +684,11 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     X = (wofs.ZH - ZH_mu) / ZH_std
 
     # Predict with the data
-    if debug: 
-        print(f"Performing predictions (wofs dims={wofs.dims}) ...")
-        print(f"Performing predictions (wofs coords={wofs.coords}) ...")
-    print(f"Performing predictions (input shape={X.shape}) ...")
+#    if debug: 
+#        print(f"Performing predictions (wofs dims={wofs.dims}) ...")
+#        print(f"Performing predictions (wofs coords={wofs.coords}) ...")
+#        print(f"Performing predictions (input shape={X.shape}) ...")
     preds = model.predict(X)
-    #if eval: results = model.evaluate(X, y_test, batch_size=128)
 
     return preds
 
@@ -838,11 +835,11 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
         fields = set(fields)
     wofs_fields = wofs_orig[fields].copy(deep=True)
     wofs_like = xr.merge([wofs_like, wofs_fields])
-    if debug:
-        print("dims\n", wofs_like.dims)
-        print("coords\n", wofs_like.coords)
-        print("data_vars\n", wofs_like.data_vars)
-        print("attr 'START_DATE'\n", wofs_like.START_DATE)
+#    if debug:
+#        print("dims\n", wofs_like.dims)
+#        print("coords\n", wofs_like.coords)
+#        print("data_vars\n", wofs_like.data_vars)
+#        print("attr 'START_DATE'\n", wofs_like.START_DATE)
 
     # Save out the interpolated file
     if args.write in [1, 2, 4]:

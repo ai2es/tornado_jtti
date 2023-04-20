@@ -4,23 +4,21 @@
 
 WOFS_REL_PATH="2019/20190520/0030/ENS_MEM_1"
 WOFS_FILE=""
-#WOFS_REL_PATH="2019/20190520/0030/ENS_MEM_1"
-#WOFS_FILE="wrfwof_d01_2019-05-21_00:30:00"
 
-python real_time_scripts/wofs_raw_predictions_azure.py  \
---loc_wofs="/datadrive/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
---datetime_format="%Y-%m-%d_%H:%M:%S"  \
---dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/"  \
---dir_patches="/datadrive/wofs_patches/${WOFS_REL_PATH}/" \
---with_nans  \
---fields U WSPD10MAX W_UP_MAX \
---loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
---file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
---write=4 \
---debug_on
+#python real_time_scripts/wofs_raw_predictions_azure.py  \
+#--loc_wofs="/datadrive/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
+#--datetime_format="%Y-%m-%d_%H:%M:%S"  \
+#--dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/"  \
+#--dir_patches="/datadrive/wofs_patches/${WOFS_REL_PATH}/" \
+#--with_nans  \
+#--fields U WSPD10MAX W_UP_MAX \
+#--loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
+#--file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
+#--write=4 \
+#--debug_on
 
-#python real_time_scripts/create_sparse_data.py \
-#--dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/" \
-#--dir_preds_msgpk="/datadrive/wofs_preds_msgpck/${WOFS_REL_PATH}/" \
-#--variable="ML_PREDICTED_TOR" \
-#--threshold=0.08
+python real_time_scripts/create_sparse_data.py \
+--dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/" \
+--dir_preds_msgpk="/datadrive/wofs_preds_msgpck/${WOFS_REL_PATH}/" \
+--variable="ML_PREDICTED_TOR" \
+--threshold=0.08
