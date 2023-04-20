@@ -37,7 +37,7 @@ Execution Instructions:
                                                      --loc_model
                                                      --file_trainset_stats
                                                      --write=0
-                                                     --dry_run
+                                                     --debug_on
 """
 import re, os, sys, glob, argparse
 from datetime import datetime, date, time
@@ -136,6 +136,7 @@ def parse_args(args_list=None):
     '''
     parser = create_argsparser(args_list=args_list)
     args = parser.parse_args()
+    print("HERE", args.loc_wofs)
     return args
 
 
@@ -267,7 +268,7 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     datetime_obj = wofs_datetime
     if not isinstance(datetime_obj, datetime):
         # Convert datetime string to datetime object
-        datetime_obj = datetime.strptime(wofs_datetime, datetime_fmt)
+        datetime_obj = datetime.strptime(wofs_datetime, datetime_format)
         if debug: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
 
     # Convert datetime object to np.datetime int
@@ -957,24 +958,25 @@ if __name__ == '__main__':
 
     args = parse_args()
 
-    if args.debug_on: print("NO OF FIELDS: ", en(args.fields))
+    if args.debug_on: print("NO OF FIELDS: ", len(args.fields))
     if args.debug_on: print("FIELDS: ", args.fields)
 
     if os.path.isfile(args.loc_wofs):
         wofs_files = list(args.loc_wofs)
     elif os.path.isdir(args.loc_wofs):
-        wofs_files = os.listdir(args.loc_wofs)
+        wofs_files = [os.path.join(args.loc_wofs, d) for d in os.listdir(args.loc_wofs)]
     else: 
         raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory, but was {args.loc_wofs}")
-
+    if args.debug_on: print("WOFS_FILES", wofs_files)
+    
     SECS_SINCE = 'seconds since 2001-01-01'
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on)
     
-    for i, file in enumerate(wofs_files):
-        print(f"Opening WoFS file {i+1} of {len(wofs_files)}: {file}")
-        wofs, wofs_netcdf = load_wofs_file(file,
+    for i, wofs_file in enumerate(wofs_files):
+        print(f"Opening WoFS file {i+1} of {len(wofs_files)}: {wofs_file}")
+        wofs, wofs_netcdf = load_wofs_file(wofs_file,
                                            args.filename_prefix, 
                                            wofs_datetime=None,
                                            datetime_format=args.datetime_format,

@@ -2,12 +2,12 @@
 #--account_url='https://storwofstest003.queue.core.windows.net/?sv=2019-02-02&st=2023-03-09T20%3A39%3A15Z&se=2024-01-01T06%3A00%3A00Z&sp=rp&sig=biy6JZg2n4Wmg%2BLHF4QnVLQvt%2F4W8oYJhXMiaTkyj4U%3D' \
 #--queue_name='wofs-ucar'
 
-WOFS_REL_PATH="2019/20190520/0030"
+WOFS_REL_PATH="2019/20190520/0030/ENS_MEM_1"
 WOFS_FILE=""
 #WOFS_REL_PATH="2019/20190520/0030/ENS_MEM_1"
 #WOFS_FILE="wrfwof_d01_2019-05-21_00:30:00"
 
-#python real_time_scripts/wofs_raw_predictions_azure.py \
+python real_time_scripts/wofs_raw_predictions_azure.py  \
 --loc_wofs="/datadrive/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
 --dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/"  \
@@ -19,9 +19,8 @@ WOFS_FILE=""
 --write=4 \
 --debug_on
 
-
-python real_time_scripts/create_sparse_data.py \
---dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/" \
---dir_preds_msgpk="/datadrive/wofs_preds_msgpck/${WOFS_REL_PATH}/" \
---variable="ML_PREDICTED_TOR" \
---threshold=0.08
+#python real_time_scripts/create_sparse_data.py \
+#--dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/" \
+#--dir_preds_msgpk="/datadrive/wofs_preds_msgpck/${WOFS_REL_PATH}/" \
+#--variable="ML_PREDICTED_TOR" \
+#--threshold=0.08
