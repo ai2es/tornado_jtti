@@ -1,4 +1,4 @@
-import argparse
+import json, argparse
 from azure.storage.queue import (
     QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 )
@@ -20,19 +20,21 @@ def test_monitor_queue():
     while True:
         # Receive messages one-by-one
         print('checking for messages...')
-        messages = queue.peek_messages()
+        messages = queue.receive_messages()
         
-        if len(messages) == 0:
-            print('no message, sleeping')
-            continue
+        #if len(messages) == 0:
+            #print('no message, sleeping')
+            #continue
         
-        else: 
+        #else: 
+        with open('message_log.txt', 'a') as message_log:
             for message in messages:
+                message_log.write(message.content)
                 body = json.loads(message.content)
                 print('Saving message to storage blob:')
                 for file_string in body['data']:
                     print(file_string)
-                    # save file to temp location
+                    
         
 if __name__ == '__main__':
     test_monitor_queue()
