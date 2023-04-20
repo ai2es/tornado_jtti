@@ -1194,26 +1194,40 @@ def args2string(args):
 if __name__ == "__main__":
     args = parse_args()
     cdatetime, argstr = args2string(args)
-    #if args.dry_run: print(cdatetime, argstr)
+    if args.dry_run: 
+        print(cdatetime)
+        print(argstr)
+
+    tf.debugging.set_log_device_placement(True)
 
     # Grab select GPU(s)
-    if args.gpu: 
-        print("Attempting to grab GPU")
-        py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
+    #if args.gpu: 
+    #    print("Attempting to grab GPU")
+    #    py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
-        '''
-        #os.get_env'CUDA_VISIBLE_DEVICES'
-        physical_devices = tf.config.get_visible_devices('GPU')
-        n_physical_devices = len(physical_devices)
+    #    '''
+    #    #os.get_env('CUDA_VISIBLE_DEVICES', None)
+    #    physical_devices = tf.config.get_visible_devices('GPU')
+    #    n_physical_devices = len(physical_devices)
 
-        # Ensure all devices used have the same memory growth flag
-        for physical_device in physical_devices:
-            tf.config.experimental.set_memory_growth(physical_device, False)
-        print(f'We have {n_physical_devices} GPUs\n')
-        '''
+    #    # Ensure all devices used have the same memory growth flag
+    #    for physical_device in physical_devices:
+    #        tf.config.experimental.set_memory_growth(physical_device, False)
+    #    print(f'We have {n_physical_devices} GPUs\n')
+    #    '''
 
-    #if args.dry_run: 
-    tf.debugging.set_log_device_placement(True)
+    if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
+        # Fetch list of allocated logical GPUs; numbered 0, 1, …
+        devices = tf.config.get_visible_devices('GPU')
+        ndevices = len(devices)
+        print(f'We have {ndevices} GPUs\n')
+
+        # Set memory growth for each
+        for device in devices:
+            tf.config.experimental.set_memory_growth(device, True)
+    else:
+        # No allocated GPUs: do not delete this case!                                                                	 
+        tf.config.set_visible_devices([], 'GPU')
 
     print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
 
