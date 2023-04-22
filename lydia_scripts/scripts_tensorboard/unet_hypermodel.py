@@ -1138,7 +1138,9 @@ def create_argsparser():
     parser.add_argument('--nogo', action='store_true',
                          help='For testing. Do NOT execute any experiements')
     parser.add_argument('--save', type=int, default=0,
-                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.')
+                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.') 
+    parser.add_argument('--save_weights', action='store_true',
+                         help='If saving the model, boolean flag indicating to save just the weights')
     return parser
 
 def parse_args():
@@ -1301,7 +1303,7 @@ if __name__ == "__main__":
 
         if args.save >= 3: 
             model_fnpath = os.path.join(dirpath, f"{FN_PREFIX}.h5")
-            hypermodel.save_model(model_fnpath, weights=True, #argstr
+            hypermodel.save_model(model_fnpath, weights=args.save_weights, #argstr
                                   model=model, save_traces=True)
 
         # Predict with trained model
