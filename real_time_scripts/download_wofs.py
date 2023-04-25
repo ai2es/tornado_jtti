@@ -29,14 +29,14 @@ def test_monitor_queue():
             time.sleep(10)
             continue
 
-        with open('message_log.txt', 'a') as message_log:
-            message_log.write(msg.content)
+        #with open('message_log.txt', 'a') as message_log:
+        #    message_log.write(msg.content)
         
         body = json.loads(msg.content)
-        if body["jobId"][:15] != "WOFSRun20230425":
-            print(f"\tOLD: {body['jobId'][:15]}")
-            queue.delete_message(msg)
-            continue
+        #if body["jobId"][:15] != "WOFSRun20230425":
+        #    print(f"\tOLD: {body['jobId'][:15]}")
+        #    queue.delete_message(msg)
+        #    continue
         
         try: 
             print('Saving message content to storage blob:')
@@ -54,7 +54,6 @@ def test_monitor_queue():
                                 f"{file_string}",
                                 f"{path}{filename}"])
                 
-            time.sleep(10)
             queue.delete_message(msg)
             
         except Exception as e:
