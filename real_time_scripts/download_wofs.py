@@ -1,4 +1,4 @@
-import os, json, argparse, subprocess
+import os, json, time, argparse, subprocess
 from azure.storage.queue import (
     QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 )
@@ -31,19 +31,24 @@ def test_monitor_queue():
 
         with open('message_log.txt', 'a') as message_log:
             message_log.write(msg.content)
+        
+        body = json.loads(msg.content)
+        if body["jobId"][:15] != "WOFSRun20230425":
+            print(f"\tOLD: {body['jobId'][:15]}")
+            queue.delete_message(msg)
+            continue
+        
         try: 
             print('Saving message content to storage blob:')
-            body = json.loads(msg.content)
-            print(f"\t{body}")
+            print(f"\t__NEW__: {body}")
             for file_string in body["data"]:
                 year = file_string.split("WOFSRun")[1][:4]
                 date = file_string.split("WOFSRun")[1].split("-")[0]
                 run_time = file_string.split("/fcst")[0][-4:]
                 mem = file_string.split("fcst/mem")[1].split("/wrfwof")[0]
                 filename = file_string.split("?se=")[0].rsplit('/', 1)[1]
-                path = f"/{args.wofs_save_path}/{year}/{date}/{run_time}/ENS_MEM_{mem}/"
+                path = f"{args.wofs_save_path}/{year}/{date}/{run_time}/ENS_MEM_{mem}/"
                 
-                os.makedirs(path, exist_ok = True)
                 subprocess.run(["azcopy",
                                 "copy",
                                 f"{file_string}",
