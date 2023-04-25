@@ -1,4 +1,4 @@
-import json, argparse, subprocess
+import os, json, argparse, subprocess
 from azure.storage.queue import (
     QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 )
@@ -11,6 +11,8 @@ def test_monitor_queue():
                         help='Account url for WoFS file location')
     parser.add_argument('--queue_name', type=str, required=True,
                         help='Queue name for WoFS file location')
+    parser.add_argument('--wofs_save_path', type=str, required=True,
+                        help='Path to save WoFS')
     args = parser.parse_args()
     
     queue = QueueClient(account_url=args.account_url,
@@ -39,7 +41,7 @@ def test_monitor_queue():
                 run_time = file_string.split("/fcst")[0][-4:]
                 mem = file_string.split("fcst/mem")[1].split("/wrfwof")[0]
                 filename = file_string.split("?se=")[0].rsplit('/', 1)[1]
-                path = f"/datadrive/wofs/{year}/{date}/{run_time}/ENS_MEM_{mem}/"
+                path = f"/{args.wofs_save_path}/{year}/{date}/{run_time}/ENS_MEM_{mem}/"
                 
                 os.makedirs(path, exist_ok = True)
                 subprocess.run(["azcopy",
