@@ -1,17 +1,17 @@
 #!/bin/bash
 
-#SBATCH --partition=normal
+#SBATCH --partition=debug #normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
 #SBATCH --mem=10G
-#SBATCH --time=1:00:00
-#SBATCH --job-name=testing__patching
+#SBATCH --time=0:20:00
+#SBATCH --job-name=test__patching
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
-#SBATCH --array=1
+#SBATCH --array=0
 ##SBATCH --array=1-262%20
 ###############################################################
 

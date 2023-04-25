@@ -1138,7 +1138,9 @@ def create_argsparser():
     parser.add_argument('--nogo', action='store_true',
                          help='For testing. Do NOT execute any experiements')
     parser.add_argument('--save', type=int, default=0,
-                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.')
+                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.') 
+    parser.add_argument('--save_weights', action='store_true',
+                         help='If saving the model, boolean flag indicating to save just the weights')
     return parser
 
 def parse_args():
@@ -1194,26 +1196,40 @@ def args2string(args):
 if __name__ == "__main__":
     args = parse_args()
     cdatetime, argstr = args2string(args)
-    #if args.dry_run: print(cdatetime, argstr)
+    if args.dry_run: 
+        print(cdatetime)
+        print(argstr)
+
+    tf.debugging.set_log_device_placement(True)
 
     # Grab select GPU(s)
-    if args.gpu: 
-        print("Attempting to grab GPU")
-        py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
+    #if args.gpu: 
+    #    print("Attempting to grab GPU")
+    #    py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
-        '''
-        #os.get_env'CUDA_VISIBLE_DEVICES'
-        physical_devices = tf.config.get_visible_devices('GPU')
-        n_physical_devices = len(physical_devices)
+    #    '''
+    #    #os.get_env('CUDA_VISIBLE_DEVICES', None)
+    #    physical_devices = tf.config.get_visible_devices('GPU')
+    #    n_physical_devices = len(physical_devices)
 
-        # Ensure all devices used have the same memory growth flag
-        for physical_device in physical_devices:
-            tf.config.experimental.set_memory_growth(physical_device, False)
-        print(f'We have {n_physical_devices} GPUs\n')
-        '''
+    #    # Ensure all devices used have the same memory growth flag
+    #    for physical_device in physical_devices:
+    #        tf.config.experimental.set_memory_growth(physical_device, False)
+    #    print(f'We have {n_physical_devices} GPUs\n')
+    #    '''
 
-    #if args.dry_run: 
-    tf.debugging.set_log_device_placement(True)
+    if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
+        # Fetch list of allocated logical GPUs; numbered 0, 1, …
+        devices = tf.config.get_visible_devices('GPU')
+        ndevices = len(devices)
+        print(f'We have {ndevices} GPUs\n')
+
+        # Set memory growth for each
+        for device in devices:
+            tf.config.experimental.set_memory_growth(device, True)
+    else:
+        # No allocated GPUs: do not delete this case!                                                                	 
+        tf.config.set_visible_devices([], 'GPU')
 
     print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
 
@@ -1287,7 +1303,7 @@ if __name__ == "__main__":
 
         if args.save >= 3: 
             model_fnpath = os.path.join(dirpath, f"{FN_PREFIX}.h5")
-            hypermodel.save_model(model_fnpath, weights=True, #argstr
+            hypermodel.save_model(model_fnpath, weights=args.save_weights, #argstr
                                   model=model, save_traces=True)
 
         # Predict with trained model
