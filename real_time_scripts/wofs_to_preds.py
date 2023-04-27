@@ -175,7 +175,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
 
     # Create Dataset
     wofs = None
-    wofs = xr.open_dataset(filepath, engine=engine, **kwargs).load()
+    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, **kwargs).load()
     wofs.close()
     wofs.attrs['filenamepath'] = filepath
 
@@ -963,15 +963,17 @@ if __name__ == '__main__':
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on)
     
-    queue = QueueClient(account_url=args.account_url_ncar,
-                        queue_name=args.queue_name_ncar,
-                        message_encode_policy=TextBase64EncodePolicy(),
-                        message_decode_policy=TextBase64DecodePolicy())
-    while True:
+    queue_ncar = QueueClient(account_url=args.account_url_ncar,
+                             queue_name=args.queue_name_ncar,
+                             message_encode_policy=TextBase64EncodePolicy(),
+                             message_decode_policy=TextBase64DecodePolicy())
+    
+    #while True:
+    for i in range(1):
         
         print('Checking for messages...')
-        msg = queue.receive_message(visibility_timeout=120)
-        
+        msg = queue_ncar.receive_message(visibility_timeout=120)
+
         if msg == None:
             print('No message: sleeping.')
             time.sleep(10)
@@ -984,10 +986,10 @@ if __name__ == '__main__':
             path = f"{args.wofs_save_path}/{rel_path}/"
             os.makedirs(path, exist_ok=True)
                 
-            subprocess.Popen(["azcopy",
-                              "copy",
-                              f"{msg.content}",
-                              f"{path}{filename}"]) 
+            subprocess.run(["azcopy",
+                            "copy",
+                            f"{msg.content}",
+                            f"{path}{filename}"]) 
             
             wofs, wofs_netcdf = load_wofs_file(f"{path}{filename}",
                                                args.filename_prefix,
