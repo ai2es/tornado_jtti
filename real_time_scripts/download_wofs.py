@@ -13,12 +13,22 @@ def test_monitor_queue():
                         help='Queue name for WoFS file location')
     parser.add_argument('--wofs_save_path', type=str, required=True,
                         help='Path to save WoFS')
+    parser.add_argument('--account_url_ncar', type=str, required=True,
+                        help='Account url for WoFS file location')
+    parser.add_argument('--queue_name_ncar', type=str, required=True,
+                        help='Queue name for WoFS file location')
     args = parser.parse_args()
     
     queue = QueueClient(account_url=args.account_url,
                         queue_name=args.queue_name,
                         message_encode_policy=TextBase64EncodePolicy(),
                         message_decode_policy=TextBase64DecodePolicy())
+    
+    queue_ncar = QueueClient(account_url=args.account_url_ncar,
+                             queue_name=args.queue_name_ncar,
+                             message_encode_policy=TextBase64EncodePolicy(),
+                             message_decode_policy=TextBase64DecodePolicy())
+    
     while True:
         
         print('Checking for messages...')
@@ -32,7 +42,7 @@ def test_monitor_queue():
         body = json.loads(msg.content)
         try: 
             print('Saving message content to storage blob:')
-            print(f"\t__NEW__: {body}")
+            print(f"__NEW__: {body}")
             for file_string in body["data"]:
                 year = file_string.split("WOFSRun")[1][:4]
                 date = file_string.split("WOFSRun")[1].split("-")[0]
@@ -45,6 +55,8 @@ def test_monitor_queue():
                                   "copy",
                                   f"{file_string}",
                                   f"{path}{filename}"])
+                
+                queue_ncar.send_message(f"{path}{filename}")
                 
             queue.delete_message(msg)
             

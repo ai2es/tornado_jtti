@@ -53,7 +53,8 @@ print("wrf-python version", wrf.__version__)
 import metpy
 import metpy.calc
 
-import matplotlib.pyplot as plt
+import json, time, argparse, subprocess
+from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
 import tensorflow as tf
 print("tensorflow version", tf.__version__)
@@ -86,10 +87,14 @@ def create_argsparser(args_list=None):
         sys.argv = args_list
         
     parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
-
-    # WoFS file(s) path 
-    parser.add_argument('--loc_wofs', type=str, required=True, 
-        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
+    
+    # NCAR storage queue where WoFS files were saved
+    parser.add_argument('--account_url_ncar', type=str, required=True,
+                        help='NCAR account url for WoFS file location')
+    parser.add_argument('--queue_name_ncar', type=str, required=True,
+                        help='NCAR queue name for WoFS file location')
+    parser.add_argument('--wofs_save_path', type=str, required=True,
+                        help='Path to save WoFS on NCAR VM')
 
     parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
         help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
@@ -683,11 +688,6 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     ZH_std = float(stats.ZH_std.values)
     X = (wofs.ZH - ZH_mu) / ZH_std
 
-    # Predict with the data
-#    if debug: 
-#        print(f"Performing predictions (wofs dims={wofs.dims}) ...")
-#        print(f"Performing predictions (wofs coords={wofs.coords}) ...")
-#        print(f"Performing predictions (input shape={X.shape}) ...")
     preds = model.predict(X)
 
     return preds
@@ -952,49 +952,67 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
 
 
 if __name__ == '__main__':
-
+    
     args = parse_args()
 
     if args.debug_on: print("NO OF FIELDS: ", len(args.fields))
     if args.debug_on: print("FIELDS: ", args.fields)
-
-    if os.path.isfile(args.loc_wofs):
-        wofs_files = list(args.loc_wofs)
-    elif os.path.isdir(args.loc_wofs):
-        wofs_files = [os.path.join(args.loc_wofs, d) for d in os.listdir(args.loc_wofs)]
-    else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file or directory, but was {args.loc_wofs}")
-    if args.debug_on: print("WOFS_FILES", wofs_files)
     
     SECS_SINCE = 'seconds since 2001-01-01'
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on)
     
-    for i, wofs_file in enumerate(wofs_files):
-        print(f"Opening WoFS file {i+1} of {len(wofs_files)}: {wofs_file}")
-        wofs, wofs_netcdf = load_wofs_file(wofs_file,
-                                           args.filename_prefix, 
-                                           wofs_datetime=None,
-                                           datetime_format=args.datetime_format,
-                                           seconds_since=SECS_SINCE, 
-                                           engine='netcdf4',
-                                           debug=args.debug_on)
-    
-        # Interpolate WoFS grid to GridRad grid
-        wofs_gridrad = to_gridrad(args, wofs, wofs_netcdf, 
-                                  gridrad_spacing=GRIDRAD_SPACING, 
-                                  gridrad_heights=GRIDRAD_HEIGHTS,
-                                  debug=args.debug_on)
-        # Compute predictions
-        preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
+    queue = QueueClient(account_url=args.account_url,
+                        queue_name=args.queue_name,
+                        message_encode_policy=TextBase64EncodePolicy(),
+                        message_decode_policy=TextBase64DecodePolicy())
+    while True:
+        
+        print('Checking for messages...')
+        msg = queue.receive_message(visibility_timeout=120)
+        
+        if msg == None:
+            print('No message: sleeping.')
+            time.sleep(10)
+            continue
 
-        # Combine the predictions, reflectivity and select fields into a single dataset
-        wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
+        try: 
+            print(f'\tProcessing {msg}')
+            rel_path = msg.content.rsplit('/', 1)[0].split('wrf-wofs/')[1]
+            filename = msg.content.rsplit('/', 1)[1]
+            path = f"{args.wofs_save_path}/{rel_path}/"
+            os.makedirs(path, exist_ok=True)
+                
+            subprocess.Popen(["azcopy",
+                              "copy",
+                              f"{msg.content}",
+                              f"{path}{filename}]) 
+            
+            wofs, wofs_netcdf = load_wofs_file(f"{path}{filename}",
+                                               args.filename_prefix,
+                                               wofs_datetime=None,
+                                               datetime_format=args.datetime_format,
+                                               seconds_since=SECS_SINCE,
+                                               engine='netcdf4',
+                                               debug=args.debug_on)
 
-        # Interpolate back to WoFS grid
-        preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
-                                               train_stats, gridrad_spacing=GRIDRAD_SPACING, 
-                                               seconds_since=SECS_SINCE, debug=args.debug_on)
+            # Interpolate WoFS grid to GridRad grid
+            wofs_gridrad = to_gridrad(args, wofs, wofs_netcdf,
+                                      gridrad_spacing=GRIDRAD_SPACING,
+                                      gridrad_heights=GRIDRAD_HEIGHTS,
+                                      debug=args.debug_on)
+            # Compute predictions
+            preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
 
-    print(f"PREDICTIONS COMPLETE FOR {args.loc_wofs}.")
+            # Combine the predictions, reflectivity and select fields into a single dataset
+            wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
+
+            # Interpolate back to WoFS grid
+            preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo,
+                                                                 train_stats, gridrad_spacing=GRIDRAD_SPACING,
+                                                                 seconds_since=SECS_SINCE, debug=args.debug_on)            
+            queue.delete_message(msg)
+            
+        except Exception as e:
+            print(f'ERROR: {e}')
