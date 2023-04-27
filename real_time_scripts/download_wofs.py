@@ -29,15 +29,7 @@ def test_monitor_queue():
             time.sleep(10)
             continue
 
-        #with open('message_log.txt', 'a') as message_log:
-        #    message_log.write(msg.content)
-        
         body = json.loads(msg.content)
-        #if body["jobId"][:15] != "WOFSRun20230425":
-        #    print(f"\tOLD: {body['jobId'][:15]}")
-        #    queue.delete_message(msg)
-        #    continue
-        
         try: 
             print('Saving message content to storage blob:')
             print(f"\t__NEW__: {body}")
@@ -49,10 +41,10 @@ def test_monitor_queue():
                 filename = file_string.split("?se=")[0].rsplit('/', 1)[1]
                 path = f"{args.wofs_save_path}/{year}/{date}/{run_time}/ENS_MEM_{mem}/"
                 
-                subprocess.run(["azcopy",
-                                "copy",
-                                f"{file_string}",
-                                f"{path}{filename}"])
+                subprocess.Popen(["azcopy",
+                                  "copy",
+                                  f"{file_string}",
+                                  f"{path}{filename}"])
                 
             queue.delete_message(msg)
             
