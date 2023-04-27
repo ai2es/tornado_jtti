@@ -963,8 +963,8 @@ if __name__ == '__main__':
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on)
     
-    queue = QueueClient(account_url=args.account_url,
-                        queue_name=args.queue_name,
+    queue = QueueClient(account_url=args.account_url_ncar,
+                        queue_name=args.queue_name_ncar,
                         message_encode_policy=TextBase64EncodePolicy(),
                         message_decode_policy=TextBase64DecodePolicy())
     while True:
@@ -987,7 +987,7 @@ if __name__ == '__main__':
             subprocess.Popen(["azcopy",
                               "copy",
                               f"{msg.content}",
-                              f"{path}{filename}]) 
+                              f"{path}{filename}"]) 
             
             wofs, wofs_netcdf = load_wofs_file(f"{path}{filename}",
                                                args.filename_prefix,
@@ -1013,6 +1013,7 @@ if __name__ == '__main__':
                                                                  train_stats, gridrad_spacing=GRIDRAD_SPACING,
                                                                  seconds_since=SECS_SINCE, debug=args.debug_on)            
             queue.delete_message(msg)
+            os.remove(f"{path}{filename}")
             
         except Exception as e:
             print(f'ERROR: {e}')
