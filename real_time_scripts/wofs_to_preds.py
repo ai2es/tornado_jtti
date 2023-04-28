@@ -43,13 +43,10 @@ import re, os, sys, glob, argparse
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
 import xarray as xr
-print("xr version", xr.__version__)
 import numpy as np
-print("np version", np.__version__)
 from netCDF4 import Dataset, date2num, num2date
 from scipy import spatial
 import wrf
-print("wrf-python version", wrf.__version__)
 import metpy
 import metpy.calc
 
@@ -57,16 +54,13 @@ import json, time, argparse, subprocess
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
 import tensorflow as tf
-print("tensorflow version", tf.__version__)
 from tensorflow import keras
-print("keras version", keras.__version__)
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
 from scripts_data_pipeline.wofs_to_gridrad_idw_azure import calculate_output_lats_lons
-print(" ")
 import gc
 gc.collect()
 
@@ -342,7 +336,6 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    #TODO if not ZH_only:
     U_agl = wrf.interplevel(U, height, gridrad_heights)
     V_agl = wrf.interplevel(V, height, gridrad_heights)
     
@@ -623,6 +616,7 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
         fname, _ext = os.path.splitext(fname)
         patch_shape = [f'{c:03d}' for c in args.patch_shape]
         patch_shape_str = '_'.join(patch_shape)
+        os.makedirs(os.path.join(args.vm_datadrive, args.dir_patches, rel_path), mode=0o775, exist_ok=True)
         savepath = os.path.join(args.vm_datadrive, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
         print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
         #ds_patches.to_netcdf(savepath)
@@ -630,6 +624,7 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
         #subprocess.run(["azcopy",
         #                "copy",
+        #                "--log-level=ERROR",
         #                f"{savepath}",
         #                f"{blobpath}"])         
 
@@ -847,18 +842,20 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         fields = set(fields)
     wofs_fields = wofs_orig[fields].copy(deep=True)
     wofs_like = xr.merge([wofs_like, wofs_fields])
-    
+
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
+        os.makedirs(os.path.join(args.vm_datadrive, args.dir_preds, rel_path), mode=0o775, exist_ok=True)
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         print(f"Save WoFS grid predictions to {savepath}\n")
         wofs_like.to_netcdf(savepath)
         
-        #blobpath = os.path.join(args.blob_url_ncar, args.dir_patches, rel_path, f'{fname}_predictions.nc')
+        #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         #subprocess.run(["azcopy",
         #                "copy",
+        #                "--log-level=ERROR",
         #                f"{savepath}",
         #                f"{blobpath}"])   
         
@@ -1001,10 +998,11 @@ if __name__ == '__main__':
             rel_path = msg.content.rsplit('/', 1)[0].split('wrf-wofs/')[1]
             filename = msg.content.rsplit('/', 1)[1]
             path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
-            os.makedirs(path, exist_ok=True)
-                
+            os.makedirs(path, mode=0o775, exist_ok=True)
+
             subprocess.run(["azcopy",
                             "copy",
+                            "--log-level=ERROR",
                             f"{msg.content}",
                             f"{path}/{filename}"]) 
             
