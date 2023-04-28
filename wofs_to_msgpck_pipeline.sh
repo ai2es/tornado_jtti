@@ -12,11 +12,11 @@ QUEUE_NAME_NCAR="wrf-wofs-queue"
 #--queue_name_ncar=${QUEUE_NAME_NCAR}
 
 python real_time_scripts/wofs_to_preds.py  \
---account_url_ncar=$ACCOUNT_URL_NCAR  \
---queue_name_ncar=$QUEUE_NAME_NCAR  \
---blob_path_ncar=$BLOB_URL_NCAR
---vm_datadrive='/datadrive2'
---dir_wofs='wrf-wofs'  \
+--account_url_ncar=${ACCOUNT_URL_NCAR}  \
+--queue_name_ncar=${QUEUE_NAME_NCAR}  \
+--blob_path_ncar=${BLOB_URL_NCAR}  \
+--vm_datadrive="/datadrive2"  \
+--dir_wofs="wrf-wofs"  \
 --dir_preds="wofs-preds"  \
 --dir_patches="wofs-patches" \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
@@ -24,8 +24,7 @@ python real_time_scripts/wofs_to_preds.py  \
 --fields U WSPD10MAX W_UP_MAX \
 --loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
 --file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
---write=4 \
---debug_on
+--write=4
 
 #python real_time_scripts/preds_to_msgpk.py \
 #--dir_preds="/datadrive/wofs_preds/${WOFS_REL_PATH}/" \
