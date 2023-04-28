@@ -88,29 +88,31 @@ def create_argsparser(args_list=None):
         
     parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
     
-    # NCAR's Azure urls and paths
+    # NCAR's queue urls and names and blob url
     parser.add_argument('--account_url_ncar', type=str, required=True,
-                        help='NCAR account url for WoFS file location')
-    parser.add_argument('--queue_name_ncar', type=str, required=True,
-                        help='NCAR queue name for WoFS file location')
-    parser.add_argument('--blob_path_ncar', type=str, required=True,
-                        help='NCAR blob path for saving preds and patches')
+                        help='NCAR queue account url')
+    parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
+                        help='NCAR queue name for downloaded WoFS files')
+    parser.add_argument('--queue_name_ncar_preds_to_msgpk', type=str, required=True,
+                        help='NCAR queue name for processed preds files')
+    parser.add_argument('--blob_url_ncar', type=str, required=True,
+                        help='NCAR path to storage blob')
     parser.add_argument('--vm_datadrive', type=str, required=True,
-                        help='Path to datadrive on NCAR VM')
+                        help='NCAR VM path to datadrive')
     
     # relative directories for various files to be saved
     parser.add_argument('--dir_wofs', type=str, required=True,
                         help='Directory to store WoFS on NCAR VM')
-    parser.add_argument('--dir_preds', type=str, required=True, 
-        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
-    parser.add_argument('--dir_patches', type=str,  
-        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
+    parser.add_argument('--dir_preds', type=str, required=True,
+                        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
+    parser.add_argument('--dir_patches', type=str,
+                        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
     
     # Various other parameters
     parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
-        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
+                        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
     parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,),
-        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
+                        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
     parser.add_argument('-Z', '--ZH_only', action='store_true',
@@ -607,7 +609,7 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
     # Calculate forecast window
     datetime_forecast_str = wofs.Times.data[0].decode('ascii') # decode from binary string to regular text string
     datetime_forecast = datetime.fromisoformat(datetime_forecast_str)
-    datetime_init = datetime.fromisoformat(wofs.START_DATE) #datetime.fromisoformat(args.datetime_init) #.strftime(datetime_fmt) #datetime.strptime(args.datetime_init, datetime_fmt)
+    datetime_init = datetime.fromisoformat(wofs.START_DATE)
     forecast_window = (datetime_forecast - datetime_init).seconds / 60
     if debug: print(f"Forecast window: {forecast_window} min\n")
 
@@ -623,13 +625,13 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
         patch_shape_str = '_'.join(patch_shape)
         savepath = os.path.join(args.vm_datadrive, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
         print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
-        ds_patches.to_netcdf(savepath)
+        #ds_patches.to_netcdf(savepath)
         
-        blobpath = os.path.join(args.blob_path_ncar, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
-        subprocess.run(["azcopy",
-                        "copy",
-                        f"{savepath}",
-                        f"{blobpath}"])         
+        #blobpath = os.path.join(args.blob_path_ncar, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
+        #subprocess.run(["azcopy",
+        #                "copy",
+        #                f"{savepath}",
+        #                f"{blobpath}"])         
 
     return ds_patches
 
@@ -841,30 +843,24 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
     if not args.ZH_only:
         fields += ['U', 'U10', 'V', 'V10']
     if not args.fields is None:
-        #, 'REL_VORT', 'W', 'W_UP_MAX'
         fields += args.fields
         fields = set(fields)
     wofs_fields = wofs_orig[fields].copy(deep=True)
     wofs_like = xr.merge([wofs_like, wofs_fields])
-#    if debug:
-#        print("dims\n", wofs_like.dims)
-#        print("coords\n", wofs_like.coords)
-#        print("data_vars\n", wofs_like.data_vars)
-#        print("attr 'START_DATE'\n", wofs_like.START_DATE)
-
+    
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-        savepath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
+        savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         print(f"Save WoFS grid predictions to {savepath}\n")
         wofs_like.to_netcdf(savepath)
         
-        blobpath = os.path.join(args.blob_path_ncar, args.dir_patches, rel_path, f'{fname}_predictions.nc')
-        subprocess.run(["azcopy",
-                        "copy",
-                        f"{savepath}",
-                        f"{blobpath}"])   
+        #blobpath = os.path.join(args.blob_url_ncar, args.dir_patches, rel_path, f'{fname}_predictions.nc')
+        #subprocess.run(["azcopy",
+        #                "copy",
+        #                f"{savepath}",
+        #                f"{blobpath}"])   
         
     return predictions, wofs_like
 
@@ -979,16 +975,21 @@ if __name__ == '__main__':
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on)
     
-    queue_ncar = QueueClient(account_url=args.account_url_ncar,
-                             queue_name=args.queue_name_ncar,
-                             message_encode_policy=TextBase64EncodePolicy(),
-                             message_decode_policy=TextBase64DecodePolicy())
+    queue_wofs_to_preds = QueueClient(account_url=args.account_url_ncar,
+                                      queue_name=args.queue_name_ncar_wofs_to_preds,
+                                      message_encode_policy=TextBase64EncodePolicy(),
+                                      message_decode_policy=TextBase64DecodePolicy())
+    
+    queue_preds_to_msgpk = QueueClient(account_url=args.account_url_ncar,
+                                        queue_name=args.queue_name_ncar_preds_to_msgpk,
+                                        message_encode_policy=TextBase64EncodePolicy(),
+                                        message_decode_policy=TextBase64DecodePolicy())    
     
     #while True:
     for i in range(1):
         
         print('Checking for messages...')
-        msg = queue_ncar.receive_message(visibility_timeout=120)
+        msg = queue_wofs_to_preds.receive_message(visibility_timeout=120)
 
         if msg == None:
             print('No message: sleeping.')
@@ -1030,7 +1031,14 @@ if __name__ == '__main__':
                                                                  train_stats, gridrad_spacing=GRIDRAD_SPACING,
                                                                  seconds_since=SECS_SINCE, debug=args.debug_on)
             
-            queue.delete_message(msg)
+            forecast_time_files = [os.path.join(args.vm_datadrive, args.dir_preds, rel_path.rsplit('_')[0] + f'_{i}', filename) for i in range(1, 19)]
+            if all([os.path.isfile(f) for f in forecast_time_files]):
+                print(f"True: {forecast_time_files[-1]}")
+                queue_preds_to_msgpk.send_message(f"{forecast_time_files[-1]}")
+            else:
+                print("False")
+            
+            queue_wofs_to_preds.delete_message(msg)
             os.remove(f"{path}{filename}")
             
         except Exception as e:
