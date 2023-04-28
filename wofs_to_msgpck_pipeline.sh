@@ -18,7 +18,7 @@ python real_time_scripts/wofs_to_preds.py  \
 --queue_name_ncar_wofs_to_preds=$QUEUE_NAME_NCAR_WOFS_TO_PREDS  \
 --queue_name_ncar_preds_to_msgpk=$QUEUE_NAME_NCAR_PREDS_TO_MSGPK  \
 --blob_url_ncar=$BLOB_URL_NCAR  \
---vm_datadrive='/datadrive2'
+--vm_datadrive='/datadrive2'  \
 --dir_wofs='wrf-wofs'  \
 --dir_preds="wofs-preds"  \
 --dir_patches="wofs-patches" \

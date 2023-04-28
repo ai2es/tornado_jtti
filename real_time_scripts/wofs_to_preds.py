@@ -39,7 +39,7 @@ Execution Instructions:
                                                      --write=0
                                                      --debug_on
 """
-import re, os, sys, glob, argparse
+import re, os, sys, glob, argparse, logging
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
 import xarray as xr
@@ -53,6 +53,7 @@ import metpy.calc
 import json, time, argparse, subprocess
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import tensorflow as tf
 from tensorflow import keras
 
@@ -618,7 +619,7 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
         patch_shape_str = '_'.join(patch_shape)
         os.makedirs(os.path.join(args.vm_datadrive, args.dir_patches, rel_path), mode=0o775, exist_ok=True)
         savepath = os.path.join(args.vm_datadrive, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
-        print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
+        if args.debug_on: print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
         #ds_patches.to_netcdf(savepath)
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
@@ -847,10 +848,10 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-        os.makedirs(os.path.join(args.vm_datadrive, args.dir_preds, rel_path), mode=0o775, exist_ok=True)
-        savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path, f'{fname}_predictions.nc')
-        print(f"Save WoFS grid predictions to {savepath}\n")
-        wofs_like.to_netcdf(savepath)
+        savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
+        os.makedirs(savepath, mode=0o775, exist_ok=True)
+        if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
+        wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"))
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         #subprocess.run(["azcopy",
@@ -982,10 +983,9 @@ if __name__ == '__main__':
                                         message_encode_policy=TextBase64EncodePolicy(),
                                         message_decode_policy=TextBase64DecodePolicy())    
     
-    #while True:
-    for i in range(1):
+    while True:
         
-        print('Checking for messages...')
+        if args.debug_on: print('Checking for messages...')
         msg = queue_wofs_to_preds.receive_message(visibility_timeout=120)
 
         if msg == None:
@@ -994,8 +994,8 @@ if __name__ == '__main__':
             continue
 
         try: 
-            print(f'\tProcessing {msg}')
-            rel_path = msg.content.rsplit('/', 1)[0].split('wrf-wofs/')[1]
+            if args.debug_on: print(f'\tProcessing {msg}')
+            rel_path = msg.content.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
             filename = msg.content.rsplit('/', 1)[1]
             path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
             os.makedirs(path, mode=0o775, exist_ok=True)
@@ -1033,8 +1033,6 @@ if __name__ == '__main__':
             if all([os.path.isfile(f) for f in forecast_time_files]):
                 print(f"True: {forecast_time_files[-1]}")
                 queue_preds_to_msgpk.send_message(f"{forecast_time_files[-1]}")
-            else:
-                print("False")
             
             queue_wofs_to_preds.delete_message(msg)
             os.remove(f"{path}{filename}")
