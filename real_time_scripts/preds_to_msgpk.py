@@ -9,26 +9,7 @@ import argparse
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
 
-def main():
-
-    parser = argparse.ArgumentParser(description='Save ML predictions to messagepack')
-    parser.add_argument('--account_url_ncar', type=str, required=True,
-                        help='NCAR queue account url')
-    parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
-                        help='NCAR queue name for downloaded WoFS files')
-    parser.add_argument('--queue_name_ncar_preds_to_msgpk', type=str, required=True,
-                        help='NCAR queue name for processed preds files')
-    parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')
-    parser.add_argument('--vm_datadrive', type=str, required=True,
-                        help='NCAR VM path to datadrive')
-    parser.add_argument('--dir_preds_msgpk', type=str, required=True, 
-        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
-    parser.add_argument('--variable', type=str, required=True, 
-        help='TODO')
-    parser.add_argument('--threshold', type=float, required=True, 
-        help='If probability of tornado is greater than or equal to this threshold value, build tornado tracks')
-    args = parser.parse_args()
+def preds_to_msgpk(args):
 
     def get_sparse_dict(ds):
         """ Convert variable from xarray dataset to a compressed sparse row matrix using a specified threshold."""
@@ -40,18 +21,12 @@ def main():
         probs = data[rows, columns].astype('float16').tolist()
 
         return dict(rows=rows.astype('uint16').tolist(), columns=columns.astype('uint16').tolist(), values=probs)
-
-    queue_preds_to_msgpk = QueueClient(account_url=args.account_url_ncar,
-                                       queue_name=args.queue_name_ncar_preds_to_msgpk,
-                                       message_encode_policy=TextBase64EncodePolicy(),
-                                       message_decode_policy=TextBase64DecodePolicy())
-    msg = queue_preds_to_msgpk.receive_message(visibility_timeout=120)
     
-    path_preds = msg.content.split('ENS')[0]
+    path_preds = vm_filepath.split('ENS')[0]
     path_preds_msgpk = path_preds.replace('wofs-preds', 'wofs-preds-msgpk')
     path_preds_msgpk = path_preds_msgpk[:-6] + path_preds_msgpk[-5:]
     os.makedirs(path_preds_msgpk, exist_ok=True)
-    filename = msg.content.rsplit('/', 1)[1]
+    filename = vm_filepath.rsplit('/', 1)[1]
     
     ds_list = []
     for i in range(1, 19):
@@ -85,6 +60,3 @@ def main():
             outfile.write(packed)
             print(f"Saving {outfile}")
             del packed
-
-if __name__ == "__main__":
-    main()

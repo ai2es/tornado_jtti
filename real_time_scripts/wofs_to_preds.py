@@ -66,86 +66,6 @@ import gc
 gc.collect()
 
 
-def create_argsparser(args_list=None):
-    ''' 
-    Create command line arguments parser
-
-    @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing.
-            Element at index 0 should either be the empty string or the name of
-            the python script
-
-    @return: the argument parser object
-    '''
-    if not args_list is None:
-        sys.argv = args_list
-        
-    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
-    
-    # NCAR's queue urls and names and blob url
-    parser.add_argument('--account_url_ncar', type=str, required=True,
-                        help='NCAR queue account url')
-    parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
-                        help='NCAR queue name for downloaded WoFS files')
-    parser.add_argument('--queue_name_ncar_preds_to_msgpk', type=str, required=True,
-                        help='NCAR queue name for processed preds files')
-    parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')
-    parser.add_argument('--vm_datadrive', type=str, required=True,
-                        help='NCAR VM path to datadrive')
-    
-    # relative directories for various files to be saved
-    parser.add_argument('--dir_wofs', type=str, required=True,
-                        help='Directory to store WoFS on NCAR VM')
-    parser.add_argument('--dir_preds', type=str, required=True,
-                        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
-    parser.add_argument('--dir_patches', type=str,
-                        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
-    
-    # Various other parameters
-    parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
-                        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
-    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,),
-                        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
-    parser.add_argument('--with_nans', action='store_true', 
-        help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', type=str, nargs='+',
-        help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
-
-    # Model directories and files
-    parser.add_argument('--loc_model', type=str, required=True,
-        help='Trained model directory or file path (i.e. file descriptor)')
-    parser.add_argument('--file_trainset_stats', type=str, required=True,
-        help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
-    
-    # Functionality parameters
-    parser.add_argument('-w', '--write', type=int, default=0,
-        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
-    parser.add_argument('-d', '--debug_on', action='store_true',
-        help='For testing and debugging. Execute without running models or saving data and display output paths')
-
-    return parser
-
-def parse_args(args_list=None):
-    '''
-    Create and parse the command line args parser
-
-    @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing.
-            Element at index 0 should either be the empty string or the name of
-            the python script
-
-    @return: the parsed arguments object
-    '''
-    parser = create_argsparser(args_list=args_list)
-    args = parser.parse_args()
-    return args
-
-
 """
 WoFS to GridRad interpolation methods, refactored from lydia_scripts/scripts_data_pipeline
 """
@@ -860,7 +780,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         #                f"{savepath}",
         #                f"{blobpath}"])   
         
-    return predictions, wofs_like
+    return predictions, wofs_like, vm_filepath
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
                    seconds_since='seconds since 2001-01-01', debug=0):
@@ -961,81 +881,50 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
     return wofs_stiched
 
 
-if __name__ == '__main__':
+def wofs_to_preds(ncar_filepath, args):
     
-    args = parse_args()
-
     if args.debug_on: print("NO OF FIELDS: ", len(args.fields))
     if args.debug_on: print("FIELDS: ", args.fields)
+    if args.debug_on: print(f'\tProcessing {ncar_filepath}')
     
     SECS_SINCE = 'seconds since 2001-01-01'
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
-    train_stats = load_trainset_stats(args, debug=args.debug_on)
+    train_stats = load_trainset_stats(args, debug=args.debug_on) 
+
+    rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
+    filename = ncar_filepath.rsplit('/', 1)[1]
+    path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
+    os.makedirs(path, mode=0o775, exist_ok=True)
+
+    subprocess.run(["azcopy",
+                    "copy",
+                    f"{ncar_filepath}",
+                    f"{path}/{filename}"]) 
+            
+    wofs, wofs_netcdf = load_wofs_file(f"{path}/{filename}",
+                                       wofs_datetime=None,
+                                       datetime_format=args.datetime_format,
+                                       seconds_since=SECS_SINCE,
+                                       engine='netcdf4',
+                                       debug=args.debug_on)
+
+    # Interpolate WoFS grid to GridRad grid
+    wofs_gridrad = to_gridrad(args, rel_path, wofs, wofs_netcdf,
+                              gridrad_spacing=GRIDRAD_SPACING,
+                              gridrad_heights=GRIDRAD_HEIGHTS,
+                              debug=args.debug_on)
     
-    queue_wofs_to_preds = QueueClient(account_url=args.account_url_ncar,
-                                      queue_name=args.queue_name_ncar_wofs_to_preds,
-                                      message_encode_policy=TextBase64EncodePolicy(),
-                                      message_decode_policy=TextBase64DecodePolicy())
+    # Compute predictions
+    preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
+
+    # Combine the predictions, reflectivity and select fields into a single dataset
+    wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
+
+    # Interpolate back to WoFS grid
+    preds_gridrad_stitched, preds_wofsgrid, vm_filepath = to_wofsgrid(args, rel_path, wofs, wofs_combo,
+                                                                      train_stats, gridrad_spacing=GRIDRAD_SPACING,
+                                                                      seconds_since=SECS_SINCE, debug=args.debug_on)
+            
+    os.remove(f"{path}{filename}")
     
-    queue_preds_to_msgpk = QueueClient(account_url=args.account_url_ncar,
-                                        queue_name=args.queue_name_ncar_preds_to_msgpk,
-                                        message_encode_policy=TextBase64EncodePolicy(),
-                                        message_decode_policy=TextBase64DecodePolicy())    
-    
-    while True:
-        
-        if args.debug_on: print('Checking for messages...')
-        msg = queue_wofs_to_preds.receive_message(visibility_timeout=120)
-
-        if msg == None:
-            print('No message: sleeping.')
-            time.sleep(10)
-            continue
-
-        try: 
-            if args.debug_on: print(f'\tProcessing {msg}')
-            rel_path = msg.content.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
-            filename = msg.content.rsplit('/', 1)[1]
-            path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
-            os.makedirs(path, mode=0o775, exist_ok=True)
-
-            subprocess.run(["azcopy",
-                            "copy",
-                            "--log-level=ERROR",
-                            f"{msg.content}",
-                            f"{path}/{filename}"]) 
-            
-            wofs, wofs_netcdf = load_wofs_file(f"{path}/{filename}",
-                                               wofs_datetime=None,
-                                               datetime_format=args.datetime_format,
-                                               seconds_since=SECS_SINCE,
-                                               engine='netcdf4',
-                                               debug=args.debug_on)
-
-            # Interpolate WoFS grid to GridRad grid
-            wofs_gridrad = to_gridrad(args, rel_path, wofs, wofs_netcdf,
-                                      gridrad_spacing=GRIDRAD_SPACING,
-                                      gridrad_heights=GRIDRAD_HEIGHTS,
-                                      debug=args.debug_on)
-            # Compute predictions
-            preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
-
-            # Combine the predictions, reflectivity and select fields into a single dataset
-            wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
-
-            # Interpolate back to WoFS grid
-            preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, rel_path, wofs, wofs_combo,
-                                                                 train_stats, gridrad_spacing=GRIDRAD_SPACING,
-                                                                 seconds_since=SECS_SINCE, debug=args.debug_on)
-            
-            forecast_time_files = [os.path.join(args.vm_datadrive, args.dir_preds, rel_path.rsplit('_')[0] + f'_{i}', filename) for i in range(1, 19)]
-            if all([os.path.isfile(f) for f in forecast_time_files]):
-                print(f"True: {forecast_time_files[-1]}")
-                queue_preds_to_msgpk.send_message(f"{forecast_time_files[-1]}")
-            
-            queue_wofs_to_preds.delete_message(msg)
-            os.remove(f"{path}{filename}")
-            
-        except Exception as e:
-            print(f'ERROR: {e}')
