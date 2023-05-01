@@ -1,7 +1,7 @@
 import subprocess
 
 
-def download_file(filepath):
+def download_file(filepath, args):
 
     year = filepath.split("WOFSRun")[1][:4]
     date = filepath.split("WOFSRun")[1].split("-")[0]
@@ -12,7 +12,7 @@ def download_file(filepath):
                 
     subprocess.run(["azcopy",
                     "copy",
-                    f"{msg}",
+                    f"{filepath}",
                     f"{path}{filename}"])
     
     return f"{path}{filename}"

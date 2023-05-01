@@ -1,10 +1,11 @@
 import json, time, argparse
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
-from multiprocessing import Pool
-import download_file, wofs_to_preds, preds_to_msgpk
+from multiprocessing.pool import Pool, ThreadPool
+from threading import active_count
 
 
 def process_one_file(ncar_filepath, args):
+    from real_time_scripts import wofs_to_preds
     vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
 
 def parse_args():
@@ -83,12 +84,12 @@ if __name__ == '__main__':
     while True:
         
         messages = queue_wofs.receive_messages(messages_per_page=18, visibility_timeout=5*60)
-        
+
         for msg_batch in messages.by_page():
-            with Pool(18) as p:
-                p.starmap(process_one_file, [(ncar_filepath, args) for ncar_filepath in msg_batch])
+            msg_batch_list = []
             for msg in msg_batch:
+                msg_batch_list.append(msg.content)
                 queue_wofs.delete_message(msg)
+            with ThreadPool(1) as p:
+                p.starmap(process_one_file, [(ncar_filepath, args) for ncar_filepath in msg_batch_list])
         
-        except Exception as e:
-            print(f'ERROR: {e}')

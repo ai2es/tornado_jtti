@@ -53,10 +53,6 @@ import metpy.calc
 import json, time, argparse, subprocess
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-import tensorflow as tf
-from tensorflow import keras
-
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
@@ -98,7 +94,8 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
     # Create Dataset
     wofs = None
     wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, **kwargs).load()
-    wofs.close()
+    print("HERE IS THE ISSUE: loading the file")
+    #wofs.close()
     wofs.attrs['filenamepath'] = filepath
 
     if wofs_datetime is None:
@@ -600,6 +597,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
 
     @return: the predictions as a numpy array
     '''
+    from tensorflow import keras
 
     model_path = args.loc_model
 
@@ -609,6 +607,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
         fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                     'cutoff': 0.5, 'want_hard_discretization': False}
     fss = make_fractions_skill_score(**fss_args)
+    print("HERE IS THE ISSUE: keras.models.load_model")
     model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
                                                 'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
 
@@ -616,7 +615,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     ZH_mu = float(stats.ZH_mean.values)
     ZH_std = float(stats.ZH_std.values)
     X = (wofs.ZH - ZH_mu) / ZH_std
-
+    model._make_predict_function() 
     preds = model.predict(X)
 
     return preds
@@ -638,6 +637,7 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), debug=0):
 
     @return: xarray dataset with the combined fields and predictions
     '''
+
     fields = ['ZH', 'UH', 'stitched_x', 'stitched_y', 'n_convective_pixels', 
               'n_uh_pixels', 'lat', 'lon', 'time', 'forecast_window']
     if not args.ZH_only:
@@ -771,6 +771,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
         os.makedirs(savepath, mode=0o775, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
+        print("HERE IS THE ISSUE: saving predictions")
         wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"))
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
@@ -780,7 +781,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         #                f"{savepath}",
         #                f"{blobpath}"])   
         
-    return predictions, wofs_like, vm_filepath
+    return predictions, wofs_like, os.path.join(savepath, f"{str(fname)}_predictions.nc")
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
                    seconds_since='seconds since 2001-01-01', debug=0):
@@ -917,7 +918,7 @@ def wofs_to_preds(ncar_filepath, args):
     
     # Compute predictions
     preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
-
+    
     # Combine the predictions, reflectivity and select fields into a single dataset
     wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
 
@@ -925,6 +926,7 @@ def wofs_to_preds(ncar_filepath, args):
     preds_gridrad_stitched, preds_wofsgrid, vm_filepath = to_wofsgrid(args, rel_path, wofs, wofs_combo,
                                                                       train_stats, gridrad_spacing=GRIDRAD_SPACING,
                                                                       seconds_since=SECS_SINCE, debug=args.debug_on)
-            
+    
+    print(f"DONE - {vm_filepath}")
     os.remove(f"{path}{filename}")
     

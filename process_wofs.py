@@ -1,12 +1,12 @@
 import json, time, argparse
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
-from multiprocessing import Pool
-import download_file, wofs_to_preds, preds_to_msgpk
+from multiprocessing.pool import Pool, ThreadPool
+from real_time_scripts import download_file, wofs_to_preds, preds_to_msgpk
 
 
 def process_one_file(wofs_filepath, args):
     ncar_filepath = download_file.download_file(wofs_filepath, args)
-    vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
+#    vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
@@ -16,6 +16,8 @@ def parse_args():
                         help='WoFS queue account url')
     parser.add_argument('--queue_name_wofs', type=str, required=True,
                         help='WoFS queue name for available files')    
+    parser.add_argument('--blob_url_ncar', type=str, required=True,
+                        help='NCAR path to storage blob')    
     
     # wofs_to_preds ___________________________________________________
     # NCAR's queue urls and names and blob url
@@ -23,10 +25,6 @@ def parse_args():
                         help='NCAR queue account url')
     parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
                         help='NCAR queue name for downloaded WoFS files')
-    parser.add_argument('--queue_name_ncar_preds_to_msgpk', type=str, required=True,
-                        help='NCAR queue name for processed preds files')
-    parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')
     parser.add_argument('--vm_datadrive', type=str, required=True,
                         help='NCAR VM path to datadrive')
     
@@ -63,17 +61,7 @@ def parse_args():
         help='For testing and debugging. Execute without running models or saving data and display output paths')
     
     # Preds to msgpk ___________________________________________________
-    parser.add_argument('--account_url_ncar', type=str, required=True,
-                        help='NCAR queue account url')
-    parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
-                        help='NCAR queue name for downloaded WoFS files')
-    parser.add_argument('--queue_name_ncar_preds_to_msgpk', type=str, required=True,
-                        help='NCAR queue name for processed preds files')
-    parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')
-    parser.add_argument('--vm_datadrive', type=str, required=True,
-                        help='NCAR VM path to datadrive')
-    parser.add_argument('--dir_preds_msgpk', type=str, required=True, 
+    parser.add_argument('--dir_preds_msgpk', type=str, required=True,
         help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
     parser.add_argument('--variable', type=str, required=True, 
         help='Variable to save out from predictions')
@@ -91,7 +79,6 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    
     while True:
         
         msg = queue_wofs.receive_message(visibility_timeout=5*60)
@@ -108,4 +95,4 @@ if __name__ == '__main__':
             queue_wofs.delete_message(msg)
         
         except Exception as e:
-            print(f'ERROR: {e}')
+            print(f'ERROR: {e}')    
