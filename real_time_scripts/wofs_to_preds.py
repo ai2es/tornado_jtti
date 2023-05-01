@@ -49,6 +49,10 @@ from scipy import spatial
 import wrf
 import metpy
 import metpy.calc
+import tensorflow as tf
+from tensorflow.python.eager import context
+tf.config.threading.set_inter_op_parallelism_threads(2)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 
 import json, time, argparse, subprocess
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
@@ -94,8 +98,6 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
     # Create Dataset
     wofs = None
     wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, **kwargs).load()
-    print("HERE IS THE ISSUE: loading the file")
-    #wofs.close()
     wofs.attrs['filenamepath'] = filepath
 
     if wofs_datetime is None:
@@ -607,7 +609,6 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
         fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                     'cutoff': 0.5, 'want_hard_discretization': False}
     fss = make_fractions_skill_score(**fss_args)
-    print("HERE IS THE ISSUE: keras.models.load_model")
     model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
                                                 'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
 
@@ -617,6 +618,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     X = (wofs.ZH - ZH_mu) / ZH_std
     model.make_predict_function() 
     preds = model.predict(X)
+    tf.keras.backend.clear_session()
 
     return preds
 
@@ -771,7 +773,6 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
         os.makedirs(savepath, mode=0o775, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
-        print("HERE IS THE ISSUE: saving predictions")
         wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"))
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')

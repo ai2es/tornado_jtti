@@ -1,7 +1,6 @@
 import json, time, argparse, traceback
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from multiprocessing.pool import Pool, ThreadPool
-from threading import active_count
 
 
 def process_one_file(ncar_filepath, args):

@@ -1,12 +1,12 @@
-import json, time, argparse
+import json, time, argparse, traceback
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from multiprocessing.pool import Pool, ThreadPool
-from real_time_scripts import download_file, wofs_to_preds, preds_to_msgpk
 
 
 def process_one_file(wofs_filepath, args):
+    from real_time_scripts import download_file, wofs_to_preds, preds_to_msgpk
     ncar_filepath = download_file.download_file(wofs_filepath, args)
-#    vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
+    vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
@@ -79,20 +79,21 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    while True:
-        
-        msg = queue_wofs.receive_message(visibility_timeout=5*60)
-        
-        if msg == None:
-            print('No message: sleeping.')
-            time.sleep(10)
-            continue
-        
-        files = json.loads(msg.content)["data"]
-        try:
-            with Pool(18) as p:
-                p.starmap(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
+    with Pool(4, maxtasksperchild=1) as p:
+        while True:
+            msg = queue_wofs.receive_message(visibility_timeout=5*60)
+
+            if msg == None:
+                print('No message: sleeping.')
+                time.sleep(10)
+                continue
+
+            files = json.loads(msg.content)["data"]
+            try:
+                p.starmap_async(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
+            except Exception as e:
+                print(traceback.format_exc())
+                raise e
             queue_wofs.delete_message(msg)
-        
-        except Exception as e:
-            print(f'ERROR: {e}')    
+        p.close()
+        p.join()
