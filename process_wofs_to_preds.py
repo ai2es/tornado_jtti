@@ -1,4 +1,4 @@
-import json, time, argparse, stacktrace
+import json, time, argparse, traceback
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from multiprocessing.pool import Pool, ThreadPool
 from threading import active_count
@@ -80,19 +80,18 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_ncar_wofs_to_preds,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    
-    while True:
-        
-        messages = queue_wofs.receive_messages(messages_per_page=18, visibility_timeout=5*60)
-
-        for msg_batch in messages.by_page():
-            msg_batch_list = []
-            for msg in msg_batch:
-                msg_batch_list.append(msg.content)
-                #queue_wofs.delete_message(msg)
-		try:
-            	    with Pool(6) as p:
-                	p.starmap(process_one_file, [(ncar_filepath, args) for ncar_filepath in msg_batch_list])
-		except Exception as e:
-		    print(traceback.format_exc())
-        	    raise e        
+    with Pool(6) as p:
+        while True:
+            messages = queue_wofs.receive_messages(messages_per_page=18, visibility_timeout=5*60)
+            for msg_batch in messages.by_page():
+                msg_batch_list = []
+                for msg in msg_batch:
+                    msg_batch_list.append(msg.content)
+                    queue_wofs.delete_message(msg)
+                    try:
+                        p.starmap(process_one_file, [(ncar_filepath, args) for ncar_filepath in msg_batch_list])
+                    except Exception as e:
+                        print(traceback.format_exc())
+                        raise e
+        p.close()
+        p.join()

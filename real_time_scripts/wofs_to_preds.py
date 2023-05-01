@@ -615,7 +615,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     ZH_mu = float(stats.ZH_mean.values)
     ZH_std = float(stats.ZH_std.values)
     X = (wofs.ZH - ZH_mu) / ZH_std
-    model._make_predict_function() 
+    model.make_predict_function() 
     preds = model.predict(X)
 
     return preds
