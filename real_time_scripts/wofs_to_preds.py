@@ -56,7 +56,6 @@ tf.config.threading.set_inter_op_parallelism_threads(2)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
 import json, time, argparse, subprocess
-from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
@@ -971,5 +970,5 @@ def wofs_to_preds(ncar_filepath, args):
                                                                       seconds_since=SECS_SINCE, debug=args.debug_on)
     
     print(f"DONE - {vm_filepath}")
-    os.remove(f"{path}{filename}")
+    os.remove(f"{path}/{filename}")
     

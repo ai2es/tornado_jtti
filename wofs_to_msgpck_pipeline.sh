@@ -6,7 +6,6 @@ python process_wofs.py  \
 --queue_name_wofs='wofs-ucar'  \
 --blob_url_ncar="https://wofsdltornado.blob.core.windows.net"  \
 --account_url_ncar="https://wofsdltornado.queue.core.windows.net/?sv=2021-12-02&ss=bfqt&srt=sco&sp=rwdlacupiytfx&se=2023-06-15T15:00:00Z&st=2023-04-26T15:00:00Z&spr=https&sig=H2JOkeMn0UuhOqyuifMc%2BCfoSXoN5ZRL7mCe9iGEjBM%3D"  \
---queue_name_ncar_wofs_to_preds="queue-wofs-to-preds"  \
 --vm_datadrive='/datadrive2'  \
 --dir_wofs='wrf-wofs'  \
 --dir_preds="wofs-preds"  \

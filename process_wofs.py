@@ -24,8 +24,6 @@ def parse_args():
     # NCAR's queue urls and names and blob url
     parser.add_argument('--account_url_ncar', type=str, required=True,
                         help='NCAR queue account url')
-    parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
-                        help='NCAR queue name for downloaded WoFS files')
     parser.add_argument('--vm_datadrive', type=str, required=True,
                         help='NCAR VM path to datadrive')
     
@@ -80,7 +78,7 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    
+    path_preds = "."
     with Pool(4, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=5*60)
@@ -88,32 +86,30 @@ if __name__ == '__main__':
             if msg == None:
                 print('No message: sleeping.')
                 time.sleep(10)
-                
-                # start the msgpk process if enough files have been saved
-                files = sorted(glob.glob(os.path.join(path_preds, f"ENS_MEM_**", "wrfwof_d01_*")))
-                if path_preds[-2:] == "00":
-                    if len(files) == 1314:
-                        preds_to_msgpk.preds_to_msgpk(path_preds, args)
-                    else:
-                        continue
-                if path_preds[-2:] == "30":
-                    if len(files) == 666:
-                        preds_to_msgpk.preds_to_msgpk(path_preds, args)
-                    else:
-                        continue
-                continue
+            
+                if path_preds == ".":
+                    continue
+                else:
+                    # start the msgpk process if all files have been saved for a runtime
+                    files = sorted(glob.glob(os.path.join(path_preds, f"ENS_MEM_**", "wrfwof_d01_*")))
+                    if path_preds[-2:] == "00":
+                        if len(files) == 1314:
+                            preds_to_msgpk.preds_to_msgpk(path_preds, args)
+                    if path_preds[-2:] == "30":
+                        if len(files) == 666:
+                            preds_to_msgpk.preds_to_msgpk(path_preds, args)
+                    continue
 
             files = json.loads(msg.content)["data"]
             try:
-                #p.starmap_async(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
                 p.starmap(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
             except Exception as e:
                 print(traceback.format_exc())
                 raise e
             
             path_preds = os.path.join("/datadrive2/wofs-preds/2023/", msg.content["runtime"][:8], msg.content["runtime"][-4:])
-            with open('230502_messages.txt', 'a') as a_writer:
-                a_writer.write(msg)
+            with open(f"{msg.content["runtime"][:8]}_msgs.txt", 'a') as file:
+                file.write(msg)
             queue_wofs.delete_message(msg)
         
         p.close()
