@@ -6,20 +6,10 @@ import os
 import sys
 import glob
 import argparse
+from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 
 
-def main():
-
-    parser = argparse.ArgumentParser(description='Save ML predictions to messagepack')
-    parser.add_argument('--dir_preds', type=str, required=True, 
-        help='Location of the WoFS prediction file(s). Can be a path to a single file or a directory to several files')
-    parser.add_argument('--dir_preds_msgpk', type=str, required=True, 
-        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
-    parser.add_argument('--variable', type=str, required=True, 
-        help='TODO')
-    parser.add_argument('--threshold', type=float, required=True, 
-        help='If probability of tornado is greater than or equal to this threshold value, build tornado tracks')
-    args = parser.parse_args()
+def preds_to_msgpk(args):
 
     def get_sparse_dict(ds):
         """ Convert variable from xarray dataset to a compressed sparse row matrix using a specified threshold."""
@@ -31,18 +21,22 @@ def main():
         probs = data[rows, columns].astype('float16').tolist()
 
         return dict(rows=rows.astype('uint16').tolist(), columns=columns.astype('uint16').tolist(), values=probs)
-
+    
+    path_preds = vm_filepath.split('ENS')[0]
+    path_preds_msgpk = path_preds.replace('wofs-preds', 'wofs-preds-msgpk')
+    path_preds_msgpk = path_preds_msgpk[:-6] + path_preds_msgpk[-5:]
+    os.makedirs(path_preds_msgpk, exist_ok=True)
+    filename = vm_filepath.rsplit('/', 1)[1]
+    
     ds_list = []
     for i in range(1, 19):
-        os.makedirs(os.path.join(args.dir_preds_msgpk, f"ENS_MEM_{i}"), exist_ok=True)
-        files = sorted(glob.glob(os.path.join(args.dir_preds, f"ENS_MEM_{i}", "wrfwof_d01_*")))
+        files = sorted(glob.glob(os.path.join(path_preds, f"ENS_MEM_{i}", filename)))
         ds_list.append(xr.open_mfdataset(files, concat_dim='Time', combine='nested')[args.variable])
     ds_all = xr.concat(ds_list, dim='member')
     ds_mean = ds_all.mean(dim='member').load()
     ds_median = ds_all.median(dim='member').load()
     ds_max = ds_all.max(dim='member').load()
 
-    os.makedirs(args.dir_preds_msgpck, exist_ok=True)
     files = sorted(glob.glob(os.path.join(args.dir_preds, f"ENS_MEM_1", "wrfwof_d01_*")))
     for timestep, f in enumerate(files):
         data = {}
@@ -66,6 +60,3 @@ def main():
             outfile.write(packed)
             print(f"Saving {outfile}")
             del packed
-
-if __name__ == "__main__":
-    main()
