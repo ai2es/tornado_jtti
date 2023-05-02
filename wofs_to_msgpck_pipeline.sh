@@ -16,12 +16,12 @@ python process_wofs.py  \
 --fields U WSPD10MAX W_UP_MAX  \
 --loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
 --file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \
-#--loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
-#--file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
 --dir_preds_msgpk="wofs-preds-msgpk" \
 --variable="ML_PREDICTED_TOR" \
 --threshold=0.08  #\
+#--loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
+#--file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 #load_weights_hps  \
 #--hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv"  \
 #--hp_idx=1
