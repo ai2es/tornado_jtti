@@ -545,6 +545,7 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
         #subprocess.run(["azcopy",
         #                "copy",
         #                "--log-level=ERROR",
+        #                "--check-length=FALSE",
         #                f"{savepath}",
         #                f"{blobpath}"])         
 
@@ -779,6 +780,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         #subprocess.run(["azcopy",
         #                "copy",
         #                "--log-level=ERROR",
+        #                "--check-length=FALSE",
         #                f"{savepath}",
         #                f"{blobpath}"])   
         

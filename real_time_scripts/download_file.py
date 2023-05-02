@@ -12,6 +12,8 @@ def download_file(filepath, args):
                 
     subprocess.run(["azcopy",
                     "copy",
+                    "--log-level=ERROR",
+                    "--check-length=FALSE",
                     f"{filepath}",
                     f"{path}{filename}"])
     
