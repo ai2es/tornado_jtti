@@ -296,7 +296,7 @@ def main():
             #make an empty storm mask for this time, since no tors
             storm_mask = np.zeros([ds.Latitude.shape[0], ds.Longitude.shape[0],])
             ds_mask = xr.Dataset({})
-            ds_mask['storm_mask'] = ds.ZH[0,0].copy()
+            ds_mask['storm_mask'] = ds.ZH[0, 0].copy()
             ds_mask['storm_mask'].values = storm_mask
             storm_mask_dss.append(ds_mask)
             

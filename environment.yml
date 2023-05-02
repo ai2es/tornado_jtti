@@ -7,7 +7,6 @@ dependencies:
   - tensorflow
   - keras-tuner
   - xarray
-  - jupyter
   - jupyterlab
   - netcdf4
   - wrf-python
@@ -19,5 +18,4 @@ dependencies:
   - pyproj
   - py3nvml
   - pydot
-  - wandb
   - seaborn
