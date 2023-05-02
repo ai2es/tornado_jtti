@@ -21,11 +21,11 @@ import time, datetime
 #from absl import flags
 import argparse
 import numpy as np
-print("np version", np.__version__)
+#print("np version", np.__version__)
 import pandas as pd
-print("pd version", pd.__version__)
+#print("pd version", pd.__version__)
 import xarray as xr 
-print("xr version", xr.__version__)
+#print("xr version", xr.__version__)
 #import scipy
 #print("scipy version", scipy.__version__)
 #import seaborn as sns
@@ -43,9 +43,9 @@ from sklearn.metrics import confusion_matrix, roc_curve, precision_recall_curve
 from sklearn.calibration import calibration_curve
 
 import tensorflow as tf
-print("tensorflow version", tf.__version__)
+#print("tensorflow version", tf.__version__)
 from tensorflow import keras
-print("keras version", keras.__version__)
+#print("keras version", keras.__version__)
 import tensorflow.keras.backend as K
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, ModelCheckpoint 

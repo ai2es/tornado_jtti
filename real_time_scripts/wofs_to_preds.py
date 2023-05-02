@@ -54,8 +54,7 @@ import tensorflow as tf
 from tensorflow.python.eager import context
 tf.config.threading.set_inter_op_parallelism_threads(2)
 tf.config.threading.set_intra_op_parallelism_threads(1)
-
-import json, time, argparse, subprocess
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
@@ -617,7 +616,7 @@ def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_ar
     if debug: print("Loading model:", model_path)
 
     model = None
-    if not from_weights:
+    if from_weights:
         if fss_args is None or fss_args == {}:
             fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                         'cutoff': 0.5, 'want_hard_discretization': False}
@@ -641,7 +640,6 @@ def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_ar
         hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
         model = hmodel.build(hp)
         model.load_weights(model_path)
-
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
@@ -958,7 +956,7 @@ def wofs_to_preds(ncar_filepath, args):
     
     # Compute predictions
     preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on)
-    from_weights = not args.load_options is None
+    from_weights = args.load_options is None
     preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, debug=args.debug_on)
     
     # Combine the predictions, reflectivity and select fields into a single dataset
