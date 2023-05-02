@@ -78,7 +78,7 @@ from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
 #sys.path.append("../keras-unet-collection")
 #from keras_unet_collection import models
 from scripts_tensorboard.unet_hypermodel import UNetHyperModel
-sys.path.append("process_monitoring")
+#sys.path.append("process_monitoring")
 #from process_monitor import ProcessMonitor
 print(" ")
 import gc
@@ -124,8 +124,8 @@ def create_argsparser(args_list=None):
         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
+    parser.add_argument('-Z', '--ZH_only', action='store_true',  
+        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
     parser.add_argument('-f', '--fields', type=str, nargs='+', #type=list,
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
 
@@ -134,7 +134,7 @@ def create_argsparser(args_list=None):
         help='Trained model directory or file path (i.e. file descriptor)')
     parser.add_argument('--file_trainset_stats', type=str, required=True,
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
-    # TODO: If loading model weights and using hyperparameters from_weights
+    # If loading model weights and using hyperparameters from_weights
     hyperparmas_sparsers = parser.add_subparsers(title='model_loading', dest='load_options', 
         help='optional, additional model loading options')
     hp_parsers = hyperparmas_sparsers.add_parser('load_weights_hps', #aliases=['hyper'], 
@@ -352,36 +352,42 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     # Get wofs heights
     height = wrf.getvar(wrfin, "height_agl", units='m')
 
-    # Get reflectivity, and U and V winds
+    # Get reflectivity
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    #if not ZH_only:
-    U = wrf.g_wind.get_u_destag(wrfin)
-    V = wrf.g_wind.get_v_destag(wrfin)   
     
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    #TODO if not ZH_only:
-    U_agl = wrf.interplevel(U, height, gridrad_heights)
-    V_agl = wrf.interplevel(V, height, gridrad_heights)
-    
-    # Add units to winds to use metpy functions
-    U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    
-    # Define grid spacings (for div and vort)
-    #dx = 3000 * (metpy.units.units.meter) 
-    #dy = 3000 * (metpy.units.units.meter) 
-    dx = wrfin.DX * (metpy.units.units.meter) 
-    dy = wrfin.DY * (metpy.units.units.meter) 
 
-    # Calculate divergence and vorticity
-    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+    div = None
+    vort = None
+    if not args.ZH_only:
+        # Get U and V winds
+        U = wrf.g_wind.get_u_destag(wrfin)
+        V = wrf.g_wind.get_v_destag(wrfin)  
+
+        # Interpolate wofs data to gridrad heights
+        U_agl = wrf.interplevel(U, height, gridrad_heights)
+        V_agl = wrf.interplevel(V, height, gridrad_heights)
+        
+        # Add units to winds to use metpy functions
+        U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        
+        # Define grid spacings (for div and vort)
+        #dx = 3000 * (metpy.units.units.meter) 
+        #dy = 3000 * (metpy.units.units.meter) 
+        dx = wrfin.DX * (metpy.units.units.meter) 
+        dy = wrfin.DY * (metpy.units.units.meter) 
+
+        # Calculate divergence and vorticity
+        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+        
+        # Grab data, remove metpy.units and xarray.Dataset stuff 
+        div = np.asarray(div)
+        vort = np.asarray(vort)
     
-    # Grab data, remove metpy.units and xarray.Dataset stuff 
-    div = np.asarray(div)
-    vort = np.asarray(vort)
     Z_agl = Z_agl.values 
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
@@ -1140,7 +1146,7 @@ if __name__ == '__main__':
     #TODO elif os.path.isdir(args.loc_wofs):
     #    wofs_files = os.listdir(args.loc_wofs)
     else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file, but was {args.loc_wofs}")
+        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should be a file, but was {args.loc_wofs}")
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
