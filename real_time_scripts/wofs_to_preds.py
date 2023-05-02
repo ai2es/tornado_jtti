@@ -44,6 +44,7 @@ from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
 import xarray as xr
 import numpy as np
+import pandas as pd
 from netCDF4 import Dataset, date2num, num2date
 from scipy import spatial
 import wrf
@@ -575,12 +576,12 @@ def load_trainset_stats(args, engine='netcdf4', debug=0, **kwargs):
 
     if debug: print("Training meta data used:", fpath)
 
-    train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load() #, cache=False
+    train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load()
     train_stats.close()
 
     return train_stats
 
-def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
+def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_args):
     '''
     Load the model and perform the predictions.
     TODO: predict on arbitrary set of fields
@@ -591,6 +592,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     @param wofs: data to predict on
     @param stats: data field statistics such as mean and standard deviation of 
             the WoFS fields from the training set data
+    @param from_weigths: boolean flag, whether to load the model from weights
     @param eval: TODO whether to compute evaluation results. only available if
             the true labels are also available
     @param debug: int debug flag to print out additional debug information
@@ -601,17 +603,39 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     @return: the predictions as a numpy array
     '''
     from tensorflow import keras
+    from keras_tuner import HyperParameters
+    from scripts_tensorboard.unet_hypermodel import UNetHyperModel
 
     model_path = args.loc_model
 
     if debug: print("Loading model:", model_path)
 
-    if fss_args is None or fss_args == {}:
-        fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
-                    'cutoff': 0.5, 'want_hard_discretization': False}
-    fss = make_fractions_skill_score(**fss_args)
-    model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-                                                'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+    model = None
+    if not from_weights:
+        if fss_args is None or fss_args == {}:
+            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+                        'cutoff': 0.5, 'want_hard_discretization': False}
+        fss = make_fractions_skill_score(**fss_args)
+        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+
+    else:
+        # TODO: args.hp_path args.hp_idx
+        # Convert csv to Keras Hyperparameters
+        df_hps = pd.read_csv(args.hp_path)
+        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
+        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
+
+        # Set hyperparameters
+        hp = HyperParameters()
+        for k, v in hps_dict.items(): 
+            hp.Fixed(k, value=v)
+
+        #(32, 32, 12)
+        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
+        model = hmodel.build(hp)
+        model.load_weights(model_path)
+
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
@@ -659,14 +683,21 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), debug=0):
         #dims=dims,
         coords=coords
     )
+    
+    _preds = np.zeros((*preds.shape[:-1], 2))
+    # If only the prob of tornado is provided, expand the data
+    if preds.shape[-1] == 1:
+        _p = np.squeeze(preds.copy())
+        _preds[:, :, :, 1] = _p  # probab of tor
+        _preds[:, :, :, 0] = 1 - _p  # probab of no tor
+    else: _preds = preds.copy()
+    
     wofs_preds['predicted_no_tor'] = xr.DataArray(
-        data=preds[:, :, :, 0], #["patch", "x", "y"]
-        #dims=wofs.dims,
+        data=_preds[:, :, :, 0],
         coords=coords
     ) 
     wofs_preds['predicted_tor'] = xr.DataArray(
-        data=preds[:, :, :, 1], #["patch", "x", "y"]
-        #dims=wofs.dims,
+        data=_preds[:, :, :, 1],
         coords=coords
     )
 
@@ -920,7 +951,9 @@ def wofs_to_preds(ncar_filepath, args):
                               debug=args.debug_on)
     
     # Compute predictions
-    preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
+    preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on)
+    from_weights = not args.load_options is None
+    preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, debug=args.debug_on)
     
     # Combine the predictions, reflectivity and select fields into a single dataset
     wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
