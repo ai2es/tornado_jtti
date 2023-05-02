@@ -1,10 +1,11 @@
-import json, time, argparse, traceback
+import json, time, argparse, traceback, glob
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
-from multiprocessing.pool import Pool, ThreadPool
+from multiprocessing.pool import Pool
+from real_time_scripts import preds_to_msgpk
 
 
 def process_one_file(wofs_filepath, args):
-    from real_time_scripts import download_file, wofs_to_preds, preds_to_msgpk
+    from real_time_scripts import download_file, wofs_to_preds
     ncar_filepath = download_file.download_file(wofs_filepath, args)
     vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
 
@@ -43,8 +44,8 @@ def parse_args():
                         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
+    parser.add_argument('-Z', '--ZH_only', action='store_true',  
+        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
     parser.add_argument('-f', '--fields', type=str, nargs='+',
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
 
@@ -79,6 +80,7 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
+    
     with Pool(4, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=5*60)
@@ -86,14 +88,33 @@ if __name__ == '__main__':
             if msg == None:
                 print('No message: sleeping.')
                 time.sleep(10)
+                
+                # start the msgpk process if enough files have been saved
+                files = sorted(glob.glob(os.path.join(path_preds, f"ENS_MEM_**", "wrfwof_d01_*")))
+                if path_preds[-2:] == "00":
+                    if len(files) == 1314:
+                        preds_to_msgpk.preds_to_msgpk(path_preds, args)
+                    else:
+                        continue
+                if path_preds[-2:] == "30":
+                    if len(files) == 666:
+                        preds_to_msgpk.preds_to_msgpk(path_preds, args)
+                    else:
+                        continue
                 continue
 
             files = json.loads(msg.content)["data"]
             try:
-                p.starmap_async(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
+                #p.starmap_async(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
+                p.starmap(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
             except Exception as e:
                 print(traceback.format_exc())
                 raise e
+            
+            path_preds = os.path.join("/datadrive2/wofs-preds/2023/", msg.content["runtime"][:8], msg.content["runtime"][-4:])
+            with open('230502_messages.txt', 'a') as a_writer:
+                a_writer.write(msg)
             queue_wofs.delete_message(msg)
+        
         p.close()
         p.join()
