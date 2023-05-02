@@ -17,7 +17,6 @@ python process_wofs.py  \
 --loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
 --file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
---debug-on  \
 --dir_preds_msgpk="wofs-preds-msgpk" \
 --variable="ML_PREDICTED_TOR" \
 --threshold=0.08  \
