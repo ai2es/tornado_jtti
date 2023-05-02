@@ -9,19 +9,19 @@ python process_wofs.py  \
 --vm_datadrive='/datadrive2'  \
 --dir_wofs='wrf-wofs'  \
 --dir_preds="wofs-preds"  \
---dir_patches="wofs-patches" \
+--dir_patches="wofs-patches"  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
 --with_nans  \
 --ZH_only  \
---fields U WSPD10MAX W_UP_MAX \
+--fields U WSPD10MAX W_UP_MAX  \
 --loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
---file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc" \
+--file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
 --debug-on  \
 --dir_preds_msgpk="wofs-preds-msgpk" \
 --variable="ML_PREDICTED_TOR" \
---threshold=0.08 \
-load_weights_hps \
---hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv" \
+--threshold=0.08  \
+load_weights_hps  \
+--hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv"  \
 --hp_idx=1
 
