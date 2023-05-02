@@ -96,7 +96,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
 
     # Create Dataset
     wofs = None
-    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, **kwargs).load()
+    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, decode_coords=False, **kwargs)
     wofs.attrs['filenamepath'] = filepath
 
     if wofs_datetime is None:

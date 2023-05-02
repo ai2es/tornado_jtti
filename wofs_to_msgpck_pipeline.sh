@@ -25,4 +25,3 @@ python process_wofs.py  \
 #load_weights_hps  \
 #--hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv"  \
 #--hp_idx=1
-
