@@ -1,23 +1,21 @@
 #!/bin/bash
 
-##SBATCH --partition=debug_gpu
-##SBATCH --partition=gpu
+#SBATCH --partition=gpu
 ##SBATCH --nodelist=c301
-#SBATCH -p ai2es
-#SBATCH --nodelist=c314
-#SBATCH --time=1:00:00
+##SBATCH -p ai2es
+##SBATCH --nodelist=c731
+#SBATCH --time=4:30:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --ntasks=1  #-n 20
-#SBATCH --mem=10G
-#SBATCH --job-name=tuning_hps1_plots
+#SBATCH --ntasks=10  #-n 20
+#SBATCH --mem=20G
+#SBATCH --job-name=test__tunning__int_nontor_tor
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --verbose
-##SBATCH --array=0-1000%20
 ##SBATCH --profile=Task   #data collection on  (I/O, Memory, ...) data is collected. stored in an HDF5 file for the job
 
 ##########################################################
@@ -53,26 +51,28 @@ echo "SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST"
 
 
 # Run hyperparameter search
-python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
---in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_tor/training_ZH_only.tf" \
---in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_tor/validation1_ZH_only.tf" \
+python lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
+--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_ZH_only.tf" \
+--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_nontor_tor/validation1_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
 --hps_index=1 \
---epochs=1000 \
---batch_size=300 \
---lrate=2e-4 \
+--epochs=200 \
+--batch_size=128 \
+--lrate=5e-4 \
 --number_of_summary_trials=3 \
 --gpu \
---save=4 \
+--save=0 \
+--overwrite \
+--tuner_id="debug" \
+--dry_run \
 hyper \
---max_epochs=400 \
---factor=10
-#--overwrite \
-#--tuner_id="debug" \
-#--dry_run \
+--max_epochs=5 \
+--factor=3
 #--nogo \
 
+#hyperband, 1 iteration max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials
+#natural_validation_ZH_only.tf
 
 #--out_dir="/home/momoshog/Tornado/test_data/tmp" \
 #tornado_jtti/unet/ZH_only/initialrun_model8/' \
