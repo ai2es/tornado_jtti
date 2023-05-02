@@ -42,8 +42,8 @@ def parse_args():
                         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
+    parser.add_argument('-Z', '--ZH_only', action='store_true',  
+        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
     parser.add_argument('-f', '--fields', type=str, nargs='+',
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
 
@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument('--file_trainset_stats', type=str, required=True,
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
     
-    # TODO: If loading model weights and using hyperparameters from_weights
+    # If loading model weights and using hyperparameters from_weights
     hyperparams_subparser = parser.add_subparsers(title='model_loading', dest='load_options', 
         help='optional, additional model loading options')
     hp_parser = hyperparams_subparser.add_parser('load_weights_hps', 

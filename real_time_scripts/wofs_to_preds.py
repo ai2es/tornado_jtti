@@ -248,35 +248,42 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     # Get wofs heights
     height = wrf.getvar(wrfin, "height_agl", units='m')
 
-    # Get reflectivity, and U and V winds
+    # Get reflectivity
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    #if not ZH_only:
-    U = wrf.g_wind.get_u_destag(wrfin)
-    V = wrf.g_wind.get_v_destag(wrfin)   
     
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    U_agl = wrf.interplevel(U, height, gridrad_heights)
-    V_agl = wrf.interplevel(V, height, gridrad_heights)
-    
-    # Add units to winds to use metpy functions
-    U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    
-    # Define grid spacings (for div and vort)
-    #dx = 3000 * (metpy.units.units.meter) 
-    #dy = 3000 * (metpy.units.units.meter) 
-    dx = wrfin.DX * (metpy.units.units.meter) 
-    dy = wrfin.DY * (metpy.units.units.meter) 
 
-    # Calculate divergence and vorticity
-    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+    div = None
+    vort = None
+    if not args.ZH_only:
+        # Get U and V winds
+        U = wrf.g_wind.get_u_destag(wrfin)
+        V = wrf.g_wind.get_v_destag(wrfin)  
+
+        # Interpolate wofs data to gridrad heights
+        U_agl = wrf.interplevel(U, height, gridrad_heights)
+        V_agl = wrf.interplevel(V, height, gridrad_heights)
+
+        # Add units to winds to use metpy functions
+        U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+
+        # Define grid spacings (for div and vort)
+        #dx = 3000 * (metpy.units.units.meter) 
+        #dy = 3000 * (metpy.units.units.meter) 
+        dx = wrfin.DX * (metpy.units.units.meter) 
+        dy = wrfin.DY * (metpy.units.units.meter) 
+
+        # Calculate divergence and vorticity
+        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+
+        # Grab data, remove metpy.units and xarray.Dataset stuff 
+        div = np.asarray(div)
+        vort = np.asarray(vort)
     
-    # Grab data, remove metpy.units and xarray.Dataset stuff 
-    div = np.asarray(div)
-    vort = np.asarray(vort)
     Z_agl = Z_agl.values 
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
