@@ -1,4 +1,4 @@
-import json, time, argparse, traceback, glob
+import json, time, argparse, traceback, glob, os
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from multiprocessing.pool import Pool
 from real_time_scripts import preds_to_msgpk
@@ -117,9 +117,11 @@ if __name__ == '__main__':
                 print(traceback.format_exc())
                 raise e
             
-            path_preds = os.path.join("/datadrive2/wofs-preds/2023/", msg.content["runtime"][:8], msg.content["runtime"][-4:])
-            with open(f"{msg.content['runtime'][:8]}_msgs.txt", 'a') as file:
-                file.write(msg)
+            rundate = json.loads(msg.content)['jobId'][7:15]
+            runtime = json.loads(msg.content)['runtime'][-4:]
+            path_preds = os.path.join("/datadrive2/wofs-preds/2023/", rundate, runtime)
+            with open(f"{rundate}_msgs.txt", 'a') as file:
+                file.write(msg.content)
             queue_wofs.delete_message(msg)
         
         p.close()

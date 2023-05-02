@@ -39,7 +39,7 @@ Execution Instructions:
                                                      --write=0
                                                      --debug_on
 """
-import re, os, sys, glob, argparse, logging
+import re, os, sys, glob, argparse, logging, subprocess
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
 import xarray as xr
@@ -616,30 +616,36 @@ def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_ar
     if debug: print("Loading model:", model_path)
 
     model = None
-    if from_weights:
-        if fss_args is None or fss_args == {}:
-            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
-                        'cutoff': 0.5, 'want_hard_discretization': False}
-        fss = make_fractions_skill_score(**fss_args)
-        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+    if fss_args is None or fss_args == {}:
+        fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0,
+                    'cutoff': 0.5, 'want_hard_discretization': False}
+    fss = make_fractions_skill_score(**fss_args)
+    model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+                                                                'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+#    if not from_weights:
+#        if fss_args is None or fss_args == {}:
+#            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+#                        'cutoff': 0.5, 'want_hard_discretization': False}
+#        fss = make_fractions_skill_score(**fss_args)
+#        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+#                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
 
-    else:
+#    else:
         # TODO: args.hp_path args.hp_idx
         # Convert csv to Keras Hyperparameters
-        df_hps = pd.read_csv(args.hp_path)
-        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
-        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
+#        df_hps = pd.read_csv(args.hp_path)
+#        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
+#        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
 
         # Set hyperparameters
-        hp = HyperParameters()
-        for k, v in hps_dict.items(): 
-            hp.Fixed(k, value=v)
+#        hp = HyperParameters()
+#        for k, v in hps_dict.items(): 
+#            hp.Fixed(k, value=v)
 
         #(32, 32, 12)
-        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
-        model = hmodel.build(hp)
-        model.load_weights(model_path)
+#        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
+#        model = hmodel.build(hp)
+#        model.load_weights(model_path)
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
