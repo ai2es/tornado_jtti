@@ -53,6 +53,16 @@ def parse_args():
     parser.add_argument('--file_trainset_stats', type=str, required=True,
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
     
+    # If loading model weights and using hyperparameters from_weights
+    hyperparams_subparser = parser.add_subparsers(title='model_loading', dest='load_options', 
+        help='optional, additional model loading options')
+    hp_parser = hyperparams_subparser.add_parser('load_weights_hps', 
+        help='Specifiy details to load model weights and UNetHyperModel hyperparameters')
+    hp_parser.add_argument('--hp_path', type=str, required=True,
+        help='Path to the csv containing the top hyperparameters')
+    hp_parser.add_argument('--hp_idx', type=int, default=0,
+        help='Index indicating the row to use within the csv of the top hyperparameters')
+    
     # Functionality parameters
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
