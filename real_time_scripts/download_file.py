@@ -1,4 +1,4 @@
-import subprocess
+import subprocess, time
 
 
 def download_file(filepath, args):
@@ -14,5 +14,6 @@ def download_file(filepath, args):
                     "copy",
                     f"{filepath}",
                     f"{path}{filename}"])
+    time.sleep(10)
     
     return f"{path}{filename}"
