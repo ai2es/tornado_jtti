@@ -111,7 +111,7 @@ if __name__ == '__main__':
                     continue
                 continue
                     
-            datetime_string = msg["data"][0].split('se=')[1].split('%')[0]
+            datetime_string = json.loads(msg.content)["data"][0].split('se=')[1].split('%')[0]
             expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
             if expiration_datetime < datetime.datetime.now():
                 continue
@@ -127,7 +127,8 @@ if __name__ == '__main__':
             runtime = json.loads(msg.content)['runtime'][-4:]
             path_preds = os.path.join("/datadrive2/wofs-preds/2023/", rundate, runtime)
             with open(f"{rundate}_msgs.txt", 'a') as file:
-                file.write('\n', msg.content)
+                file.write('\n')
+                file.write(msg.content)
             queue_wofs.delete_message(msg)
         
         p.close()
