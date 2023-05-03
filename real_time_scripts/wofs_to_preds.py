@@ -941,13 +941,18 @@ def wofs_to_preds(ncar_filepath, args):
     filename = ncar_filepath.rsplit('/', 1)[1]
     path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
     os.makedirs(path, mode=0o775, exist_ok=True)
-
+    
+    print(["azcopy",
+           "copy",
+           f"{ncar_filepath}",
+           f"{path}{filename}"])
+    
     subprocess.run(["azcopy",
                     "copy",
                     f"{ncar_filepath}",
-                    f"{path}/{filename}"]) 
+                    f"{path}{filename}"])
             
-    wofs, wofs_netcdf = load_wofs_file(f"{path}/{filename}",
+    wofs, wofs_netcdf = load_wofs_file(f"{path}{filename}",
                                        wofs_datetime=None,
                                        datetime_format=args.datetime_format,
                                        seconds_since=SECS_SINCE,
@@ -974,5 +979,5 @@ def wofs_to_preds(ncar_filepath, args):
                                                                       seconds_since=SECS_SINCE, debug=args.debug_on)
     
     print(f"DONE - {vm_filepath}")
-    os.remove(f"{path}/{filename}")
+    os.remove(f"{path}{filename}")
     
