@@ -89,7 +89,7 @@ if __name__ == '__main__':
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
     path_preds = "."
-    with Pool(4, maxtasksperchild=1) as p:
+    with Pool(9, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=5*60)
 
@@ -115,13 +115,13 @@ if __name__ == '__main__':
                 p.starmap(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
             except Exception as e:
                 print(traceback.format_exc())
-                raise e
+                #raise e
             
             rundate = json.loads(msg.content)['jobId'][7:15]
             runtime = json.loads(msg.content)['runtime'][-4:]
             path_preds = os.path.join("/datadrive2/wofs-preds/2023/", rundate, runtime)
             with open(f"{rundate}_msgs.txt", 'a') as file:
-                file.write(msg.content)
+                file.write('\n', msg.content)
             queue_wofs.delete_message(msg)
         
         p.close()
