@@ -1,4 +1,4 @@
-import json, time, argparse, traceback, glob, os
+import json, time, argparse, traceback, glob, os, datetime
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from multiprocessing.pool import Pool
 from real_time_scripts import preds_to_msgpk
@@ -109,6 +109,12 @@ if __name__ == '__main__':
                         if len(files) == 666:
                             preds_to_msgpk.preds_to_msgpk(path_preds, args)
                     continue
+                continue
+                    
+            datetime_string = msg["data"][0].split('se=')[1].split('%')[0]
+            expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
+            if expiration_datetime < datetime.datetime.now():
+                continue
 
             files = json.loads(msg.content)["data"]
             try:
