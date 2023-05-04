@@ -86,8 +86,8 @@ if __name__ == '__main__':
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
     
-    def result_callback(result):
-        print(result, flush=True)
+#    def result_callback(result):
+#        print(result, flush=True)
     
     with Pool(16, maxtasksperchild=1) as p:
         while True:
@@ -102,42 +102,45 @@ if __name__ == '__main__':
                 queue_wofs.delete_message(msg)
                 continue
             
+            # check to see if queue is empty
             if msg == None:
                 print('No message: sleeping.')
                 time.sleep(10)
                 continue
             
+            # check to see if new message
             rundate = msg_dict["jobId"][7:15]
             if rundate == "20230504":
                 print(f"NEW-SKIPPING FOR NOW: {msg_dict['jobID']} - {msg_dict['runtime']}")
                 continue
-            try:
-                p.starmap_async(process_one_file,
-                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
-                                callback=result_callback)
-            except Exception as e:
-                print(traceback.format_exc())
-                with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
-                    file.write('\n')
-                    file.write(msg.content)
+            
+            # begin processing
+#                p.starmap_async(process_one_file,
+#                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
+#                                callback=result_callback)
+#            except Exception as e:
+#                print(traceback.format_exc())
+#                with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
+#                    file.write('\n')
+#                    file.write(msg.content)
                 #raise e
             
-            rundatetime = msg_dict["runtime"]
-            filename = msg_dict["data"][0].split('?se')[0].rsplit('/')[-1] + "_predictions.nc"
-            path_preds_timestep = f"/datadrive2/wofs-preds/{rundate[:4]}/{rundate}/{rundatetime}"
+#            rundatetime = msg_dict["runtime"]
+#            filename = msg_dict["data"][0].split('?se')[0].rsplit('/')[-1] + "_predictions.nc"
+#            path_preds_timestep = f"/datadrive2/wofs-preds/{rundate[:4]}/{rundate}/{rundatetime}"
             
-            if len(glob.glob(path_preds_timestep)) == 18:
-                path_preds_timestep_msgpk = f"/datadrive2/wofs-preds-msgpk/{rundate[:4]}/{rundate}/{rundatetime}/"
-                timestep = filename[11:30].replace('-', '').replace('_', '')
-                preds_to_msgpk.preds_to_msgpk(path_preds_timestep,
-                                              path_preds_timestep_msgpk,
-                                              timestep,
-                                              args)
+#            if len(glob.glob(path_preds_timestep)) == 18:
+#                path_preds_timestep_msgpk = f"/datadrive2/wofs-preds-msgpk/{rundate[:4]}/{rundate}/{rundatetime}/"
+#                timestep = filename[11:30].replace('-', '').replace('_', '')
+#                preds_to_msgpk.preds_to_msgpk(path_preds_timestep,
+#                                              path_preds_timestep_msgpk,
+#                                              timestep,
+#                                              args)
             
-                with open(f"./logs/{rundate}_msgs.txt", 'a') as file:
-                    file.write('\n')
-                    file.write(msg.content)
-                queue_wofs.delete_message(msg)
+#                with open(f"./logs/{rundate}_msgs.txt", 'a') as file:
+#                    file.write('\n')
+#                    file.write(msg.content)
+#                queue_wofs.delete_message(msg)
 
         p.close()
         p.join()
