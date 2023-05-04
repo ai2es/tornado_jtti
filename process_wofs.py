@@ -131,6 +131,11 @@ if __name__ == '__main__':
                     file.write('\n')
                     file.write(msg.content)
                 queue_wofs.delete_message(msg)
-        
+            else:
+                with open(f"{rundate}_msgs.txt", 'a') as file:
+                    file.write('\n')
+                    file.write(msg.content)
+                continue
+
         p.close()
         p.join()
