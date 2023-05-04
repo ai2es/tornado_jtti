@@ -114,10 +114,9 @@ if __name__ == '__main__':
             
             # begin processing
             try:
-                p.starmap(process_one_file,
-                          [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
-                          callback=preds_to_msgpk_callback)
-                raise
+                p.starmap_async(process_one_file,
+                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
+                                callback=preds_to_msgpk_callback)
             except Exception as e:
                 print(traceback.format_exc())
                 with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
