@@ -8,6 +8,7 @@ def process_one_file(wofs_filepath, args):
     from real_time_scripts import download_file, wofs_to_preds
     ncar_filepath = download_file.download_file(wofs_filepath, args)
     vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
+    return vm_filepath
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
@@ -85,11 +86,10 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    
+
     def preds_to_msgpk_callback(result):
         for item in result:
             print(f'DONE with wofs_to_preds for {item}', flush=True)
-        preds_to_msgpk(list(result))
     
     with Pool(16, maxtasksperchild=1) as p:
         while True:
@@ -114,9 +114,12 @@ if __name__ == '__main__':
             
             # begin processing
             try:
-                p.starmap_async(process_one_file,
-                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
-                                callback=preds_to_msgpk_callback)
+                result = p.starmap_async(process_one_file,
+                                         [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
+                                         callback=preds_to_msgpk_callback)
+                result = result.get(timeout=None)
+                preds_to_msgpk.preds_to_msgpk(result)
+
             except Exception as e:
                 print(traceback.format_exc())
                 with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:

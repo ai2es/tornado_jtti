@@ -806,9 +806,10 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
         os.makedirs(savepath, mode=0o775, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
-        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4} for var in wofs_like_combined.variables.keys()}
-        vm_filepath = os.path.join(savepath, f"{str(fname)}_predictions.nc"
-        wofs_like_combined.to_netcdf(vm_filepath), encoding=encoding)
+        encoding_vars = [k for k in wofs_like_combined.variables.keys() if k not in ["Times", "Time"]]
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4.0} for var in encoding_vars}
+        vm_filepath = savepath + f"{str(fname)}_predictions.nc"
+        wofs_like_combined.to_netcdf(vm_filepath, encoding=encoding)
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         #subprocess.run(["azcopy",
@@ -816,7 +817,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         #                f"{savepath}",
         #                f"{blobpath}"])   
         
-    return predictions, wofs_like, vm_filepath
+    return predictions, wofs_like_combined, vm_filepath
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
                    seconds_since='seconds since 2001-01-01', debug=0):
@@ -958,5 +959,5 @@ def wofs_to_preds(ncar_filepath, args):
                                                                       seconds_since=SECS_SINCE, debug=args.debug_on)
     
     print(f"DONE - {vm_filepath}")
-    os.remove(f"{vm_filepath}")
+    os.remove(f"{ncar_filepath}")
     return vm_filepath

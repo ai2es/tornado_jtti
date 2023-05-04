@@ -13,7 +13,7 @@ python process_wofs.py  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
 --with_nans  \
 --ZH_only  \
---fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX REFL_10CM COMPOSITE_REFL_10CM Times  \
+--fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX  \
 --loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
 --file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
