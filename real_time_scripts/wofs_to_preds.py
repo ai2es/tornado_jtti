@@ -797,7 +797,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         fields += args.fields
         fields = list(set(fields))
     wofs_fields = wofs_orig[fields].copy(deep=True)
-    wofs_like = xr.merge([wofs_like, wofs_fields])
+    wofs_like_combined = xr.merge([wofs_like, wofs_fields])
 
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
@@ -806,8 +806,8 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
         os.makedirs(savepath, mode=0o775, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
-        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4} for var in wofs_like.variables.keys()}
-        wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"), encoding=encoding)
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4} for var in wofs_like_combined.variables.keys()}
+        wofs_like_combined.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"), encoding=encoding)
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         #subprocess.run(["azcopy",

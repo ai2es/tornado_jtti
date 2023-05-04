@@ -101,6 +101,7 @@ if __name__ == '__main__':
                 continue
 
             msg_dict = json.loads(msg.content)
+            rundate = msg_dict['jobId'][7:15]
 
             # check to see if message has expired
             datetime_string = msg_dict["data"][0].split('se=')[1].split('%')[0]
@@ -112,9 +113,10 @@ if __name__ == '__main__':
             
             # begin processing
             try:
-                p.starmap_async(process_one_file,
-                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
-                                callback=preds_to_msgpk_callback)
+                p.starmap(process_one_file,
+                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]]) #,
+                                #callback=preds_to_msgpk_callback)
+                break
             except Exception as e:
                 print(traceback.format_exc())
                 with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
