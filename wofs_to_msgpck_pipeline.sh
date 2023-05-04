@@ -7,7 +7,7 @@ python process_wofs.py  \
 --queue_name_wofs='wofs-ucar'  \
 --blob_url_ncar="https://wofsdltornado.blob.core.windows.net"  \
 --vm_datadrive='/datadrive2'  \
---dir_wofs='wrfout-wofs'  \
+--dir_wofs='wrf-wofs'  \
 --dir_preds="wofs-preds"  \
 --dir_patches="wofs-patches"  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \

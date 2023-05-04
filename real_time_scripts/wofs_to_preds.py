@@ -930,7 +930,7 @@ def wofs_to_preds(ncar_filepath, args):
     train_stats = load_trainset_stats(args, debug=args.debug_on) 
     
     print(ncar_filepath)
-    rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrfout-wofs/')[1] + '/'
+    rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
     filename = ncar_filepath.rsplit('/', 1)[1]
     path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
     os.makedirs(path, mode=0o775, exist_ok=True)
