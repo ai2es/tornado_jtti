@@ -934,11 +934,6 @@ def wofs_to_preds(ncar_filepath, args):
     path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
     os.makedirs(path, mode=0o775, exist_ok=True)
     
-    print(["azcopy",
-           "copy",
-           f"{ncar_filepath}",
-           f"{path}{filename}"])
-    
     subprocess.run(["azcopy",
                     "copy",
                     f"{ncar_filepath}",
