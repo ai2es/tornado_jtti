@@ -7,7 +7,7 @@ from real_time_scripts import preds_to_msgpk
 def process_one_file(wofs_filepath, args):
     from real_time_scripts import download_file, wofs_to_preds
     ncar_filepath = download_file.download_file(wofs_filepath, args)
-    vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
+    #vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
@@ -88,48 +88,49 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    path_preds = "."
+    #path_preds = "."
     with Pool(9, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=5*60)
-
             if msg == None:
                 print('No message: sleeping.')
                 time.sleep(10)
             
-                if path_preds == ".":
-                    continue
-                else:
-                    # start the msgpk process if all files have been saved for a runtime
-                    files = sorted(glob.glob(os.path.join(path_preds, f"ENS_MEM_**", "wrfwof_d01_*")))
-                    if path_preds[-2:] == "00":
-                        if len(files) == 1314:
-                            preds_to_msgpk.preds_to_msgpk(path_preds, args)
-                    if path_preds[-2:] == "30":
-                        if len(files) == 666:
-                            preds_to_msgpk.preds_to_msgpk(path_preds, args)
-                    continue
+                #if path_preds == ".":
+                #    continue
+                #else:
+                #    # start the msgpk process if all files have been saved for a runtime
+                #    files = sorted(glob.glob(os.path.join(path_preds, f"ENS_MEM_**", "wrfwof_d01_*")))
+                #    if path_preds[-2:] == "00":
+                #        if len(files) == 1314:
+                #            preds_to_msgpk.preds_to_msgpk(path_preds, args)
+                #    if path_preds[-2:] == "30":
+                #        if len(files) == 666:
+                #            preds_to_msgpk.preds_to_msgpk(path_preds, args)
+                #    continue
                 continue
-                    
+            
             datetime_string = json.loads(msg.content)["data"][0].split('se=')[1].split('%')[0]
             expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
             if expiration_datetime < datetime.datetime.now():
                 continue
-
-            files = json.loads(msg.content)["data"]
-            try:
-                p.starmap(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
-            except Exception as e:
-                print(traceback.format_exc())
-                #raise e
             
             rundate = json.loads(msg.content)['jobId'][7:15]
-            runtime = json.loads(msg.content)['runtime'][-4:]
-            path_preds = os.path.join("/datadrive2/wofs-preds/2023/", rundate, runtime)
-            with open(f"{rundate}_msgs.txt", 'a') as file:
-                file.write('\n')
-                file.write(msg.content)
-            queue_wofs.delete_message(msg)
+            if rundate == "20230502":
+                files = json.loads(msg.content)["data"]
+                try:
+                    p.starmap(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
+                except Exception as e:
+                    print(traceback.format_exc())
+                    #raise e
+            
+                #rundate = json.loads(msg.content)['jobId'][7:15]
+                #runtime = json.loads(msg.content)['runtime'][-4:]
+                #path_preds = os.path.join("/datadrive2/wofs-preds/2023/", rundate, runtime)
+                with open(f"{rundate}_msgs.txt", 'a') as file:
+                    file.write('\n')
+                    file.write(msg.content)
+                queue_wofs.delete_message(msg)
         
         p.close()
         p.join()
