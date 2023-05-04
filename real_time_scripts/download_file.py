@@ -14,5 +14,5 @@ def download_file(filepath, args):
                     "copy",
                     f"{filepath}",
                     f"{path}{filename}"])
-    
+
     return f"{path}{filename}"
