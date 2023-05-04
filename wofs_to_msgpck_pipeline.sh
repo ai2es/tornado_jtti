@@ -23,7 +23,7 @@ python process_wofs.py  \
 load_weights_hps  \
 --hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv"  \
 --hp_idx=1  \
-|& tee $(date +"%Y%m%d_%H%M%S")_output.txt
+|& tee ./logs/$(date +"%Y%m%d_%H%M%S")_output.txt
 
 #--loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
 #--file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \

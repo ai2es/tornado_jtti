@@ -100,7 +100,7 @@ if __name__ == '__main__':
                 p.starmap(process_one_file, [(wofs_fp, args) for wofs_fp in msg_dict["data"]])
             except Exception as e:
                 print(traceback.format_exc())
-                with open(f"{rundate}_msgs_errors.txt", 'a') as file:
+                with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
                     file.write('\n')
                     file.write(msg.content)
                 #raise e
@@ -117,7 +117,7 @@ if __name__ == '__main__':
                                               timestep,
                                               args)
             
-                with open(f"{rundate}_msgs.txt", 'a') as file:
+                with open(f"./logs/{rundate}_msgs.txt", 'a') as file:
                     file.write('\n')
                     file.write(msg.content)
                 queue_wofs.delete_message(msg)

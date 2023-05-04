@@ -143,3 +143,9 @@ cython_debug/
 
 # VSCode
 .vscode/
+
+# Logs
+*.txt
+
+# keras-unet-collection
+lydia_scripts/keras-unet-collection
