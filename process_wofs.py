@@ -98,13 +98,16 @@ if __name__ == '__main__':
                 continue
             
             msg_dict = json.loads(msg.content)
+            rundate = msg_dict["jobId"][7:15]
             try:
                 p.starmap(process_one_file, [(wofs_fp, args) for wofs_fp in msg_dict["data"]])
             except Exception as e:
                 print(traceback.format_exc())
+                with open(f"{rundate}_msgs_errors.txt", 'a') as file:
+                    file.write('\n')
+                    file.write(msg.content)
                 #raise e
             
-            rundate = msg_dict["jobId"][7:15]
             rundatetime = msg_dict["runtime"]
             filename = msg_dict["data"][0].split('?se')[0].rsplit('/')[-1] + "_predictions.nc"
             path_preds_timestep = f"/datadrive2/wofs-preds/{rundate[:4]}/{rundate}/{rundatetime}"
@@ -117,10 +120,10 @@ if __name__ == '__main__':
                                               timestep,
                                               args)
             
-            with open(f"{rundate}_msgs.txt", 'a') as file:
-                file.write('\n')
-                file.write(msg.content)
-            queue_wofs.delete_message(msg)
+                with open(f"{rundate}_msgs.txt", 'a') as file:
+                    file.write('\n')
+                    file.write(msg.content)
+                queue_wofs.delete_message(msg)
 
         p.close()
         p.join()
