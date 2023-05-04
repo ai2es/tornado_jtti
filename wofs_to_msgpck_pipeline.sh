@@ -13,7 +13,7 @@ python process_wofs.py  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
 --with_nans  \
 --ZH_only  \
---fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX  \
+--fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX REFL_10CM  \
 --loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
 --file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
@@ -24,6 +24,3 @@ load_weights_hps  \
 --hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv"  \
 --hp_idx=1  \
 |& tee ./logs/$(date +"%Y%m%d_%H%M%S")_output.txt
-
-#--loc_model="lydia_scripts/models/initialrun_model8/initialrun_model8.h5"  \
-#--file_trainset_stats="lydia_scripts/training_metadata/3D_light/training_onehot_tor/training_metadata_ZH_only.nc" \

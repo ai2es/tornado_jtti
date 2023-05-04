@@ -87,7 +87,8 @@ if __name__ == '__main__':
                              message_decode_policy=TextBase64DecodePolicy())
     
     def preds_to_msgpk_callback(result):
-        print(result, flush=True)
+        for item in result:
+            print(f'DONE with wofs_to_preds for {item}', flush=True)
     
     with Pool(16, maxtasksperchild=1) as p:
         while True:

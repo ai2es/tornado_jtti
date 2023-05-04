@@ -795,7 +795,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         fields += ['U', 'U10', 'V', 'V10']
     if not args.fields is None:
         fields += args.fields
-        fields = set(fields)
+        fields = list(set(fields))
     wofs_fields = wofs_orig[fields].copy(deep=True)
     wofs_like = xr.merge([wofs_like, wofs_fields])
 
@@ -960,4 +960,4 @@ def wofs_to_preds(ncar_filepath, args):
     
     print(f"DONE - {ncar_filepath}")
     os.remove(f"{ncar_filepath}")
-    
+    return vm_filepath
