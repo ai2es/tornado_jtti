@@ -92,20 +92,21 @@ if __name__ == '__main__':
     with Pool(16, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=40)
+
+            # check to see if queue is empty
+            if msg == None:
+                print('No message: sleeping.')
+                time.sleep(10)
+                continue
+
             msg_dict = json.loads(msg.content)
 
             # check to see if message has expired
             datetime_string = msg_dict["data"][0].split('se=')[1].split('%')[0]
             expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
             if expiration_datetime < datetime.datetime.now():
-                print(f"EXPIRED: {msg_dict['jobID']} - {expiration_datetime}")
+                print(f"EXPIRED: {msg_dict['jobId']} - {expiration_datetime}")
                 queue_wofs.delete_message(msg)
-                continue
-            
-            # check to see if queue is empty
-            if msg == None:
-                print('No message: sleeping.')
-                time.sleep(10)
                 continue
             
             # begin processing
