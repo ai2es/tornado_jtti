@@ -928,19 +928,12 @@ def wofs_to_preds(ncar_filepath, args):
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on) 
-    
-    print(ncar_filepath)
+
     rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
     filename = ncar_filepath.rsplit('/', 1)[1]
     path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
-    os.makedirs(path, mode=0o775, exist_ok=True)
     
-    subprocess.run(["azcopy",
-                    "copy",
-                    f"{ncar_filepath}",
-                    f"{path}{filename}"])
-            
-    wofs, wofs_netcdf = load_wofs_file(f"{path}{filename}",
+    wofs, wofs_netcdf = load_wofs_file(ncar_filepath,
                                        wofs_datetime=None,
                                        datetime_format=args.datetime_format,
                                        seconds_since=SECS_SINCE,
@@ -965,6 +958,6 @@ def wofs_to_preds(ncar_filepath, args):
                                                                       train_stats, gridrad_spacing=GRIDRAD_SPACING,
                                                                       seconds_since=SECS_SINCE, debug=args.debug_on)
     
-    print(f"DONE - {vm_filepath}")
-    os.remove(f"{path}{filename}")
+    print(f"DONE - {ncar_filepath}")
+    os.remove(f"{ncar_filepath}")
     
