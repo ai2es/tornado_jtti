@@ -7,7 +7,7 @@ from real_time_scripts import preds_to_msgpk
 def process_one_file(wofs_filepath, args):
     from real_time_scripts import download_file, wofs_to_preds
     ncar_filepath = download_file.download_file(wofs_filepath, args)
-    #vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
+    vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
@@ -21,9 +21,6 @@ def parse_args():
                         help='NCAR path to storage blob')    
     
     # wofs_to_preds ___________________________________________________
-    # NCAR's queue urls and names and blob url
-    parser.add_argument('--account_url_ncar', type=str, required=True,
-                        help='NCAR queue account url')
     parser.add_argument('--vm_datadrive', type=str, required=True,
                         help='NCAR VM path to datadrive')
     

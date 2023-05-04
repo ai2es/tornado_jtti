@@ -928,8 +928,9 @@ def wofs_to_preds(ncar_filepath, args):
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     train_stats = load_trainset_stats(args, debug=args.debug_on) 
-
-    rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
+    
+    print(ncar_filepath)
+    rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrfout-wofs/')[1] + '/'
     filename = ncar_filepath.rsplit('/', 1)[1]
     path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
     os.makedirs(path, mode=0o775, exist_ok=True)

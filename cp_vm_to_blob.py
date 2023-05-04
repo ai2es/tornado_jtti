@@ -1,4 +1,4 @@
-import glob, os
+import os, glob, subprocess
 
 
 def cp_vm_to_blob():
@@ -9,13 +9,22 @@ def cp_vm_to_blob():
     blob_path_ncar = "https://wofsdltornado.blob.core.windows.net"
     for file in files:
         rel_path = file.split('/datadrive2')[1]
-        file_blob = os.path.join(blob_path_ncar, rel_path)
-        subprocess.run(["azcopy",
-                        "copy",
-                        f"{file}",
-                        f"{file_blob}"])
-        if len(files)%20 == 0:
-            file_count += 20
-            print(f"DONE - {file_count} of {len(files)}")
-        os.remove(f"{file}")
+        file_blob = blob_path_ncar + rel_path
+        
+        try:
+            print(["azcopy","copy",f"{file}",f"{file_blob}"])
+            subprocess.run(["azcopy",
+                            "copy",
+                            f"{file}",
+                            f"{file_blob}"],
+                           timeout=60)
+            if len(files)%20 == 0:
+                file_count += 20
+                print(f"______DONE_______ - {file_count} of {len(files)}")
+            os.remove(f"{file}")
+        except:
+            continue
+
+if __name__ == "__main__":
+    cp_vm_to_blob()
 
