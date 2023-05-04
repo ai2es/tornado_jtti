@@ -806,7 +806,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
         os.makedirs(savepath, mode=0o775, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
-        encoding = {var: {"zlib":True, "complevel":4} for var in wofs_like.variables.keys()}
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4} for var in wofs_like.variables.keys()}
         wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"), encoding=encoding)
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
