@@ -615,37 +615,28 @@ def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_ar
 
     if debug: print("Loading model:", model_path)
 
-    model = None
-    if fss_args is None or fss_args == {}:
-        fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0,
-                    'cutoff': 0.5, 'want_hard_discretization': False}
-    fss = make_fractions_skill_score(**fss_args)
-    model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-                                                                'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
-#    if not from_weights:
-#        if fss_args is None or fss_args == {}:
-#            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
-#                        'cutoff': 0.5, 'want_hard_discretization': False}
-#        fss = make_fractions_skill_score(**fss_args)
-#        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-#                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+    if not from_weights:
+        if fss_args is None or fss_args == {}:
+            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+                        'cutoff': 0.5, 'want_hard_discretization': False}
+        fss = make_fractions_skill_score(**fss_args)
+        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
 
-#    else:
-        # TODO: args.hp_path args.hp_idx
+    else:
         # Convert csv to Keras Hyperparameters
-#        df_hps = pd.read_csv(args.hp_path)
-#        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
-#        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
+        df_hps = pd.read_csv(args.hp_path)
+        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
+        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
 
         # Set hyperparameters
-#        hp = HyperParameters()
-#        for k, v in hps_dict.items(): 
-#            hp.Fixed(k, value=v)
+        hp = HyperParameters()
+        for k, v in hps_dict.items(): 
+            hp.Fixed(k, value=v)
 
-        #(32, 32, 12)
-#        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
-#        model = hmodel.build(hp)
-#        model.load_weights(model_path)
+        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
+        model = hmodel.build(hp)
+        model.load_weights(model_path)
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
@@ -815,7 +806,8 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
         os.makedirs(savepath, mode=0o775, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
-        wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"))
+        encoding = {var: {"zlib":True, "complevel":4} for var in wofs_like.variables.keys()}
+        wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"), encoding=encoding)
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         #subprocess.run(["azcopy",
@@ -966,8 +958,7 @@ def wofs_to_preds(ncar_filepath, args):
                               debug=args.debug_on)
     
     # Compute predictions
-    preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on)
-    from_weights = args.load_options is None
+    from_weights = not args.load_options is None
     preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, debug=args.debug_on)
     
     # Combine the predictions, reflectivity and select fields into a single dataset
