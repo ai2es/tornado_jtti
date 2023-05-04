@@ -92,11 +92,13 @@ if __name__ == '__main__':
     with Pool(16, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=40)
-            
+            msg_dict = json.loads(msg.content)
+
             # check to see if message has expired
-            datetime_string = msg["data"][0].split('se=')[1].split('%')[0]
+            datetime_string = msg_dict["data"][0].split('se=')[1].split('%')[0]
             expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
             if expiration_datetime < datetime.datetime.now():
+                print(f"EXPIRED: {msg_dict['jobID']} - {expiration_datetime}")
                 queue_wofs.delete_message(msg)
                 continue
             
@@ -105,8 +107,10 @@ if __name__ == '__main__':
                 time.sleep(10)
                 continue
             
-            msg_dict = json.loads(msg.content)
             rundate = msg_dict["jobId"][7:15]
+            if rundate == "20230504":
+                print(f"NEW-SKIPPING FOR NOW: {msg_dict['jobID']} - {msg_dict['runtime']}")
+                continue
             try:
                 p.starmap_async(process_one_file,
                                 [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
