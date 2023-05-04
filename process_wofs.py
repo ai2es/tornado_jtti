@@ -86,9 +86,20 @@ if __name__ == '__main__':
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
     
-    with Pool(9, maxtasksperchild=1) as p:
+    def result_callback(result):
+        print(result, flush=True)
+    
+    with Pool(16, maxtasksperchild=1) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=40)
+            
+            # check to see if message has expired
+            datetime_string = msg["data"][0].split('se=')[1].split('%')[0]
+            expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
+            if expiration_datetime < datetime.datetime.now():
+                queue_wofs.delete_message(msg)
+                continue
+            
             if msg == None:
                 print('No message: sleeping.')
                 time.sleep(10)
@@ -97,7 +108,9 @@ if __name__ == '__main__':
             msg_dict = json.loads(msg.content)
             rundate = msg_dict["jobId"][7:15]
             try:
-                p.starmap(process_one_file, [(wofs_fp, args) for wofs_fp in msg_dict["data"]])
+                p.starmap_async(process_one_file,
+                                [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
+                                callback=result_callback)
             except Exception as e:
                 print(traceback.format_exc())
                 with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
