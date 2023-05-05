@@ -60,10 +60,10 @@ def parse_args():
     # Preds to msgpk ___________________________________________________
     parser.add_argument('--dir_preds_msgpk', type=str, required=True,
         help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
-    parser.add_argument('--variable', type=str, required=True, 
-        help='Variable to save out from predictions')
-    parser.add_argument('--threshold', type=float, required=True, 
-        help='If probability of tornado is greater than or equal to this threshold value, build tornado tracks')
+    parser.add_argument('--variables', type=list, required=True, 
+        help='List of string variables to save out from predictions')
+    parser.add_argument('--thresholds', type=list, required=True, 
+        help='List of float thresholds')
 
     # If loading model weights and using hyperparameters from_weights
     hyperparams_subparser = parser.add_subparsers(title='model_loading', dest='load_options', 
@@ -81,6 +81,8 @@ def parse_args():
 if __name__ == '__main__':
     
     args = parse_args()
+    print(type(args.variables), type(args.variables[0]), args.variables)
+    print(type(args.thresholds), type(args.thresholds[0]), args.thresholds)
     
     queue_wofs = QueueClient(account_url=args.account_url_wofs,
                              queue_name=args.queue_name_wofs,
@@ -118,7 +120,7 @@ if __name__ == '__main__':
                                          [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
                                          callback=preds_to_msgpk_callback)
                 result = result.get(timeout=None)
-                preds_to_msgpk.preds_to_msgpk(result)
+                preds_to_msgpk.preds_to_msgpk(result, args)
 
             except Exception as e:
                 print(traceback.format_exc())

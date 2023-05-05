@@ -18,8 +18,8 @@ python process_wofs.py  \
 --file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
 --dir_preds_msgpk="wofs-preds-msgpk" \
---variable="ML_PREDICTED_TOR" \
---threshold=0.08  \
+--variables=ML_PREDICTED_TOR \
+--thresholds=0.08  \
 load_weights_hps  \
 --hp_path="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hps.csv"  \
 --hp_idx=1  \
