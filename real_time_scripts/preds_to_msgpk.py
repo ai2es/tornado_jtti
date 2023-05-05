@@ -1,8 +1,7 @@
 import xarray as xr
 import numpy as np
 from scipy.sparse import csr_matrix
-import msgpack
-import os
+import os, glob, msgpack
 
 
 def preds_to_msgpk(paths, args):
@@ -11,9 +10,15 @@ def preds_to_msgpk(paths, args):
         """ Convert variable from xarray dataset to a compressed sparse row matrix using a specified threshold."""
 
         if variable:
-            x = ds[variable].values.reshape(300, 300)
+            ds = ds[variable]
+
+        if len(ds.values.shape) == 2 or len(ds.values.shape) == 3:
+            x = ds.values.reshape(300, 300)
+        elif len(ds.values.shape) == 4:
+            x = ds.values.reshape(ds.values.shape[1], 300, 300)
         else:
-            x = ds.values.reshape(300, 300)        
+            print("WARNING: unknown variable size", len(ds.values.shape), len(ds.values.shape))
+
         data = np.where(x <= thresh, 0, x)
         sparse_data = csr_matrix(data)
         rows, columns = sparse_data.nonzero()
@@ -46,7 +51,7 @@ def preds_to_msgpk(paths, args):
             data = {}
             for i in range(1, 19):
                 mem_f = f.replace("MEM_1", f"MEM_{i}")
-                ds = xr.open_dataset(mem_f)
+                ds = xr.open_dataset(mem_f, decode_times=False, decode_coords=False)
                 sparse_dict = get_sparse_dict(ds, threshold, variable)
                 data[f"MEM_{i}"] = sparse_dict
 

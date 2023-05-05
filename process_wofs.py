@@ -42,8 +42,16 @@ def parse_args():
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
     parser.add_argument('-Z', '--ZH_only', action='store_true',  
         help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', type=str, nargs='+',
+    parser.add_argument('-f', '--fields', nargs='+', type=str,
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
+    
+    # Preds to msgpk ___________________________________________________
+    parser.add_argument('--dir_preds_msgpk', type=str, required=True,
+        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
+    parser.add_argument('-v', '--variables', nargs='+', type=str,
+        help='List of string variables to save out from predictions. Ex use: --variables ML_PREDICTED_TOR REFL_10CM')
+    parser.add_argument('-t', '--thresholds', nargs='+', type=float,
+        help='Space delimited list of float thresholds. Ex use: --thresholds 0.08 0.07')
 
     # Model directories and files
     parser.add_argument('--loc_model', type=str, required=True,
@@ -57,14 +65,6 @@ def parse_args():
     parser.add_argument('-d', '--debug_on', action='store_true',
         help='For testing and debugging. Execute without running models or saving data and display output paths')
     
-    # Preds to msgpk ___________________________________________________
-    parser.add_argument('--dir_preds_msgpk', type=str, required=True,
-        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
-    parser.add_argument('--variables', type=list, required=True, 
-        help='List of string variables to save out from predictions')
-    parser.add_argument('--thresholds', type=list, required=True, 
-        help='List of float thresholds')
-
     # If loading model weights and using hyperparameters from_weights
     hyperparams_subparser = parser.add_subparsers(title='model_loading', dest='load_options', 
         help='optional, additional model loading options')
@@ -81,8 +81,6 @@ def parse_args():
 if __name__ == '__main__':
     
     args = parse_args()
-    print(type(args.variables), type(args.variables[0]), args.variables)
-    print(type(args.thresholds), type(args.thresholds[0]), args.thresholds)
     
     queue_wofs = QueueClient(account_url=args.account_url_wofs,
                              queue_name=args.queue_name_wofs,
@@ -95,7 +93,7 @@ if __name__ == '__main__':
     
     with Pool(16, maxtasksperchild=1) as p:
         while True:
-            msg = queue_wofs.receive_message(visibility_timeout=40)
+            msg = queue_wofs.receive_message(visibility_timeout=60)
 
             # check to see if queue is empty
             if msg == None:

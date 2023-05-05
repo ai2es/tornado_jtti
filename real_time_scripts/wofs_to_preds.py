@@ -790,7 +790,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
                             )
 
     # Include select WoFS fields
-    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'Times', 'UP_HELI_MAX']
+    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'UP_HELI_MAX', 'Times']
     if not args.ZH_only:
         fields += ['U', 'U10', 'V', 'V10']
     if not args.fields is None:
