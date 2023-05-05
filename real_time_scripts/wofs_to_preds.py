@@ -39,6 +39,11 @@ Execution Instructions:
                                                      --write=0
                                                      --debug_on
 """
+
+import tensorflow as tf
+from tensorflow.python.eager import context
+tf.config.threading.set_inter_op_parallelism_threads(2)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 import re, os, sys, glob, argparse, logging, subprocess
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
@@ -50,10 +55,6 @@ from scipy import spatial
 import wrf
 import metpy
 import metpy.calc
-import tensorflow as tf
-from tensorflow.python.eager import context
-tf.config.threading.set_inter_op_parallelism_threads(2)
-tf.config.threading.set_intra_op_parallelism_threads(1)
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 # Working directory expected to be tornado_jtti/
@@ -607,6 +608,7 @@ def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_ar
 
     @return: the predictions as a numpy array
     '''
+
     from tensorflow import keras
     from keras_tuner import HyperParameters
     from scripts_tensorboard.unet_hypermodel import UNetHyperModel
@@ -643,7 +645,7 @@ def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_ar
     ZH_std = float(stats.ZH_std.values)
     X = (wofs.ZH - ZH_mu) / ZH_std
     model.make_predict_function() 
-    preds = model.predict(X)
+    preds = model.predict(X, batch_size=100000)
     tf.keras.backend.clear_session()
 
     return preds
@@ -804,10 +806,11 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
-        os.makedirs(savepath, mode=0o775, exist_ok=True)
+        os.umask(0o002)
+        os.makedirs(savepath, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
         encoding_vars = [k for k in wofs_like_combined.variables.keys() if k not in ["Times", "Time"]]
-        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4.0} for var in encoding_vars}
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4} for var in encoding_vars}
         vm_filepath = savepath + f"{str(fname)}_predictions.nc"
         wofs_like_combined.to_netcdf(vm_filepath, encoding=encoding)
         

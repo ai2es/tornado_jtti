@@ -114,10 +114,10 @@ if __name__ == '__main__':
             
             # begin processing
             try:
-                result = p.starmap_async(process_one_file,
+                result = p.starmap(process_one_file,
                                          [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
-                                         callback=preds_to_msgpk_callback)
-                result = result.get(timeout=None)
+                                         )
+                #result = result.get(timeout=None)
                 preds_to_msgpk.preds_to_msgpk(result, args)
 
             except Exception as e:

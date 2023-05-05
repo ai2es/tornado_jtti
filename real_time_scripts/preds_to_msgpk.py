@@ -28,6 +28,7 @@ def preds_to_msgpk(paths, args):
     
     path_save = paths[0].replace('/2023/', '-msgpk/').rsplit('ENS_MEM_')[0]
     path_save = path_save[:-6] + path_save[-5:]
+    os.umask(0o002)
     os.makedirs(path_save, exist_ok=True)
     datetime = paths[0].rsplit('_predictions.nc')[0].rsplit('/wrfwof_d01_')[1]
     datetime = datetime.replace('-', '').replace('_', '')
