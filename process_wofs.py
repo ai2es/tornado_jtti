@@ -2,7 +2,8 @@ import json, time, argparse, traceback, glob, os, datetime
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from multiprocessing.pool import Pool
 from real_time_scripts import preds_to_msgpk
-
+import warnings
+warnings.filterwarnings("ignore")
 
 def process_one_file(wofs_filepath, args):
     from real_time_scripts import download_file, wofs_to_preds
@@ -91,7 +92,7 @@ if __name__ == '__main__':
         for item in result:
             print(f'DONE with wofs_to_preds for {item}', flush=True)
     
-    with Pool(16, maxtasksperchild=1) as p:
+    with Pool(9) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=60)
 
@@ -118,6 +119,7 @@ if __name__ == '__main__':
                                          [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
                                          )
                 #result = result.get(timeout=None)
+                print(result)
                 preds_to_msgpk.preds_to_msgpk(result, args)
 
             except Exception as e:
@@ -130,5 +132,3 @@ if __name__ == '__main__':
                 file.write(f"{msg.content}\n")
             queue_wofs.delete_message(msg)
 
-        p.close()
-        p.join()

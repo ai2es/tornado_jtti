@@ -13,14 +13,14 @@ def download_file(filepath, args):
 
     os.umask(0o002)
     os.makedirs(path_vm, exist_ok=True)
-    p = subprocess.Popen(["azcopy",
+    p = subprocess.run(["azcopy",
                           "copy",
                           f"{filepath}",
                           f"{path_vm}{filename}"])
-    p_blob = subprocess.Popen(["azcopy",
-                               "copy",
-                               f"{filepath}",
-                               f"{path_blob}{filename}"])
-    p.wait()
+    #p_blob = subprocess.run(["azcopy",
+    #                           "copy",
+    #                      "--log-level", "ERROR",
+    #                           f"{filepath}",
+    #                           f"{path_blob}{filename}"])
     
     return f"{path_vm}{filename}"

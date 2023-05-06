@@ -44,6 +44,10 @@ import tensorflow as tf
 from tensorflow.python.eager import context
 tf.config.threading.set_inter_op_parallelism_threads(2)
 tf.config.threading.set_intra_op_parallelism_threads(1)
+tf.get_logger().setLevel('INFO')
+tf.autograph.set_verbosity(0)
+import logging
+tf.get_logger().setLevel(logging.ERROR)
 import re, os, sys, glob, argparse, logging, subprocess
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
@@ -97,7 +101,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
 
     # Create Dataset
     wofs = None
-    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, decode_coords=False, **kwargs)
+    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, decode_coords=True, **kwargs)
     wofs.attrs['filenamepath'] = filepath
 
     if wofs_datetime is None:
@@ -792,7 +796,7 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
                             )
 
     # Include select WoFS fields
-    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'UP_HELI_MAX', 'Times']
+    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'UP_HELI_MAX', 'Times', 'XTIME']
     if not args.ZH_only:
         fields += ['U', 'U10', 'V', 'V10']
     if not args.fields is None:

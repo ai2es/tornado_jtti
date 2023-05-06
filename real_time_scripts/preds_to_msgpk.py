@@ -41,7 +41,7 @@ def preds_to_msgpk(paths, args):
                                              concat_dim='Time',
                                              combine='nested',
                                              decode_times=False,
-                                             decode_coords=False)[variable])
+                                             decode_coords=True)[variable])
         ds_all = xr.concat(ds_list, dim='member')
         ds_mean = ds_all.mean(dim='member').load()
         ds_median = ds_all.median(dim='member').load()
@@ -52,7 +52,7 @@ def preds_to_msgpk(paths, args):
             data = {}
             for i in range(1, 19):
                 mem_f = f.replace("MEM_1", f"MEM_{i}")
-                ds = xr.open_dataset(mem_f, decode_times=False, decode_coords=False)
+                ds = xr.open_dataset(mem_f, decode_times=False, decode_coords=True)
                 sparse_dict = get_sparse_dict(ds, threshold, variable)
                 data[f"MEM_{i}"] = sparse_dict
 
