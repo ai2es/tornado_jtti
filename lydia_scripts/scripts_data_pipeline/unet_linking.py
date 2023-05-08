@@ -87,7 +87,7 @@ def main():
     # Find all available days that we have data for
     all_gridrad_dirs = glob.glob(final_tracking_directory + '/*/*')
     all_gridrad_dirs.sort()
-    print("all_gridrad_dirs.sort()", all_gridrad_dirs[:10])
+    print("all_gridrad_dirs.sort()", all_gridrad_dirs[:5], "...", all_gridrad_dirs[-5:])
 
     # Find day corresponding to index_primer
     ndirs = len(all_gridrad_dirs)
@@ -249,7 +249,7 @@ def main():
     rad_files = glob.glob(rad_dir + '*')
     rad_files.sort()
 
-    yrs_pattern = "(2013|2014|2015|2016)"
+    yrs_pattern = "(2013|2014|2015|2016|2017|2018)"
     for i in range(len(rad_files)):
         # Only perform for specified years
         MATCH = re.search(yrs_pattern, rad_files[i])
@@ -267,7 +267,7 @@ def main():
         
         #load the corresponding dataframes
         df_labeled  = pd.read_csv(labeled_storm_dataframe_path + this_dtime.strftime('%Y/%Y%m%d/labeled_storms_%Y%m%d_') + '05_min_10_km.csv')
-        df_labeled  = df_labeled.set_index('date')
+        df_labeled = df_labeled.set_index('date')
         
         #We need to collect the data and metadata - make empty lists for this data
         storm_mask_dss = []
@@ -345,7 +345,7 @@ def main():
                     #increment the number of EF0 and EF1 pixels
                     tornadic_pixels_EF0_EF1 = tornadic_pixels_EF0_EF1 + r.shape[0]
                     #label them 1 
-                    storm_mask[r,c] = 1
+                    storm_mask[r, c] = 1
                 else:
                     #increment the number of EF2+ tornadoes
                     num_EF2_EF5_storms = num_EF2_EF5_storms + 1
