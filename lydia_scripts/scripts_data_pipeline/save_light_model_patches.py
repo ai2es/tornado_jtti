@@ -25,6 +25,10 @@ def get_arguments():
         '--output_path', type=str, required=True,
         help=OUTPUT_PATH_HELP_STRING)
         
+    INPUT_ARG_PARSER.add_argument(
+        '--dry_run', action='store_true',
+        help="For testing to verify input and output paths")
+        
     #Pull out all of the input strings from the .sh file
     args = INPUT_ARG_PARSER.parse_args()
     #Index primer indicates the day of data that we are looking at in this particuar run of this code
@@ -32,6 +36,8 @@ def get_arguments():
     input_xarray_path = getattr(args, 'input_xarray_path')
     global output_path
     output_path = getattr(args, 'output_path')
+    global dry_run
+    dry_run = getattr(args, 'dry_run')
 
 
 def transfer_patch(patches_file):
@@ -40,25 +46,38 @@ def transfer_patch(patches_file):
     path_length = len(input_xarray_path)  
 
     # Make the output directory structure
-    if not os.path.exists(output_path + patches_file[path_length:path_length+4]):
+    outpath = output_path + patches_file[path_length:path_length+4]
+    print(f"Making dir outpath={outpath} [dry_run={dry_run}]")
+    if not os.path.exists(outpath):
         try:
-            os.mkdir(output_path + patches_file[path_length:path_length+4])
-        except:
-            pass
-    if not os.path.exists(output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13]):
+            #os.mkdir(output_path + patches_file[path_length:path_length+4])
+            if not dry_run:
+                print(f"Making directory {outpath} [dry_run={dry_run}]")
+                os.mkdir(outpath)
+        except Exception as err:
+            print(err)
+
+    outpath2 = output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13]
+    print(f"Making dir outpath2={outpath2} [dry_run={dry_run}]")
+    if not os.path.exists(outpath2):
         try:
-            os.mkdir(output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13])
-        except:
-            pass
+            #os.mkdir(output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13])
+            if not dry_run:
+                print(f"Making directory {outpath2} [dry_run={dry_run}]")
+                os.mkdir(outpath2)
+        except Exception as err:
+            print(err)
             
     # We want to save out the patches based on their file type
     if '_nontor_' in patches_file:
         
         # Transfer only if the "light" file doesn't exists
-        if not os.path.exists(output_path + patches_file[path_length:]):
+        ds_fname = output_path + patches_file[path_length:]
+        print(f"nontor outfile={ds_fname}\n")
+        if not os.path.exists(ds_fname):
 
             # Keep only convective patches
-            ds = xr.open_dataset(patches_file)
+            ds = xr.load_dataset(patches_file) #xr.open_dataset(patches_file)
             ds = ds.where(ds.n_convective_pixels > 0).dropna(dim='patch')
             
             # Select 50 random patches from all the convective patches
@@ -69,8 +88,13 @@ def transfer_patch(patches_file):
             ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
 
             # Save and close the dataset
-            ds.to_netcdf(output_path + patches_file[path_length:])
-            ds.close()
+            #ds_fname = output_path + patches_file[path_length:]
+            if dry_run: 
+                print(f"[nontor] ds to save = {ds_fname} [dry_run={dry_run}]")
+            else:
+                print(f"[nontor] Saving xr.DS {ds_fname} [dry_run={dry_run}]")
+                ds.to_netcdf(ds_fname)
+            #ds.close()
             del ds
             return
         
@@ -78,10 +102,12 @@ def transfer_patch(patches_file):
     elif 'tor_' in patches_file:
         
         # If the "light" file doesn't already exist
-        if not os.path.exists(output_path + patches_file[path_length:]):
+        ds_fname = output_path + patches_file[path_length:]
+        print(f"tor outfile={ds_fname}\n")
+        if not os.path.exists(ds_fname):
 
             # Open the dataset
-            ds = xr.open_dataset(patches_file)
+            ds = xr.load_dataset(patches_file) #xr.open_dataset(patches_file)
             
             # Select a random 50 patches from the hour of data
             random_idxs = list(np.random.randint(low=0, high=ds.patch.values.shape[0], size=50))
@@ -91,8 +117,13 @@ def transfer_patch(patches_file):
             ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
 
             # Save and close the dataset
-            ds.to_netcdf(output_path + patches_file[path_length:])
-            ds.close()
+            if dry_run: 
+                print(f"[tor] ds to save = {ds_fname} [dry_run={dry_run}]")
+            else:
+                print(f"[tor] Saving xr.DS {ds_fname} [dry_run={dry_run}]")
+                #ds.to_netcdf(output_path + patches_file[path_length:])
+                ds.to_netcdf(ds_fname)
+            #ds.close()
             del ds
             
             return
@@ -104,17 +135,24 @@ def transfer_patch(patches_file):
         if 'natural' in patches_file:
 
             # Transfer the data if it hasn't been done already
-            if not os.path.exists(output_path + patches_file[path_length:]):
+            ds_fname = output_path + patches_file[path_length:]
+            print(f"val natural outfile={ds_fname}\n")
+            if not os.path.exists(ds_fname):
 
                 # Open the dataset
-                ds = xr.open_dataset(patches_file)
+                ds = xr.load_dataset(patches_file) #xr.open_dataset(patches_file)
 
                 # Select the vertical levels we want for the ML model
                 ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
 
                 # Save and close dataset
-                ds.to_netcdf(output_path + patches_file[path_length:])
-                ds.close()
+                if dry_run: 
+                    print(f"[val natural] ds to save = {ds_fname} [dry_run={dry_run}]")
+                else:
+                    print(f"[val natural] Saving xr.DS {ds_fname} [dry_run={dry_run}]")
+                    #ds.to_netcdf(output_path + patches_file[path_length:])
+                    ds.to_netcdf(ds_fname)
+                #ds.close()
                 del ds
                 
                 return
@@ -123,7 +161,9 @@ def transfer_patch(patches_file):
         else:
 
             # Transfer if the data hasn't been transfered already
-            if not os.path.exists(output_path + patches_file[path_length:]):
+            ds_fname = output_path + patches_file[path_length:]
+            print(f"val 50/50 outfile={ds_fname}\n")
+            if not os.path.exists(ds_fname):
 
                 # Open the file
                 ds = xr.open_dataset(patches_file)
@@ -132,20 +172,31 @@ def transfer_patch(patches_file):
                 ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
 
                 # Save out the data
-                ds.to_netcdf(output_path + patches_file[path_length:])
+                if dry_run:
+                    print(f"[val 50/50] ds to save = {ds_fname} [dry_run={dry_run}]")
+                else:
+                    print(f"[val 50/50] Saving xr.DS {ds_fname} [dry_run={dry_run}]")
+                    #ds.to_netcdf(output_path + patches_file[path_length:])
+                    ds.to_netcdf(ds_fname)
                 
                 # If there is not also a super light version of this validation file, make one
-                if not os.path.exists(output_path + 'light_' + patches_file[path_length + 1:]):
+                ds_light_dir = output_path + 'light_' + patches_file[path_length + 1:]
+                if not os.path.exists(ds_light_dir):
                     
                     # Select 50 random patches from the file
                     random_idxs = list(np.random.randint(low=0, high=ds.patch.values.shape[0], size=50))
                     ds = ds.isel(patch=random_idxs)
                     
                     # Save the dataset
-                    ds.to_netcdf(output_path + patches_file[path_length:path_length+13] + '/light_' + patches_file[path_length+14:])
+                    light_fname = output_path + patches_file[path_length:path_length+13] + '/light_' + patches_file[path_length+14:]
+                    if dry_run:
+                        print(f"[val 50/50 light] ds to save = {light_fname} [dry_run={dry_run}]")
+                    else:
+                        print(f"[val 50/50 light] Saving xr.DS {light_fname} [dry_run={dry_run}]")
+                        ds.to_netcdf(light_fname)
                 
                 # Close the dataset
-                ds.close()
+                #ds.close()
                 del ds
                 return
                     
@@ -163,8 +214,13 @@ def transfer_patch(patches_file):
                 ds = ds.isel(patch=random_idxs)
                 
                 # Save and close the dataset
-                ds.to_netcdf(output_path + patches_file[path_length:path_length+13] + '/light_' + patches_file[path_length+14:])
-                ds.close()
+                light_fname = output_path + patches_file[path_length:path_length+13] + '/light_' + patches_file[path_length+14:]
+                if dry_run:
+                    print(f"[val 50/50 light2] ds to save = {light_fname} [dry_run={dry_run}]")
+                else:
+                    print(f"[val 50/50 light2] Saving xr.DS {light_fname} [dry_run={dry_run}]")
+                    ds.to_netcdf(light_fname)
+                #ds.close()
                 del ds
                 return
 
@@ -183,10 +239,14 @@ def main():
     # Find the filepaths for all the patches we want to reduce
     all_patches = glob.glob(input_xarray_path + '*/*/*.nc')
     all_patches.sort()
+    print(input_xarray_path + '*/*/*.nc')
+    print(len(all_patches), all_patches)
+    print(" ")
 
     # Transfer patches in parallel
     with mp.Pool(processes=20) as p:
-        tqdm.tqdm(p.map(transfer_patch, all_patches), total=len(all_patches))
+        #tqdm.tqdm(p.map(transfer_patch, all_patches), total=len(all_patches))
+        p.map(transfer_patch, all_patches[:10])
 
 
 

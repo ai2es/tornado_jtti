@@ -47,6 +47,8 @@ import xarray as xr
 print("xr version", xr.__version__)
 import numpy as np
 print("np version", np.__version__)
+import pandas as pd
+print("pd version", pd.__version__)
 #import netCDF4
 #print("netCDF4 version", netCDF4.__version__)
 from netCDF4 import Dataset, date2num, num2date
@@ -66,14 +68,18 @@ import tensorflow as tf
 print("tensorflow version", tf.__version__)
 from tensorflow import keras
 print("keras version", keras.__version__)
+from keras_tuner import HyperParameters
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
 from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
-sys.path.append("process_monitoring")
-from process_monitor import ProcessMonitor
+#sys.path.append("../keras-unet-collection")
+#from keras_unet_collection import models
+from scripts_tensorboard.unet_hypermodel import UNetHyperModel
+#sys.path.append("process_monitoring")
+#from process_monitor import ProcessMonitor
 print(" ")
 import gc
 gc.collect()
@@ -118,8 +124,8 @@ def create_argsparser(args_list=None):
         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
+    parser.add_argument('-Z', '--ZH_only', action='store_true',  
+        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
     parser.add_argument('-f', '--fields', type=str, nargs='+', #type=list,
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
 
@@ -128,6 +134,17 @@ def create_argsparser(args_list=None):
         help='Trained model directory or file path (i.e. file descriptor)')
     parser.add_argument('--file_trainset_stats', type=str, required=True,
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
+    # If loading model weights and using hyperparameters from_weights
+    hyperparmas_sparsers = parser.add_subparsers(title='model_loading', dest='load_options', 
+        help='optional, additional model loading options')
+    hp_parsers = hyperparmas_sparsers.add_parser('load_weights_hps', #aliases=['hyper'], 
+        help='Specifiy details to load model weights and UNetHyperModel hyperparameters')
+    #hp_parsers.add_argument('--from_weights', action='store_true',
+    #    help='Boolean whether to load the model as weights')
+    hp_parsers.add_argument('--hp_path', type=str, required=True,
+        help='Path to the csv containing the top hyperparameters')
+    hp_parsers.add_argument('--hp_idx', type=int, default=0,
+        help='Index indicating the row to use within the csv of the top hyperparameters')
 
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
@@ -335,36 +352,42 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     # Get wofs heights
     height = wrf.getvar(wrfin, "height_agl", units='m')
 
-    # Get reflectivity, and U and V winds
+    # Get reflectivity
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    #if not ZH_only:
-    U = wrf.g_wind.get_u_destag(wrfin)
-    V = wrf.g_wind.get_v_destag(wrfin)   
     
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    #TODO if not ZH_only:
-    U_agl = wrf.interplevel(U, height, gridrad_heights)
-    V_agl = wrf.interplevel(V, height, gridrad_heights)
-    
-    # Add units to winds to use metpy functions
-    U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    
-    # Define grid spacings (for div and vort)
-    #dx = 3000 * (metpy.units.units.meter) 
-    #dy = 3000 * (metpy.units.units.meter) 
-    dx = wrfin.DX * (metpy.units.units.meter) 
-    dy = wrfin.DY * (metpy.units.units.meter) 
 
-    # Calculate divergence and vorticity
-    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+    div = None
+    vort = None
+    if not args.ZH_only:
+        # Get U and V winds
+        U = wrf.g_wind.get_u_destag(wrfin)
+        V = wrf.g_wind.get_v_destag(wrfin)  
+
+        # Interpolate wofs data to gridrad heights
+        U_agl = wrf.interplevel(U, height, gridrad_heights)
+        V_agl = wrf.interplevel(V, height, gridrad_heights)
+        
+        # Add units to winds to use metpy functions
+        U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        
+        # Define grid spacings (for div and vort)
+        #dx = 3000 * (metpy.units.units.meter) 
+        #dy = 3000 * (metpy.units.units.meter) 
+        dx = wrfin.DX * (metpy.units.units.meter) 
+        dy = wrfin.DY * (metpy.units.units.meter) 
+
+        # Calculate divergence and vorticity
+        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+        
+        # Grab data, remove metpy.units and xarray.Dataset stuff 
+        div = np.asarray(div)
+        vort = np.asarray(vort)
     
-    # Grab data, remove metpy.units and xarray.Dataset stuff 
-    div = np.asarray(div)
-    vort = np.asarray(vort)
     Z_agl = Z_agl.values 
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
@@ -662,7 +685,7 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
 
     return train_stats
 
-def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
+def predict(args, wofs, stats, from_weights=False, eval=False, DB=0, **fss_args):
     '''
     Load the model and perform the predictions.
     TODO: predict on arbitrary set of fields
@@ -673,6 +696,7 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
     @param wofs: data to predict on
     @param stats: data field statistics such as mean and standard deviation of 
             the WoFS fields from the training set data
+    @param from_weigths: boolean flag, whether to load the model from weights
     @param eval: TODO whether to compute evaluation results. only available if
             the true labels are also available
     @param DB: int debug flag to print out additional debug information
@@ -687,12 +711,31 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
 
     if DB: print("Loading model:", model_path)
 
-    if fss_args is None or fss_args == {}:
-        fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
-                    'cutoff': 0.5, 'want_hard_discretization': False}
-    fss = make_fractions_skill_score(**fss_args)
-    model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-                                                'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+    model = None
+    if not from_weights:
+        if fss_args is None or fss_args == {}:
+            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+                        'cutoff': 0.5, 'want_hard_discretization': False}
+        fss = make_fractions_skill_score(**fss_args)
+        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+
+    else:
+        # TODO: args.hp_path args.hp_idx
+        # Convert csv to Keras Hyperparameters
+        df_hps = pd.read_csv(args.hp_path)
+        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
+        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
+
+        # Set hyperparameters
+        hp = HyperParameters()
+        for k, v in hps_dict.items(): 
+            hp.Fixed(k, value=v)
+
+        #(32, 32, 12)
+        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
+        model = hmodel.build(hp)
+        model.load_weights(model_path)
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
@@ -746,13 +789,20 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
         #dims=dims,
         coords=coords
     )
+    _preds = np.zeros((*preds.shape[:-1], 2))
+    # If only the prob of tornado is provided, expand the data
+    if preds.shape[-1] == 1:
+        _p = np.squeeze(preds.copy())
+        _preds[:, :, :, 1] = _p   # probab of tor
+        _preds[:, :, :, 0] = 1 - _p      # probab of no tor
+    else: _preds = preds.copy()
     wofs_preds['predicted_no_tor'] = xr.DataArray(
-        data=preds[:, :, :, 0], #["patch", "x", "y"]
+        data=_preds[:, :, :, 0], #["patch", "x", "y"]
         #dims=wofs.dims,
         coords=coords
     ) 
     wofs_preds['predicted_tor'] = xr.DataArray(
-        data=preds[:, :, :, 1], #["patch", "x", "y"]
+        data=_preds[:, :, :, 1], #["patch", "x", "y"]
         #dims=wofs.dims,
         coords=coords
     )
@@ -1086,7 +1136,9 @@ if __name__ == '__main__':
     args = parse_args()
     DB = args.dry_run
 
-    if DB: print("FIELDS", args.fields, len(args.fields))
+    if DB: 
+        print(args)
+        print("FIELDS", args.fields, len(args.fields))
 
     wofs_files = []
     if os.path.isfile(args.loc_wofs):
@@ -1094,7 +1146,7 @@ if __name__ == '__main__':
     #TODO elif os.path.isdir(args.loc_wofs):
     #    wofs_files = os.listdir(args.loc_wofs)
     else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file, but was {args.loc_wofs}")
+        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should be a file, but was {args.loc_wofs}")
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
@@ -1123,7 +1175,8 @@ if __name__ == '__main__':
     train_stats = load_trainset_stats(args, DB=DB)
 
     # Compute predictions
-    preds = predict(args, wofs_gridrad, train_stats, DB=DB) #, **fss_args)
+    from_weights = not args.load_options is None
+    preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, DB=DB) #, **fss_args)
 
     # TODO: optional display/output performance
 
@@ -1199,16 +1252,17 @@ if __name__ == '__main__':
 
 
         # predictions GRIDRAD GRID
+        pred_max = np.max(preds_wofsgrid.ML_PREDICTED_TOR[0])
         fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
         plot_pcolormesh(args, preds_gridrad_stitched.predicted_tor[0], fname, 
                         title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
+                        cmap="cividis", vmin=0, vmax=pred_max, dpi=250, figsize=(10, 9)) #1
 
         # predictions WOFS GRID
         fname = os.path.basename(wofs_files) + f'__predictions.png'
         plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
                         title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
+                        cmap="cividis", vmin=0, vmax=pred_max, dpi=250, figsize=(10, 9))
 
 
         npatches = wofs_combo.ZH_composite.values.shape[0]

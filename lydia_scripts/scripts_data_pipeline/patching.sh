@@ -4,18 +4,18 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
 #SBATCH --mem=10G
-#SBATCH --time=1:00:00
-#SBATCH --job-name=testing__patching
+#SBATCH --time=12:30:00
+#SBATCH --job-name=run__patching
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
-#SBATCH --array=1
+#SBATCH --array=2-213%20
 ##SBATCH --array=1-262%20
+###Total days in 2013 = 119 ### 262 total files
 ###############################################################
 
-###Total days in 2013 = 119 ### 262 total files
 
 # Source conda env
 #source /home/lydiaks2/.bashrc
@@ -34,5 +34,5 @@ python -u lydia_scripts/scripts_data_pipeline/patching.py \
 --input_storm_mask_dir_name="/ourdisk/hpc/ai2es/tornado/storm_mask_unet_V2/" \
 --output_patch_dir_name="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D/" \
 --patch_size=32 \
---n_patches=100 \
---dry_run
+--n_patches=150
+#--dry_run

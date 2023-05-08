@@ -2,7 +2,7 @@
 author: Monique Shotande 
 Functions based on those provided by Lydia
 
-End to end script takes as input the raw WoFS (Warn on Forecast System) data,
+End to end script takes as input the raw WoFS (warn on Forecast System) data,
 and outputs the predictions in the WoFS grid.
 
 General Procedure:
@@ -11,7 +11,7 @@ General Procedure:
 3. construct patches (dependent on patch size)
 4. load ML model
 5. make predictions
-6. interpolate predictions to WoFS grid
+6. interpolate back to WoFS grid
 
 Execution Instructions:
     Conda environment requires are in the environment.yml
@@ -32,114 +32,42 @@ Execution Instructions:
                                                      (--filename_prefix)
                                                      --dir_preds
                                                      (--dir_patches)
-                                                     (--dir_figs)
                                                      --with_nans 
                                                      (--fields)
                                                      --loc_model
                                                      --file_trainset_stats
                                                      --write=0
-                                                     --dry_run
+                                                     --debug_on
 """
-import re, os, sys, glob, argparse
+
+import tensorflow as tf
+from tensorflow.python.eager import context
+tf.config.threading.set_inter_op_parallelism_threads(2)
+tf.config.threading.set_intra_op_parallelism_threads(1)
+tf.get_logger().setLevel('INFO')
+tf.autograph.set_verbosity(0)
+import logging
+tf.get_logger().setLevel(logging.ERROR)
+import re, os, sys, glob, argparse, logging, subprocess
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
 import xarray as xr
-print("xr version", xr.__version__)
 import numpy as np
-print("np version", np.__version__)
+import pandas as pd
 from netCDF4 import Dataset, date2num, num2date
 from scipy import spatial
 import wrf
-print("wrf-python version", wrf.__version__)
 import metpy
 import metpy.calc
-
-import matplotlib.pyplot as plt
-
-import tensorflow as tf
-print("tensorflow version", tf.__version__)
-from tensorflow import keras
-print("keras version", keras.__version__)
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
-print(" ")
+from scripts_data_pipeline.wofs_to_gridrad_idw_azure import calculate_output_lats_lons
 import gc
 gc.collect()
-
-
-def create_argsparser(args_list=None):
-    ''' 
-    Create command line arguments parser
-
-    @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing.
-            Element at index 0 should either be the empty string or the name of
-            the python script
-
-    @return: the argument parser object
-    '''
-    if not args_list is None:
-        sys.argv = args_list
-        
-    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from WoFS data', epilog='AI2ES')
-
-    # WoFS file(s) path 
-    parser.add_argument('--loc_wofs', type=str, required=True, 
-        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
-
-    parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
-        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
-    parser.add_argument('--filename_prefix', type=str, 
-        help='Prefix used in the WoFS file name')
-
-    parser.add_argument('--dir_preds', type=str, required=True, 
-        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
-    parser.add_argument('--dir_patches', type=str,  
-        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
-    parser.add_argument('--dir_figs', type=str,  
-        help='Top level directory to save any corresponding figures.')
-    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,),
-        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
-    parser.add_argument('--with_nans', action='store_true', 
-        help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity and updraft data, excluding divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', type=list,
-        help='List of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction.')
-
-    # Model directories and files
-    parser.add_argument('--loc_model', type=str, required=True,
-        help='Trained model directory or file path (i.e. file descriptor)')
-    parser.add_argument('--file_trainset_stats', type=str, required=True,
-        help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
-
-    parser.add_argument('-w', '--write', type=int, default=0,
-        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
-    parser.add_argument('-d', '--dry_run', action='store_true',
-        help='For testing and debugging. Execute without displaying output paths')
-
-    return parser
-
-def parse_args(args_list=None):
-    '''
-    Create and parse the command line args parser
-
-    @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing.
-            Element at index 0 should either be the empty string or the name of
-            the python script
-
-    @return: the parsed arguments object
-    '''
-    parser = create_argsparser(args_list=args_list)
-    args = parser.parse_args()
-    return args
 
 
 """
@@ -148,7 +76,7 @@ WoFS to GridRad interpolation methods, refactored from lydia_scripts/scripts_dat
 def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None, 
                    datetime_format='%Y-%m-%d_%H:%M:%S', 
                    seconds_since='seconds since 2001-01-01', 
-                   engine='netcdf4', DB=0, **kwargs):
+                   engine='netcdf4', debug=0, **kwargs):
     ''' 
     Load the raw WoFS file as xarray dataset and netcdf dataset
 
@@ -164,24 +92,23 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
             documentation for more information
     @param engine: Engine to use when reading file. see documentation for xarray 
             Dataset
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
     @param kwargs: any additional desired parameters to xarray.open_dataset(...)
     
     @return: tuple with xarray Dataset and netCDF4 Dataset
     '''
-    if DB: print(f"Loading {filepath}")
+    if debug: print(f"Loading {filepath}")
 
     # Create Dataset
     wofs = None
-    wofs = xr.open_dataset(filepath, engine=engine, **kwargs).load()
-    wofs.close()
+    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, decode_coords=True, **kwargs)
     wofs.attrs['filenamepath'] = filepath
 
     if wofs_datetime is None:
         wofs_datetime = wofs.Times.data[0].decode('ascii') # decode from binary string to text string
     _datetime, dt_int, dt_str = get_wofs_datetime(filepath, filename_prefix=filename_prefix, 
                                                 wofs_datetime=wofs_datetime, seconds_since=seconds_since, 
-                                                datetime_format=datetime_format, DB=DB)
+                                                datetime_format=datetime_format, debug=debug)
     wofs = wofs.reindex(Time=[dt_int])
     wofs.attrs['FORECAST_DATETIME'] = dt_str
     
@@ -190,7 +117,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
     return wofs, wofs_netcdf
 
 def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4',
-                   seconds_since='seconds since 2001-01-01', DB=0, **kwargs):
+                   seconds_since='seconds since 2001-01-01', debug=0, **kwargs):
     ''' TODO: maybe. stretch
     (not implemented) Load multiple WoFS files
     '''
@@ -201,7 +128,7 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
         wofs_datetime = wofs.Times.data[f]
         _datetime, dt_int, dt_str = get_wofs_datetime(filepath, filename_prefix=filename_prefix, 
                                                 wofs_datetime=wofs_datetime, seconds_since=seconds_since, 
-                                                datetime_format=datetime_format, DB=DB)
+                                                datetime_format=datetime_format, debug=debug)
         wofs = wofs.reindex(Time=[dt_int])
         wofs_netcdf = Dataset(filepath)
 
@@ -209,7 +136,7 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
     pass
 
 def create_wofs_time(year, month, day, hour, min, sec, 
-                     seconds_since='seconds since 2001-01-01', DB=0):
+                     seconds_since='seconds since 2001-01-01', debug=0):
     ''' 
     Create corresponding datatime object and return the date in GridRad time 
     seconds since
@@ -223,18 +150,18 @@ def create_wofs_time(year, month, day, hour, min, sec,
     @param seconds_since: string of the form since describing the time units. 
             can be days, hours, minutes, seconds, milliseconds or microseconds. 
             see netcdf4.date2num() documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: the WoFS datetime as a np.datetime int
     '''
     dtime = datetime.datetime(year, month, day, hour, min, sec)
     dtime = date2num(dtime, seconds_since)
-    if DB: print(f"WoFS time: {dtime}")
+    if debug: print(f"WoFS time: {dtime}")
     return dtime 
 
 def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None, 
                       datetime_format='%Y-%m-%d_%H:%M:%S', 
-                      seconds_since='seconds since 2001-01-01', DB=0):
+                      seconds_since='seconds since 2001-01-01', debug=0):
     ''' 
     Construct a datetime object for the raw WoFS file name. Raw WoFS file names 
     are of the form: wrfwof_d01_2019-05-18_07:35:00 ('YYYY-MM-DD_hh:mm:ss'). 
@@ -253,7 +180,7 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     @param seconds_since: string of the form since describing the time units. 
             can be days, hours, minutes, seconds, milliseconds or microseconds. 
             see netcdf4.date2num() documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: a 3-tuple with the datetime object, the datetime int 
             since seconds_since and the formatted datetime string for the WoFS 
@@ -265,25 +192,25 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     if not filename_prefix is None:
         fname = fname.replace(filename_prefix, '')
         wofs_datetime, _ = parse_date(fname, fuzzy_with_tokens=True)
-        if DB: print(f"Extracted {wofs_datetime} from file {fnpath}:{fname}")
+        if debug: print(f"Extracted {wofs_datetime} from file {fnpath}:{fname}")
 
     datetime_obj = wofs_datetime
     if not isinstance(datetime_obj, datetime):
         # Convert datetime string to datetime object
-        datetime_obj = datetime.strptime(wofs_datetime, datetime_fmt)
-        if DB: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
+        datetime_obj = datetime.strptime(wofs_datetime, datetime_format)
+        if debug: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
 
     # Convert datetime object to np.datetime int
     datetime_int = date2num(datetime_obj, seconds_since)
-    if DB: print(f"Extracted datetime int in {seconds_since}:: {datetime_int} from file {fnpath}({fname})")
+    if debug: print(f"Extracted datetime int in {seconds_since}:: {datetime_int} from file {fnpath}({fname})")
 
     # Convert datetime object to string with the desired format
     datetime_str = datetime_obj.strftime(datetime_format)
-    if DB: print(f"Extracted datetime string:: {datetime_str} from file {fnpath}({fname})\n")
+    if debug: print(f"Extracted datetime string:: {datetime_str} from file {fnpath}({fname})\n")
 
     return datetime_obj, datetime_int, datetime_str
 
-def compute_forecast_window(init_time, forecast_time, DB=0):
+def compute_forecast_window(init_time, forecast_time, debug=0):
     ''' 
     Calculate the forecast window as the time between the WoFS initialization 
     time and the WoFS forecast time.
@@ -291,7 +218,7 @@ def compute_forecast_window(init_time, forecast_time, DB=0):
     @param init_time: string indicating the initialization time of the WoFS 
             simulation.
     @param forecast_time: string indicating the forecast time of the WoFS data
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: integer duration of the forecast window in minutes
     '''
@@ -301,7 +228,7 @@ def compute_forecast_window(init_time, forecast_time, DB=0):
     t1 = time.fromisoformat(forecast_time) 
 
     forecast_window = (t1 - t0).total_seconds() / 60
-    if DB: print(f"Forecast window: {forecast_window} min\n")  
+    if debug: print(f"Forecast window: {forecast_window} min\n")  
 
     return forecast_window
 
@@ -324,36 +251,42 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     # Get wofs heights
     height = wrf.getvar(wrfin, "height_agl", units='m')
 
-    # Get reflectivity, and U and V winds
+    # Get reflectivity
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    #if not ZH_only:
-    U = wrf.g_wind.get_u_destag(wrfin)
-    V = wrf.g_wind.get_v_destag(wrfin)   
     
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    #TODO if not ZH_only:
-    U_agl = wrf.interplevel(U, height, gridrad_heights)
-    V_agl = wrf.interplevel(V, height, gridrad_heights)
-    
-    # Add units to winds to use metpy functions
-    U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    
-    # Define grid spacings (for div and vort)
-    #dx = 3000 * (metpy.units.units.meter) 
-    #dy = 3000 * (metpy.units.units.meter) 
-    dx = wrfin.DX * (metpy.units.units.meter) 
-    dy = wrfin.DY * (metpy.units.units.meter) 
 
-    # Calculate divergence and vorticity
-    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+    div = None
+    vort = None
+    if not args.ZH_only:
+        # Get U and V winds
+        U = wrf.g_wind.get_u_destag(wrfin)
+        V = wrf.g_wind.get_v_destag(wrfin)  
+
+        # Interpolate wofs data to gridrad heights
+        U_agl = wrf.interplevel(U, height, gridrad_heights)
+        V_agl = wrf.interplevel(V, height, gridrad_heights)
+
+        # Add units to winds to use metpy functions
+        U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+
+        # Define grid spacings (for div and vort)
+        #dx = 3000 * (metpy.units.units.meter) 
+        #dy = 3000 * (metpy.units.units.meter) 
+        dx = wrfin.DX * (metpy.units.units.meter) 
+        dy = wrfin.DY * (metpy.units.units.meter) 
+
+        # Calculate divergence and vorticity
+        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+
+        # Grab data, remove metpy.units and xarray.Dataset stuff 
+        div = np.asarray(div)
+        vort = np.asarray(vort)
     
-    # Grab data, remove metpy.units and xarray.Dataset stuff 
-    div = np.asarray(div)
-    vort = np.asarray(vort)
     Z_agl = Z_agl.values 
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
@@ -463,8 +396,8 @@ def make_patches(args, radar, window):
     
     return ds_patches
 
-def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
-               gridrad_heights=np.arange(1, 13, step=1, dtype=int), DB=0):
+def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
+               gridrad_heights=np.arange(1, 13, step=1, dtype=int), debug=0):
     '''
     Convert WoFS data into the GridRad grid. If with_nans is set, change grid points 
     with reflectivity=0 to NaN
@@ -474,19 +407,17 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
                 dir_patches: directory to save patched WoFS data in the GridRad grid
                 write: flag whether to the patched data
                 with_nans: flag whether to set reflectivity values that are 0 to NaN
-                dry_run: 
+                debug_on: flag whether to run in debug mode (null) or not (not null)
     @param wofs: xarray Dataset
     @param wofs_netcdf: netcdf Dataset
     @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
             1 / (gridrad_spacing) degrees
     @param gridrad_heights: 1D array of the elevation levels in the GridRad data. 
             Height values we want to interpolate to
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: xarray Dataset with the interpolated and patched data
     '''
-    DB = args.dry_run
-
     # There is a difference sometimes between the day in the filepath and the day in the filename
     # All filepath dates have '_path' and all filename dates have '_day'
     
@@ -602,23 +533,32 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
     # Calculate forecast window
     datetime_forecast_str = wofs.Times.data[0].decode('ascii') # decode from binary string to regular text string
     datetime_forecast = datetime.fromisoformat(datetime_forecast_str)
-    datetime_init = datetime.fromisoformat(wofs.START_DATE) #datetime.fromisoformat(args.datetime_init) #.strftime(datetime_fmt) #datetime.strptime(args.datetime_init, datetime_fmt)
+    datetime_init = datetime.fromisoformat(wofs.START_DATE)
     forecast_window = (datetime_forecast - datetime_init).seconds / 60
-    if DB: print(f"Forecast window: {forecast_window} min\n")
+    if debug: print(f"Forecast window: {forecast_window} min\n")
 
     # Make patches
     ds_patches = make_patches(args, wofs_regridded, forecast_window)
     #ds_patches['Times'] = wofs.Times
     ds_patches.attrs = wofs.attrs
     
-    if args.write in [2, 4] and not args.dir_patches is None:
+    if args.write in [2, 4] and not os.path.join(args.dir_patches) is None:
         fname = os.path.basename(wofs.filenamepath)
         fname, _ext = os.path.splitext(fname)
         patch_shape = [f'{c:03d}' for c in args.patch_shape]
         patch_shape_str = '_'.join(patch_shape)
-        savepath = os.path.join(args.dir_patches, f'{fname}_patched_{patch_shape_str}.nc')
-        print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
-        ds_patches.to_netcdf(savepath) #, engine='netcdf4'
+        os.makedirs(os.path.join(args.vm_datadrive, args.dir_patches, rel_path), mode=0o775, exist_ok=True)
+        savepath = os.path.join(args.vm_datadrive, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
+        if args.debug_on: print(f"Saving patched WoFS data interpolated to GridRad grid to {savepath}\n")
+        #ds_patches.to_netcdf(savepath)
+        
+        #blobpath = os.path.join(args.blob_path_ncar, args.dir_patches, rel_path, f'{fname}_patched_{patch_shape_str}.nc')
+        #subprocess.run(["azcopy",
+        #                "copy",
+        #                "--log-level=ERROR",
+        #                "--check-length=FALSE",
+        #                f"{savepath}",
+        #                f"{blobpath}"])         
 
     return ds_patches
 
@@ -626,7 +566,7 @@ def to_gridrad(args, wofs, wofs_netcdf, gridrad_spacing=48,
 """
 Tornado prediction methods.
 """
-def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
+def load_trainset_stats(args, engine='netcdf4', debug=0, **kwargs):
     ''' 
     Open args.file_trainset_stats with the mean and std of the training data. These 
     will be used for normalizing the data prior to prediction
@@ -637,21 +577,21 @@ def load_trainset_stats(args, engine='netcdf4', DB=0, **kwargs):
                 fields: list of fields
     @param engine: Engine to use when reading file. see xarray Dataset 
             documentation 
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
     @param kwargs: keyword args for xr.open_dataset()
 
     @return: the dataset with the means and stds of the features
     '''
     fpath = args.file_trainset_stats
 
-    if DB: print("Training meta data used:", fpath)
+    if debug: print("Training meta data used:", fpath)
 
-    train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load() #, cache=False
+    train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load()
     train_stats.close()
 
     return train_stats
 
-def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
+def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_args):
     '''
     Load the model and perform the predictions.
     TODO: predict on arbitrary set of fields
@@ -662,9 +602,10 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
     @param wofs: data to predict on
     @param stats: data field statistics such as mean and standard deviation of 
             the WoFS fields from the training set data
+    @param from_weigths: boolean flag, whether to load the model from weights
     @param eval: TODO whether to compute evaluation results. only available if
             the true labels are also available
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
     @param fss_args: keyword args for make_fractions_skill_score()
             default: {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                         'cutoff': 0.5, 'want_hard_discretization': False}
@@ -672,33 +613,48 @@ def predict(args, wofs, stats, eval=False, DB=0, **fss_args):
     @return: the predictions as a numpy array
     '''
 
+    from tensorflow import keras
+    from keras_tuner import HyperParameters
+    from scripts_tensorboard.unet_hypermodel import UNetHyperModel
+
     model_path = args.loc_model
 
-    if DB: print("Loading model:", model_path)
+    if debug: print("Loading model:", model_path)
 
-    if fss_args is None or fss_args == {}:
-        fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
-                    'cutoff': 0.5, 'want_hard_discretization': False}
-    fss = make_fractions_skill_score(**fss_args)
-    model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-                                                'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+    if not from_weights:
+        if fss_args is None or fss_args == {}:
+            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+                        'cutoff': 0.5, 'want_hard_discretization': False}
+        fss = make_fractions_skill_score(**fss_args)
+        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+
+    else:
+        # Convert csv to Keras Hyperparameters
+        df_hps = pd.read_csv(args.hp_path)
+        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
+        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
+
+        # Set hyperparameters
+        hp = HyperParameters()
+        for k, v in hps_dict.items(): 
+            hp.Fixed(k, value=v)
+
+        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
+        model = hmodel.build(hp)
+        model.load_weights(model_path)
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
     ZH_std = float(stats.ZH_std.values)
     X = (wofs.ZH - ZH_mu) / ZH_std
-
-    # Predict with the data
-    if DB: 
-        print(f"Performing predictions (wofs dims={wofs.dims}) ...")
-        print(f"Performing predictions (wofs coords={wofs.coords}) ...")
-    print(f"Performing predictions (input shape={X.shape}) ...")
-    preds = model.predict(X)
-    #if eval: results = model.evaluate(X, y_test, batch_size=128)
+    model.make_predict_function() 
+    preds = model.predict(X, batch_size=100000)
+    tf.keras.backend.clear_session()
 
     return preds
 
-def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
+def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), debug=0):
     '''
     Combine the fields of interest with true and predicted data into a single Dataset
     Combine the predictions, reflectivity, U, V.
@@ -711,51 +667,59 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
     @param wofs: xarray Dataset with all the wofs data
     @param preds: the predictions from the reflectivity
     @param gridrad_heights: indicies of the vertical levels 
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: xarray dataset with the combined fields and predictions
     '''
+
     fields = ['ZH', 'UH', 'stitched_x', 'stitched_y', 'n_convective_pixels', 
               'n_uh_pixels', 'lat', 'lon', 'time', 'forecast_window']
     if not args.ZH_only:
         fields += ['DIV', 'VOR']
-    if not args.fields is None:
+    '''if not args.fields is None:
         fields += args.fields
-        fields = set(fields)
+        fields = set(fields)'''
     wofs_preds = wofs[fields].copy(deep=True)
 
     dims = dict(wofs.dims)
     coords = dict(wofs.coords)
     coords.pop('z')
-    print(wofs.dims)
-    print(wofs.coords)
 
     wofs_preds['ZH_composite'] = xr.DataArray(
         data=wofs.ZH.values.max(axis=3), #["patch", "x", "y"]
         #dims=dims,
         coords=coords
     )
+    
+    _preds = np.zeros((*preds.shape[:-1], 2))
+    # If only the prob of tornado is provided, expand the data
+    if preds.shape[-1] == 1:
+        _p = np.squeeze(preds.copy())
+        _preds[:, :, :, 1] = _p  # probab of tor
+        _preds[:, :, :, 0] = 1 - _p  # probab of no tor
+    else: _preds = preds.copy()
+    
     wofs_preds['predicted_no_tor'] = xr.DataArray(
-        data=preds[:, :, :, 0], #["patch", "x", "y"]
-        #dims=wofs.dims,
+        data=_preds[:, :, :, 0],
         coords=coords
     ) 
     wofs_preds['predicted_tor'] = xr.DataArray(
-        data=preds[:, :, :, 1], #["patch", "x", "y"]
-        #dims=wofs.dims,
+        data=_preds[:, :, :, 1],
         coords=coords
     )
 
     return wofs_preds
 
-def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
-                 seconds_since='seconds since 2001-01-01', DB=0):
+def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
+                 seconds_since='seconds since 2001-01-01', debug=0):
     '''
     Interpolate the WofS predictions data back into the original WoFS grid
 
     @param args: command line args. see crate_argsparser()
             Relevant arguements:
                 dir_preds: directory to save the WoFS grid predictions
+                ZH_only: flag whether to only include reflectivity
+                fields: list of additional fields to write
                 write: flag whether to write out the predictions
     @param wofs_orig: original WoFS data prior to interpolating to GridRad. Used 
             to obtain the original WoFS grid spacing
@@ -767,7 +731,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: a tuple with stitched WoFS prediction patches (in gridrad system), 
             and the WoFS data as an xarray Dataset in the original WoFS grid 
@@ -776,7 +740,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     # Stitch back together the patches of the predictions
     predictions =  stitch_patches(args, wofs_gridrad, stats, 
                                     gridrad_spacing=gridrad_spacing, 
-                                    seconds_since=seconds_since, DB=DB)
+                                    seconds_since=seconds_since, debug=debug)
     
     # Add the stitched file to the list of stitched files     
     #stitched_preds.append(predictions)
@@ -830,21 +794,41 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
                                             XLONG=(["Time", "south_north", "west_east"], wofs_orig.XLONG.values)),
                             attrs=wofs_orig.attrs
                             )
-    #on_wofsgrid.append(wofs_like)
+
+    # Include select WoFS fields
+    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'UP_HELI_MAX', 'Times', 'XTIME']
+    if not args.ZH_only:
+        fields += ['U', 'U10', 'V', 'V10']
+    if not args.fields is None:
+        fields += args.fields
+        fields = list(set(fields))
+    wofs_fields = wofs_orig[fields].copy(deep=True)
+    wofs_like_combined = xr.merge([wofs_like, wofs_fields])
 
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-        savepath = os.path.join(args.dir_preds, f'{fname}_predictions.nc')
-        print(f"Save WoFS grid predictions to {savepath}\n")
-        wofs_like.to_netcdf(savepath)
-        #wofs_like.to_netcdf(outfile_path + '/wrfwof_d01_%s-%s-%s_%s:%s:00' % (yyyy, mm, dd, hh, minmin))
-    
-    return predictions, wofs_like
+        savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
+        os.umask(0o002)
+        os.makedirs(savepath, exist_ok=True)
+        if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
+        encoding_vars = [k for k in wofs_like_combined.variables.keys() if k not in ["Times", "Time"]]
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":2} for var in encoding_vars}
+        encoding["ML_PREDICTED_TOR"]['least_significant_digit'] = 3
+        vm_filepath = savepath + f"{str(fname)}_predictions.nc"
+        wofs_like_combined.to_netcdf(vm_filepath, encoding=encoding)
+        
+        #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
+        #subprocess.run(["azcopy",
+        #                "copy",
+        #                f"{savepath}",
+        #                f"{blobpath}"])   
+        
+    return predictions, wofs_like_combined, vm_filepath
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
-                   seconds_since='seconds since 2001-01-01', DB=0):
+                   seconds_since='seconds since 2001-01-01', debug=0):
     """ 
     Reconstruct the stitched grid for a single WoFS forecast time
 
@@ -860,7 +844,7 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
             documentation for more information
-    @param DB: int debug flag to print out additional debug information
+    @param debug: int debug flag to print out additional debug information
 
     @return: xarray Dataset of the stitched WoFS patches
     """
@@ -942,270 +926,46 @@ def stitch_patches(args, wofs, stats, gridrad_spacing=48,
     return wofs_stiched
 
 
-"""
-Visualization methods
-"""
-def plot_pcolormesh(args, data, fname, title, cb_label, cmap="Spectral_r", 
-                    vmin=0, vmax=50, dpi=250, figsize=(10, 9)):
-    '''
-    Use matplotlib pcolormesh to plot the data
-
-    @param args: command line args. see create_argsparser()
-            Relevant arguments
-                write
-                dir_preds
-                dir_figs
-    @param data: data to plot
-    @param fname: name of the file with the image extension
-    @param title: figure title
-    @param cb_label: colorbar label
-    @param cmap: color map. See matplotlib for the colormap options
-    @param vmin: color bar min value
-    @param vmax: color bar max value
-    @param dpi: integer for the saved figure resolution as dots per inch
-    @param figsize: as tuple for the figure width and height
-
-    @return: the fig and the axes objects
-    '''
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-    pcmesh = ax.pcolormesh(data, cmap=cmap, vmin=vmin, vmax=vmax)
-    ax.set_aspect('equal', 'box') #.axis('equal') #
-    ax.set_title(title)
-    cb_ = fig.colorbar(pcmesh, ax=ax)
-    cb_.set_label(cb_label, rotation=0)
-
-    if args.write in [3, 4]:
-        dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
-        fpath = os.path.join(dir_figs, fname)
-        print("  Saving", fpath)
-        plt.savefig(fpath, dpi=dpi)
-    plt.close()
-
-    return fig, ax
-
-def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50, 
-               figsize=(10, 9), DB=0, **kwargs):
-    ''' 
-    Create a .gif or movie file of the storm data
-    matplotlib documentation 
-    https://www.c-sharpcorner.com/article/create-animated-gif-using-python-matplotlib/
-
-    @param args: command line args. see create_argsparser()
-            Relevant arguments
-                write
-                dir_preds
-                dir_figs
-    @param wofs: WoFS data 
-    @param suffix: file name suffix to append to the file name
-    @param field0: TODO WoFS field to render in the colormap
-    @param field1: TODO WoFS field to render as contours
-    @param interval: Delay between frames in milliseconds. See matplotlib 
-            FuncAnimation documentation for more information
-    @param figsize: tuple with the width and height of the figure
-    @param DB: int debug flag to print out additional debug information
-    @param kwargs: additional keyword args for the animator
-            repeat: bool, default: True. Whether the animation repeats when the 
-                    sequence of frames is completed.
-            repeat_delay: int, default: 0. The delay in milliseconds between 
-                    consecutive animation runs, if repeat is True.
-    '''
-    from matplotlib.animation import FuncAnimation, PillowWriter
-    #import imageio
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-
-    def draw_storm_frame(pi):
-        '''
-        Draw a patch as a single frame
-        @param pi: patch index (aka draw frame index)
-        '''
-        ax.clear()
-
-        ZH_distr = ax.pcolormesh(wofs.ZH_composite.values[pi], cmap="Spectral_r", vmin=0, vmax=50)
-        if pi == 0: 
-            cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
-            cb_ZH_distr.set_label('dBZ', rotation=0)
-        ax.contour(wofs.predicted_tor.values[pi])
-        ax.set_aspect('equal', 'box') #.axis('equal') #
-        ax.set_title('Composite Reflectivity')
-        ax.text(0, -3, f'patch {pi:03d}')
-
-        fig.canvas.draw() # draw the canvas, cache renderer
-        image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
-        WIDTH, HEIGHT = fig.canvas.get_width_height()
-        image = image.reshape(HEIGHT, WIDTH, 3) # 3 for RGB
-        return image
-
-    #fndir = os.path.join(self.subjcode, self.session)
-    #fnpath = os.path.join(fndir, f"{self.session}_kinematics_movie.gif")
-    fname = os.path.basename(wofs.filenamepath) + f'__{suffix}.gif'
-
-    nframes = wofs['patch'].size
-    animator = FuncAnimation(fig, draw_storm_frame, frames=nframes, 
-                             interval=interval, **kwargs)
-    if args.write in [3, 4]:
-        dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
-        fnpath = os.path.join(dir_figs, fname)
-        print("  Saving", fnpath)
-        #writer = PillowWriter(fps=30)
-        animator.save(fnpath, dpi=250) #, writer=writer)
-
-    return fig, animator
-
-
-if __name__ == '__main__':
-
-    args = parse_args()
-    DB = args.dry_run
-
-    wofs_files = []
-    if os.path.isfile(args.loc_wofs):
-        wofs_files = args.loc_wofs
-    #TODO elif os.path.isdir(args.loc_wofs):
-    #    wofs_files = os.listdir(args.loc_wofs)
-    else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should either be a file, but was {args.loc_wofs}")
+def wofs_to_preds(ncar_filepath, args):
     
-    # Opens all data files into a Dataset
-    print("Open WoFS file(s)", wofs_files)
-
-    #datetime_fmt = '%Y-%m-%d_%H:%M:%S' #YYYY-MM-DD_hh-mm-ss
-    datetime_fmt = args.datetime_format
-    print("Datetime format:", datetime_fmt)
-
+    if args.debug_on: print("NO OF FIELDS: ", len(args.fields))
+    if args.debug_on: print("FIELDS: ", args.fields)
+    if args.debug_on: print(f'\tProcessing {ncar_filepath}')
+    
     SECS_SINCE = 'seconds since 2001-01-01'
-    ds_load_args = {'cache': False}
-    wofs, wofs_netcdf = load_wofs_file(wofs_files, args.filename_prefix, 
-                                       wofs_datetime=None,
-                                       datetime_format=datetime_fmt,
-                                       seconds_since=SECS_SINCE, 
-                                       engine='netcdf4', DB=DB)
-                                       
-    # Interpolate WoFS grid to GridRad grid
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
-    wofs_gridrad = to_gridrad(args, wofs, wofs_netcdf, 
-                              gridrad_spacing=GRIDRAD_SPACING, 
-                              gridrad_heights=GRIDRAD_HEIGHTS, DB=DB)
+    train_stats = load_trainset_stats(args, debug=args.debug_on) 
 
-    # Prepare data for prediction
-    # Load training data statistics
-    train_stats = load_trainset_stats(args, DB=DB)
+    rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
+    filename = ncar_filepath.rsplit('/', 1)[1]
+    path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
+    
+    wofs, wofs_netcdf = load_wofs_file(ncar_filepath,
+                                       wofs_datetime=None,
+                                       datetime_format=args.datetime_format,
+                                       seconds_since=SECS_SINCE,
+                                       engine='netcdf4',
+                                       debug=args.debug_on)
 
+    # Interpolate WoFS grid to GridRad grid
+    wofs_gridrad = to_gridrad(args, rel_path, wofs, wofs_netcdf,
+                              gridrad_spacing=GRIDRAD_SPACING,
+                              gridrad_heights=GRIDRAD_HEIGHTS,
+                              debug=args.debug_on)
+    
     # Compute predictions
-    preds = predict(args, wofs_gridrad, train_stats, DB=DB) #, **fss_args)
-
-    # TODO: optional display/output performance
-
+    from_weights = not args.load_options is None
+    preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, debug=args.debug_on)
+    
     # Combine the predictions, reflectivity and select fields into a single dataset
-    wofs_combo = combine_fields(args, wofs_gridrad, preds, DB=DB)
+    wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
 
     # Interpolate back to WoFS grid
-    preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
-                                           train_stats, gridrad_spacing=GRIDRAD_SPACING, 
-                                           seconds_since=SECS_SINCE, DB=DB)
-
-    '''
-    # Interpolate back to WoFS grid
-    # Predictions for multiple times
-    forecast_times = set(wofs_combo.time.values)
-    stitched_preds = []
-    on_wofsgrid = []
-
-    #Iterate over each forecast time. First stitch patches, then interpolate them  to the WoFS grid
-    for ftime in forecast_times:
-        wofs_orig_instant = wofs_orig.where(wofs_orig.time==ftime, drop=True)
-
-        preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, train_stats, 
-                                           gridrad_spacing=GRIDRAD_SPACING, 
-                                           seconds_since=SECS_SINCE, DB=DB)
-
-        stitched_preds.append(preds_gridrad_stitched)
-        on_wofsgrid.append(preds_wofsgrid)
-
-    # Combine all stitched predictions from each time into a time sorted Dataset
-    ds_stitched_preds = xr.concat(stitched_preds, dim='time')
-    ds_stitched_preds = ds_stitched_preds.sortby('time')
-    ds_stitched_preds.attrs = wofs_orig.attrs
-
-    ds_wofsgrid = xr.concat(on_wofsgrid, dim='Time')
-    ds_wofsgrid = ds_wofsgrid.sortby('Time')
-    ds_wofsgrid.attrs = wofs_orig.attrs
-
-    if args.write in [2, 4]:
-        fname = os.path.basename(wofs_orig.filenamepath)
-        fname, file_extension = os.path.splitext(fname)
-
-        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions_gridrad_stitched.nc')
-        print("Save interpolated file", savepath)
-        ds_stitched_preds.to_netcdf(savepath)
-        
-        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions.nc')
-        print(f"Save interpolated file to {savepath}\n")
-        ds_wofsgrid.to_netcdf(savepath)
-    '''
-
-
-    # Plot data
-    if args.write in [3, 4]:
-        dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
-
-        anim_args = {'repeat': True, 'repeat_delay': 100}
-        create_gif(args, wofs_combo, 'patches_ZH_distr', interval=550, 
-                   figsize=(10, 9), DB=DB, **anim_args)
-        #plt.close()
-
-        # original reflectivity
-        fname = os.path.basename(wofs_files) + f'__ZH_distr.png'
-        plot_pcolormesh(args, wofs.REFL_10CM.values[0, 0], fname, 
-                        title='Reflectivity 10 cm', cb_label='dBZ', 
-                        cmap="Spectral_r", vmin=0, vmax=50, dpi=250, figsize=(10, 9))
-
-        # Reflectivity GRIDRAD
-        fname = os.path.basename(wofs_files) + f'__gridrad_ZH.png'
-        plot_pcolormesh(args, wofs_gridrad.ZH[0,:,:,0], fname, 
-                        title='Reflectivity (GridRad Grid)', cb_label='Reflectivity', 
-                        cmap="Spectral_r", vmin=0, vmax=50, dpi=250, figsize=(10, 9))
-
-
-        # predictions GRIDRAD GRID
-        fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
-        plot_pcolormesh(args, preds_gridrad_stitched.predicted_tor[0], fname, 
-                        title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
-
-        # predictions WOFS GRID
-        fname = os.path.basename(wofs_files) + f'__predictions.png'
-        plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
-                        title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
-
-
-        npatches = wofs_combo.ZH_composite.values.shape[0]
-        for pi in range(0, npatches, 25):
-            fig, ax = plt.subplots(1, 1, figsize=(10, 9))
-            ZH_distr = ax.pcolormesh(wofs_combo.ZH_composite.values[pi], 
-                                     cmap="Spectral_r", vmin=0, vmax=50)
-            ax.contour(wofs_combo.predicted_tor.values[pi])
-            ax.set_aspect('equal', 'box') #.axis('equal') #
-            ax.set_title('Composite Reflectivity')
-            cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
-            cb_ZH_distr.set_label('dBZ', rotation=0)
-
-            fname = os.path.basename(wofs_files) + f'__patch{pi:03d}_ZH_distr.png'
-            fpath = os.path.join(dir_figs, fname)
-            print("  Saving", fpath)
-            plt.savefig(fpath, dpi=250)
-            
-
-            # Predictions heatmap
-            fname = os.path.basename(wofs_files) + f'__patch{pi:03d}_ZH_distr_preds.png'
-            plot_pcolormesh(args, wofs_combo.predicted_tor.values[pi], fname, 
-                            title=f'Prediction (patch {pi:03d})', cb_label='$p_{tor}$', 
-                            cmap="coolwarm", vmin=0, vmax=1, dpi=250, figsize=(10, 9))
-
-    # Close Datasets
-    #wofs_netcdf.close()
-    #ds_stitched.close()
-    #ds_wofs_as_gridrad.close()
-    print(f"PREDICTIONS COMPLETE FOR {wofs_files}.")
+    preds_gridrad_stitched, preds_wofsgrid, vm_filepath = to_wofsgrid(args, rel_path, wofs, wofs_combo,
+                                                                      train_stats, gridrad_spacing=GRIDRAD_SPACING,
+                                                                      seconds_since=SECS_SINCE, debug=args.debug_on)
+    
+    print(f"DONE - {vm_filepath}")
+    os.remove(f"{ncar_filepath}")
+    return vm_filepath

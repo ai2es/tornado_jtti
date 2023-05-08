@@ -21,11 +21,11 @@ import time, datetime
 #from absl import flags
 import argparse
 import numpy as np
-print("np version", np.__version__)
+#print("np version", np.__version__)
 import pandas as pd
-print("pd version", pd.__version__)
+#print("pd version", pd.__version__)
 import xarray as xr 
-print("xr version", xr.__version__)
+#print("xr version", xr.__version__)
 #import scipy
 #print("scipy version", scipy.__version__)
 #import seaborn as sns
@@ -43,14 +43,16 @@ from sklearn.metrics import confusion_matrix, roc_curve, precision_recall_curve
 from sklearn.calibration import calibration_curve
 
 import tensorflow as tf
-print("tensorflow version", tf.__version__)
+#print("tensorflow version", tf.__version__)
 from tensorflow import keras
-print("keras version", keras.__version__)
+#print("keras version", keras.__version__)
 import tensorflow.keras.backend as K
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, ModelCheckpoint 
 from tensorflow.keras.optimizers import Adam #, SGD, RMSprop, Adagrad
 from tensorflow.keras.metrics import AUC
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras import Model
 
 from keras_tuner import HyperModel
 from keras_tuner.tuners import RandomSearch, Hyperband, BayesianOptimization
@@ -221,6 +223,7 @@ class UNetHyperModel(HyperModel):
                 l2 = hp.Choice("l2", values=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6])
 
         # TODO: Dropout??
+        # Single BatchNorm layer after input layer
 
         # Choose the type of unet
         unet_type = hp.Choice("unet_type", values=['unet_2d', 'unet_plus_2d', 'unet_3plus_2d'])
@@ -258,6 +261,12 @@ class UNetHyperModel(HyperModel):
                             l1=l1, l2=l2, weights=None,
                             batch_norm=batch_norm, name='unet3plus')
 
+        # Insert BatchNormalization layer after Input layer
+        if not batch_norm:
+            bn_layer = BatchNormalization()
+            #synchronized=self.distribution_strategy, #set and if this layer is used within a tf.distribute strategy
+            #TODO: model = insert_batchnorm_after_input(model, bn_layer) #, DB=False)
+
         # Optimization
         lr = hp.Choice("learning_rate", values=[1e-3, 1e-4, 1e-5, 1e-6])
         #hp.Float('learning_rate',min_value=1e-4, max_value=1e-2, sampling='LOG', default=1e-3)
@@ -271,6 +280,78 @@ class UNetHyperModel(HyperModel):
         model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
         if self.DB: model.summary()
         return model
+
+def insert_batchnorm_after_input(model, bn_layer, DB=False):
+    '''
+    Insert a BatchNormalization layer after the input layer of an existing 
+    model
+    :param model: the existing Keras model
+    :param bn_layer: BatchNormalization layer
+    '''
+    #bn_layer = BatchNormalization(**bnargs)
+    layers_dict = {layer.name: layer for layer in model.layers}
+    new_layers = {model.layers[0].name: None}
+    layer_outputs = []
+
+    x = model.layers[0]
+    prior_layer_name = ''
+    for i, layer in enumerate(model.layers):
+        if DB:
+            print(f"[{i}] x={x}; ({type(layer)})")
+            print(f"      layer.name={layer.name}; layer={layer}")
+            print(f"      layer.input={type(layer.input)}")
+            print(f"      layer.input={layer.input}")
+            print(f"      layer.output={layer.output}")
+
+        # Insert BN layer after the input layer
+        if i == 0:
+            x = bn_layer(layer.output)
+            new_layers[layer.name] = layer.output
+            new_layers[bn_layer.name] = x
+            layer_outputs.append(x)
+        else: 
+            # Handle layers that also take skip connections as input
+            if isinstance(layer.input, list): # or 'Concatenate' in str(type(layer)):
+                ins = []
+                for j, inp in enumerate(layer.input):
+                    name = layer.input[0].name.split('/')[0]
+                    if DB:
+                        print(f"  {j} {name}")
+                        print(f"  {j} {new_layers[name]}") #=inp
+                        print(f"  inp {inp}")
+                    ins.append(new_layers[name])
+                if DB:
+                    print("  x", x)
+                x = layer(ins)
+            else: 
+                inlayer_name = layer.input.name.split('/')[0]
+                if DB:
+                    print(f"  e {inlayer_name}")
+                    print(f"  e {new_layers[inlayer_name]}")
+
+                if 'Concatenate' in str(type(layer)):
+                    x = [x]
+
+                # Use output of BN layer for layers whose input comes from the Input layer
+                if 'Input' in inlayer_name: # or name != prior_layer:
+                    bn_layer_out = new_layers[bn_layer.name]
+                    x = layer(bn_layer_out)
+                elif inlayer_name == prior_layer_name:
+                    x = layer(x)
+                else:
+                    inp =  new_layers[inlayer_name]
+                    x = layer(inp)
+            
+            new_layers[layer.name] = x
+            layer_outputs.append(x)
+
+        prior_layer_name = layer.name
+
+    new_model = Model(model.layers[0].output, layer_outputs, name=f'{model.name}_bn_after_input')
+    new_model.summary()
+    for k, v in new_layers.items():
+            print(f"{k}: {v}")
+    return new_model
 
 def create_tuner(args, strategy=None, DB=1, **kwargs):
     '''
@@ -885,7 +966,7 @@ def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=1
 
     return fig, ax
 
-def plot_reliabilty_curve(y, y_preds, fname, n_bins=15, strategy='quantile', 
+def plot_reliabilty_curve(y, y_preds, fname, n_bins=18, strategy='quantile', 
                           fig_ax=None, figsize=(10, 10), save=False, dpi=180, 
                           **kwargs):
     '''
@@ -1121,7 +1202,7 @@ def create_argsparser():
     # EarlyStopping
     parser.add_argument('--patience', type=int, default=8, #required=True,
                          help='Number of epochs with no improvement after which training will be stopped. See patience in EarlyStopping')
-    parser.add_argument('--min_delta', type=float, default=2e-4, #required=True,
+    parser.add_argument('--min_delta', type=float, default=1e-3, #required=True,
                          help='Absolute change of less than min_delta will count as no improvement. See min_delta in EarlyStopping')
 
     # TODO: choices? tuned hyperparam
@@ -1138,7 +1219,9 @@ def create_argsparser():
     parser.add_argument('--nogo', action='store_true',
                          help='For testing. Do NOT execute any experiements')
     parser.add_argument('--save', type=int, default=0,
-                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.')
+                         help='Specify data to save. 0 indicates save nothing. >=1 (but not 3) to save best hyperparameters and results in text format. >=2 (but not 3) save figures. 3 to save only the best model trained from the best hyperparameters. 4 to save textual results, figures, and the best model.') 
+    parser.add_argument('--save_weights', action='store_true',
+                         help='If saving the model, boolean flag indicating to save just the weights')
     return parser
 
 def parse_args():
@@ -1194,26 +1277,40 @@ def args2string(args):
 if __name__ == "__main__":
     args = parse_args()
     cdatetime, argstr = args2string(args)
-    #if args.dry_run: print(cdatetime, argstr)
+    if args.dry_run: 
+        print(cdatetime)
+        print(argstr)
 
     # Grab select GPU(s)
-    if args.gpu: 
-        print("Attempting to grab GPU")
-        py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
+    #if args.gpu: 
+    #    print("Attempting to grab GPU")
+    #    py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
 
-        '''
-        #os.get_env'CUDA_VISIBLE_DEVICES'
-        physical_devices = tf.config.get_visible_devices('GPU')
-        n_physical_devices = len(physical_devices)
+    #    '''
+    #    #os.get_env('CUDA_VISIBLE_DEVICES', None)
+    #    physical_devices = tf.config.get_visible_devices('GPU')
+    #    n_physical_devices = len(physical_devices)
 
-        # Ensure all devices used have the same memory growth flag
-        for physical_device in physical_devices:
-            tf.config.experimental.set_memory_growth(physical_device, False)
-        print(f'We have {n_physical_devices} GPUs\n')
-        '''
+    #    # Ensure all devices used have the same memory growth flag
+    #    for physical_device in physical_devices:
+    #        tf.config.experimental.set_memory_growth(physical_device, False)
+    #    print(f'We have {n_physical_devices} GPUs\n')
+    #    '''
 
-    #if args.dry_run: 
     tf.debugging.set_log_device_placement(True)
+
+    if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
+        # Fetch list of allocated logical GPUs; numbered 0, 1, …
+        devices = tf.config.get_visible_devices('GPU')
+        ndevices = len(devices)
+        print(f'We have {ndevices} GPUs\n')
+
+        # Set memory growth for each
+        #for device in devices:
+        #    tf.config.experimental.set_memory_growth(device, True)
+    else:
+        # No allocated GPUs: do not delete this case!                                                                	 
+        tf.config.set_visible_devices([], 'GPU')
 
     print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
 
@@ -1287,7 +1384,7 @@ if __name__ == "__main__":
 
         if args.save >= 3: 
             model_fnpath = os.path.join(dirpath, f"{FN_PREFIX}.h5")
-            hypermodel.save_model(model_fnpath, weights=True, #argstr
+            hypermodel.save_model(model_fnpath, weights=args.save_weights, #argstr
                                   model=model, save_traces=True)
 
         # Predict with trained model
@@ -1297,49 +1394,54 @@ if __name__ == "__main__":
         #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
         #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
         fname = os.path.join(dirpath, f"{FN_PREFIX}_preds_distr.png")
-        plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=(args.save in [2, 4])) #args.save >= 2
-        plt.close()
+        if args.save in [2, 4]:
+            plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=True) #args.save >= 2
+            plt.close()
 
         # Confusion Matrix
         def get_y(x, y):
             ''' Get y from tuple Dataset '''
             return y
+
         y_train = np.concatenate([y for x, y in ds_train]) #ds.map(get_y)
         y_val = np.concatenate([y for x, y in ds_val])
+
         threshs = np.linspace(0, 1, 51).tolist()
         tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs)
         csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
         xi = np.argmax(csis)
         cutoff_probab = threshs[xi] # cutoff with heightest CSI
         print(f"Max CSI: {csis[xi]}  Thres: {cutoff_probab}  Index: {xi}")
-        fname = os.path.join(dirpath, f"{FN_PREFIX}_confusion_matrix_train_val.png")
-        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        axs = axs.ravel()
-        #plt.subplots_adjust(wspace=.1)
-        plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                            p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
-        plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
-                            p=cutoff_probab, fig_ax=(fig, axs[1]), save=(args.save in [2, 4])) #args.save >= 2
-        plt.close(fig)
-        del fig, axs
 
-        # ROC
-        fname = os.path.join(dirpath, f"{FN_PREFIX}_roc_train_val.png")
-        fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                           save=False, label='Train')
-        plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
-                          save=(args.save in [2, 4]), label='Val', c='orange') #args.save >= 2
-        plt.close(fig)
-        del fig, ax
+        if args.save in [2, 4]:
+            fname = os.path.join(dirpath, f"{FN_PREFIX}_confusion_matrix_train_val.png")
+            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+            axs = axs.ravel()
+            #plt.subplots_adjust(wspace=.1)
+            plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                                p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
+            plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
+                                p=cutoff_probab, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
+            plt.close(fig)
+            del fig, axs
 
-        # PRC
-        fname = os.path.join(dirpath, f"{FN_PREFIX}_prc_train_val.png")
-        fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                           save=False, label='Train')
-        plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
-                           save=(args.save in [2, 4]), label='Val', c='orange') #args.save >= 2
-        plt.close(fig)
-        del fig, ax
+            # ROC
+            fname = os.path.join(dirpath, f"{FN_PREFIX}_roc_train_val.png")
+            fig, ax = plot_roc(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                            save=False, label='Train')
+            plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
+                            save=True, label='Val', c='orange') #args.save in [2, 4] #args.save >= 2
+            plt.close(fig)
+            del fig, ax
+
+            # PRC
+            fname = os.path.join(dirpath, f"{FN_PREFIX}_prc_train_val.png")
+            fig, ax = plot_prc(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                            save=False, label='Train')
+            plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
+                            save=True, label='Val', c='orange') #args.save in [2, 4] #args.save >= 2
+            plt.close(fig)
+            del fig, ax
         
         # Evaluate trained model
         print("\nEVALUATION")
@@ -1356,24 +1458,25 @@ if __name__ == "__main__":
             print("Saving", fname)
             df_eval.to_csv(fname)
 
-        # CSI Curve
-        fname = os.path.join(dirpath, f"{FN_PREFIX}_csi_train_val.png")
-        fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                           label='Train', show_cb=False)
-        plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
-                           color='orange', save=(args.save in [2, 4]), fig_ax=(fig, ax)) #args.save >= 2
-        plt.close(fig)
-        del fig, ax
+        if args.save in [2, 4]:
+            # CSI Curve
+            fname = os.path.join(dirpath, f"{FN_PREFIX}_csi_train_val.png")
+            fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                            label='Train', show_cb=False)
+            plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
+                            color='orange', save=True, fig_ax=(fig, ax)) #args.save in [2, 4] #args.save >= 2
+            plt.close(fig)
+            del fig, ax
 
-        # Reliability Curve
-        fname = os.path.join(dirpath, f"{FN_PREFIX}_reliability_train_val.png")
-        fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
-                                    fname, save=False, label='Train')
-        plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
-                                    fig_ax=(fig, ax), save=(args.save in [2, 4]), #args.save >= 2
-                                    label='Val', c='orange')
-        plt.close(fig)
-        del fig, ax
+            # Reliability Curve
+            fname = os.path.join(dirpath, f"{FN_PREFIX}_reliability_train_val.png")
+            fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
+                                        fname, save=False, label='Train')
+            plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
+                                        fig_ax=(fig, ax), save=True, #args.save in [2, 4] #args.save >= 2
+                                        label='Val', c='orange')
+            plt.close(fig)
+            del fig, ax
 
 
         '''
