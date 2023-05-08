@@ -814,7 +814,8 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
         os.makedirs(savepath, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
         encoding_vars = [k for k in wofs_like_combined.variables.keys() if k not in ["Times", "Time"]]
-        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":4} for var in encoding_vars}
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":2} for var in encoding_vars}
+        encoding["ML_PREDICTED_TOR"]['least_significant_digit'] = 3
         vm_filepath = savepath + f"{str(fname)}_predictions.nc"
         wofs_like_combined.to_netcdf(vm_filepath, encoding=encoding)
         

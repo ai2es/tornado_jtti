@@ -21,3 +21,12 @@ dependencies:
   - py3nvml
   - pydot
   - seaborn
+  - matplotlib
+  - scikit-learn
+  - msgpack-python
+  - pip:
+     - git+https://github.com/dopplerchase/keras-unet-collection.git
+     - azure-mgmt-compute
+     - azure-mgmt-storage
+     - azure-storage-blob
+     - azure-storage-queue

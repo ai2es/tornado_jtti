@@ -2,7 +2,7 @@ import xarray as xr
 import numpy as np
 from scipy.sparse import csr_matrix
 import os, glob, msgpack
-
+import subprocess
 
 def preds_to_msgpk(paths, args):
 
@@ -64,7 +64,15 @@ def preds_to_msgpk(paths, args):
             data["MEM_median"] = median_sparse_dict
             se_coords = [ds['XLONG'][0, 0, 0].values.tolist(), ds['XLAT'][0, 0, 0].values.tolist()]
             data['se_coords'] = se_coords
-            with open(os.path.join(path_save, f"wofs_sparse_prob_{datetime}_{variable}.msgpk"), 'wb') as outfile:
+            out_file_path = os.path.join(path_save, f"wofs_sparse_prob_{datetime}_{variable}.msgpk")
+            with open(out_file_path, 'wb') as outfile:
                 packed = msgpack.packb(data)
                 outfile.write(packed)
                 del packed
+            run_date = out_file_path.split("/")[-2]
+            out_file_name = out_file_path.split("/")[-1]
+            subprocess.run(["azcopy",
+                            "copy",
+                            out_file_path,
+                            f"https://wofsdltornado.blob.core.windows.net/wofs-dl-preds/{run_date}/{out_file_name}"])
+
