@@ -20,7 +20,9 @@ def parse_args():
     parser.add_argument('--queue_name_wofs', type=str, required=True,
                         help='WoFS queue name for available files')    
     parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')    
+                        help='NCAR path to storage blob')
+    parser.add_argument('--hours_to_analyze', type=int, required=True,
+                        help='Number of hours to analyze, starting from 0, for each runtime.')
     
     # wofs_to_preds ___________________________________________________
     parser.add_argument('--vm_datadrive', type=str, required=True,
@@ -88,10 +90,18 @@ if __name__ == '__main__':
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
 
+    if args.hours_to_analyze > 3:
+        len_rundatetimes = 11*args.hours_to_analyze*12 + 10*3*12
+    elif args.hours_to_analyze < 4:
+        len_rundatetimes = 21*args.hours_to_analyze*12
+    else:
+        raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
+    
     def preds_to_msgpk_callback(result):
         for item in result:
             print(f'DONE with wofs_to_preds for {item}', flush=True)
     
+    rundatetimes = []
     with Pool(9) as p:
         while True:
             msg = queue_wofs.receive_message(visibility_timeout=60)
@@ -113,12 +123,20 @@ if __name__ == '__main__':
                 queue_wofs.delete_message(msg)
                 continue
             
+            # check to see if message is beyond hours_to_analyze window
+            forecastTime = datetime.datetime.strptime(msg['forecastTime'], '%Y%m%d%H%M')
+            runtime = datetime.datetime.strptime(msg['runtime'], '%Y%m%d%H%M')
+            if (forecastTime - runtime).total_seconds() > args.hours_to_analyze * 60 * 60:
+                print(f"BEYOND hours_to_analyze WINDOW: {msg_dict['jobId']}: {forecastTime} - {runtime}")
+                with open(f"./logs/{rundate}_msgs_beyond_window.txt", 'a') as file:
+                    file.write(f"{msg.content}\n")
+                queue_wofs.delete_message(msg)
+                continue
+            
             # begin processing
             try:
                 result = p.starmap(process_one_file,
-                                         [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
-                                         )
-                #result = result.get(timeout=None)
+                                   [(wofs_fp, args) for wofs_fp in msg_dict["data"]])
                 print(result)
                 preds_to_msgpk.preds_to_msgpk(result, args)
 
@@ -131,4 +149,23 @@ if __name__ == '__main__':
             with open(f"./logs/{rundate}_msgs.txt", 'a') as file:
                 file.write(f"{msg.content}\n")
             queue_wofs.delete_message(msg)
-
+            
+            rundatetime = msg_dict["runtime"]
+            rundatetimes.append(rundatetime)
+            if rundatetime[-4:] == "0300" and len(rundatetimes) == len_rundatetimes:
+                for rdt in list(set(rundatetimes)):
+                    files_msgpk = sorted(glob.glob(f"{args.blob_url_ncar}/{args.dir_preds_msgpk}/{rdt}/**.msgpk"))
+                    files_wrf_wofs_vm = sorted(glob.glob(f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}/ENS_MEM_**/**"))
+                    files_msgpk_len = len(files_msgpk)
+                    files_wrf_wofs_vm_len = len(files_wrf_wofs_vm)
+                    variables_len = len(args.variables)
+                
+                    if files_msgpk_len / variables_len == files_wrf_wofs_vm_len:
+                        subprocess.run(["azcopy",
+                                        "copy",
+                                        "--recursive",
+                                        "--block-blob-tier cool",
+                                        "--check-length=false",
+                                        f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
+                                        f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"]) 
+                        raise
