@@ -3,6 +3,7 @@ from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64D
 from multiprocessing.pool import Pool
 from real_time_scripts import preds_to_msgpk
 import warnings
+import logging
 warnings.filterwarnings("ignore")
 
 def process_one_file(wofs_filepath, args):
@@ -94,11 +95,18 @@ if __name__ == '__main__':
     
     with Pool(9) as p:
         while True:
+            #properties = queue_wofs.get_queue_properties()
+            #count = properties.approximate_message_count
+            #logging.info("Message count: " + str(count))
+            #if count == 0:
+            #    logging.info("No messages: sleeping")
+            #    time.sleep(10)
+            #    continue
             msg = queue_wofs.receive_message(visibility_timeout=60)
 
             # check to see if queue is empty
             if msg == None:
-                print('No message: sleeping.')
+                logging.info('No message: sleeping.')
                 time.sleep(10)
                 continue
 
@@ -109,7 +117,7 @@ if __name__ == '__main__':
             datetime_string = msg_dict["data"][0].split('se=')[1].split('%')[0]
             expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
             if expiration_datetime < datetime.datetime.now():
-                print(f"EXPIRED: {msg_dict['jobId']} - {expiration_datetime}")
+                logging.info(f"EXPIRED: {msg_dict['jobId']} - {expiration_datetime}")
                 queue_wofs.delete_message(msg)
                 continue
             
@@ -119,7 +127,6 @@ if __name__ == '__main__':
                                          [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
                                          )
                 #result = result.get(timeout=None)
-                print(result)
                 preds_to_msgpk.preds_to_msgpk(result, args)
 
             except Exception as e:
