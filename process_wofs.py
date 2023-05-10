@@ -178,10 +178,15 @@ if __name__ == '__main__':
             rundatetime = msg_dict["runtime"]
             if rundatetime in list(rundatetimes_dict.keys()):
                 rundatetimes_dict[rundatetime] += 1
-                if rundatetimes_dict[rundatetime] == 18:
+                if rundatetime[-2:] == "00":
+                    rundatetime_len = args.hours_to_analyze * 12
+                elif rundatetime[-2:] == "30":
+                    rundatetime_len = min(3, args.hours_to_analyze) * 12
+                if rundatetimes_dict[rundatetime] == rundatetime_len:
                     append_to_available_dates_csv(rundatetime, args)
             else:
                 rundatetimes_dict[rundatetime] = 1
+            
             rundatetimes.append(rundatetime)
             if rundatetime[-4:] == "0300" and len(rundatetimes) == len_rundatetimes:
                 for rdt in list(set(rundatetimes)):
@@ -199,4 +204,4 @@ if __name__ == '__main__':
                                         "--check-length=false",
                                         f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
                                         f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"]) 
-                        raise
+                raise
