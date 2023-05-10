@@ -1,9 +1,10 @@
-#!/usr/bin/bash -l
+#!/usr/bin/bash
 azcopy login --identity
 python process_wofs.py  \
 --account_url_wofs="https://storwofstest003.queue.core.windows.net/?sv=2019-02-02&st=2023-03-09T20%3A39%3A15Z&se=2024-01-01T06%3A00%3A00Z&sp=rp&sig=biy6JZg2n4Wmg%2BLHF4QnVLQvt%2F4W8oYJhXMiaTkyj4U%3D"  \
 --queue_name_wofs="wofs-ucar"  \
 --blob_url_ncar="https://wofsdltornado.blob.core.windows.net"  \
+--hours_to_analyze=6  \
 --vm_datadrive="/datadrive2"  \
 --dir_wofs="wrf-wofs"  \
 --dir_preds="wofs-preds"  \
