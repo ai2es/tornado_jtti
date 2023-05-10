@@ -13,7 +13,7 @@ python process_wofs.py  \
 --with_nans  \
 --ZH_only  \
 --fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX  \
---dir_preds_msgpk="wofs-preds-msgpk" \
+--dir_preds_msgpk="wofs-dl-preds" \
 --variables ML_PREDICTED_TOR COMPOSITE_REFL_10CM UP_HELI_MAX \
 --thresholds 0.08 20 25 \
 --loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \

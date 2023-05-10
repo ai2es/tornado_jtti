@@ -1,10 +1,13 @@
-import json, time, argparse, traceback, glob, os, datetime
+import os, glob, json, time, argparse, traceback, datetime
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
+from azure.storage.blob import BlobServiceClient
 from multiprocessing.pool import Pool
 from real_time_scripts import preds_to_msgpk
+import pandas as pd
 import warnings
 import logging
 warnings.filterwarnings("ignore")
+
 
 def process_one_file(wofs_filepath, args):
     from real_time_scripts import download_file, wofs_to_preds
@@ -82,6 +85,30 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+    def append_to_available_dates_csv(new_rundatetime, args):
+        
+        conn_string = "DefaultEndpointsProtocol=https;AccountName=wofsdltornado;AccountKey=gS4rFYepIg7Rtw0bZcKjelcJ9TNoVEhKV5cZBGc1WEtRZ4eCn35DhDnaDqugDXtfq+aLnA/rD0Bc+ASt4erSzQ==;EndpointSuffix=core.windows.net"
+        container = args.dir_preds_msgpk
+
+        blob_service_client = BlobServiceClient.from_connection_string(conn_string)
+        container_client = blob_service_client.get_container_client(container)
+
+        filename = "available_dates.csv"
+        blob_client = container_client.get_blob_client(filename)
+        with open(filename, "wb") as new_blob:
+            download_stream = blob_client.download_blob()
+            new_blob.write(download_stream.readall())
+
+        df = pd.read_csv(filename)
+        df.loc[len(df.index)] = new_rundatetime 
+
+        csv_string = df.to_csv(index=False)
+        csv_bytes = csv_string.encode()
+        blob_client.upload_blob(csv_bytes, overwrite=True)
+
+        os.remove(filename)
+
+
 if __name__ == '__main__':
     
     args = parse_args()
@@ -98,10 +125,7 @@ if __name__ == '__main__':
     else:
         raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
     
-    def preds_to_msgpk_callback(result):
-        for item in result:
-            print(f'DONE with wofs_to_preds for {item}', flush=True)
-    
+    rundatetimes_dict = dict()
     rundatetimes = []
     with Pool(9) as p:
         while True:
@@ -148,6 +172,7 @@ if __name__ == '__main__':
                                          )
                 print(result)
                 preds_to_msgpk.preds_to_msgpk(result, args)
+                # timestep is done
 
             except Exception as e:
                 print(traceback.format_exc())
@@ -160,6 +185,12 @@ if __name__ == '__main__':
             queue_wofs.delete_message(msg)
             
             rundatetime = msg_dict["runtime"]
+            if rundatetime in list(rundatetimes_dict.keys()):
+                rundatetimes_dict[rundatetime] += 1
+                if rundatetimes_dict[rundatetime] == 18:
+                    append_to_available_dates_csv(rundatetime, args)
+            else:
+                rundatetimes_dict[rundatetime] = 1
             rundatetimes.append(rundatetime)
             if rundatetime[-4:] == "0300" and len(rundatetimes) == len_rundatetimes:
                 for rdt in list(set(rundatetimes)):
