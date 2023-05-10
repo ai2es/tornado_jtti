@@ -190,18 +190,11 @@ if __name__ == '__main__':
             rundatetimes.append(rundatetime)
             if rundatetime[-4:] == "0300" and len(rundatetimes) == len_rundatetimes:
                 for rdt in list(set(rundatetimes)):
-                    files_msgpk = sorted(glob.glob(f"{args.blob_url_ncar}/{args.dir_preds_msgpk}/{rdt}/**.msgpk"))
-                    files_wrf_wofs_vm = sorted(glob.glob(f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}/ENS_MEM_**/**"))
-                    files_msgpk_len = len(files_msgpk)
-                    files_wrf_wofs_vm_len = len(files_wrf_wofs_vm)
-                    variables_len = len(args.variables)
-                
-                    if files_msgpk_len / variables_len == files_wrf_wofs_vm_len:
-                        subprocess.run(["azcopy",
-                                        "copy",
-                                        "--recursive",
-                                        "--block-blob-tier cool",
-                                        "--check-length=false",
-                                        f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
-                                        f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"]) 
+                    subprocess.run(["azcopy",
+                                    "copy",
+                                    "--recursive",
+                                    "--block-blob-tier cool",
+                                    "--check-length=false",
+                                    f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
+                                    f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"]) 
                 raise
