@@ -74,5 +74,5 @@ def preds_to_msgpk(paths, args):
             subprocess.run(["azcopy",
                             "copy",
                             out_file_path,
-                            f"https://wofsdltornado.blob.core.windows.net/wofs-dl-preds/{run_date}/{out_file_name}"])
+                            f"{args.blob_url_ncar}/{args.dir_preds_msgpk}/{run_date}/{out_file_name}"])
 
