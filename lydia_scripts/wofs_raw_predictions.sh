@@ -1,7 +1,5 @@
 #!/bin/bash
-##SBATCH -p normal
-##SBATCH --time=5:00:00
-#SBATCH -p debug
+#SBATCH -p debug #normal
 #SBATCH --time=00:30:00
 #SBATCH --nodes=1
 ##SBATCH -n 20
@@ -12,7 +10,6 @@
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
-#SBATCH --array=0
 
 ##########################################################
 
@@ -22,7 +19,6 @@ bash
 conda activate tf_tornado
 
 python --version
-echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 
 WOFS_REL_PATH="2019/20190430/1930/ENS_MEM_2"
 WOFS_FILE="wrfwof_d01_2019-04-30_20:35:00"
@@ -39,13 +35,16 @@ python -u lydia_scripts/wofs_raw_predictions.py \
 --with_nans  \
 -Z  \
 -f U WSPD10MAX W_UP_MAX \
---loc_model="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tornado_unet_hyper/2023_04_06_18_23_50_hp_model01.h5" \
---file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_tor/training_metadata_ZH_only.nc" \
+--loc_model="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tornado_unet_hyper/2023_05_02_17_29_29_hp_model00.h5" \
+--file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_metadata_ZH_only.nc" \
 --write=4 \
---dry_run \
-load_weights_hps \
---hp_path="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tornado_unet_hyper/2023_04_06_18_23_50_hps.csv" \
---hp_idx=1 
+--dry_run 
+
+#--loc_model="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tornado_unet_hyper/2023_04_06_18_23_50_hp_model01.h5" \
+#--file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_tor/training_metadata_ZH_only.nc" \
+#load_weights_hps \
+#--hp_path="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tornado_unet_hyper/2023_04_06_18_23_50_hps.csv" \
+#--hp_idx=1 
 
 #--loc_model="/ourdisk/hpc/ai2es/tornado/unet/ZH_only/initialrun_model2/initialrun_model2.h5" \
 #--file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_onehot_nontor_tor/training_metadata_ZH_only.nc" \
