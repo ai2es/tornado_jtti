@@ -84,6 +84,30 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+    def append_to_available_dates_csv(new_rundatetime, args):
+        
+        conn_string = "DefaultEndpointsProtocol=https;AccountName=wofsdltornado;AccountKey=gS4rFYepIg7Rtw0bZcKjelcJ9TNoVEhKV5cZBGc1WEtRZ4eCn35DhDnaDqugDXtfq+aLnA/rD0Bc+ASt4erSzQ==;EndpointSuffix=core.windows.net"
+        container = args.dir_preds_msgpk
+
+        blob_service_client = BlobServiceClient.from_connection_string(conn_string)
+        container_client = blob_service_client.get_container_client(container)
+
+        filename = "available_dates.csv"
+        blob_client = container_client.get_blob_client(filename)
+        with open(filename, "wb") as new_blob:
+            download_stream = blob_client.download_blob()
+            new_blob.write(download_stream.readall())
+
+        df = pd.read_csv(filename)
+        df.loc[len(df.index)] = new_rundatetime 
+
+        csv_string = df.to_csv(index=False)
+        csv_bytes = csv_string.encode()
+        blob_client.upload_blob(csv_bytes, overwrite=True)
+
+        os.remove(filename)
+
+
 if __name__ == '__main__':
     
     args = parse_args()
@@ -176,26 +200,3 @@ if __name__ == '__main__':
                                         f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
                                         f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"]) 
                         raise
-
-    def append_to_available_dates_csv(new_rundatetime, args):
-        
-        conn_string = "DefaultEndpointsProtocol=https;AccountName=wofsdltornado;AccountKey=gS4rFYepIg7Rtw0bZcKjelcJ9TNoVEhKV5cZBGc1WEtRZ4eCn35DhDnaDqugDXtfq+aLnA/rD0Bc+ASt4erSzQ==;EndpointSuffix=core.windows.net"
-        container = args.dir_preds_msgpk
-
-        blob_service_client = BlobServiceClient.from_connection_string(conn_string)
-        container_client = blob_service_client.get_container_client(container)
-
-        filename = "available_dates.csv"
-        blob_client = container_client.get_blob_client(filename)
-        with open(filename, "wb") as new_blob:
-            download_stream = blob_client.download_blob()
-            new_blob.write(download_stream.readall())
-
-        df = pd.read_csv(filename)
-        df.loc[len(df.index)] = new_rundatetime 
-
-        csv_string = df.to_csv(index=False)
-        csv_bytes = csv_string.encode()
-        blob_client.upload_blob(csv_bytes, overwrite=True)
-
-        os.remove(filename)
