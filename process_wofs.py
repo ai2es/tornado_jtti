@@ -176,7 +176,7 @@ if __name__ == '__main__':
             queue_wofs.delete_message(msg)
             
             rundatetime = msg_dict["runtime"]
-            if rundatetime in rundatetimes_dict:
+            if rundatetime in list(rundatetimes_dict.keys()):
                 rundatetimes_dict[rundatetime] += 1
                 if rundatetimes_dict[rundatetime] == 18:
                     append_to_available_dates_csv(rundatetime, args)
