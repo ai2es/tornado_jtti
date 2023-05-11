@@ -86,7 +86,10 @@ def parse_args():
     return args
 
 def append_to_available_dates_csv(new_rundatetime, args):
-    
+    run_date_dt = datetime.datetime.strptime(new_rundatetime, "%Y%m%d%H%M")
+    if run_date_dt.hour < 4:
+        run_date_dt = run_date_dt - datetime.timedelta(hours=24)
+    run_date_dt_str = run_date_dt.strftime("%Y%m%d%H%M")
     conn_string = "DefaultEndpointsProtocol=https;AccountName=wofsdltornado;AccountKey=gS4rFYepIg7Rtw0bZcKjelcJ9TNoVEhKV5cZBGc1WEtRZ4eCn35DhDnaDqugDXtfq+aLnA/rD0Bc+ASt4erSzQ==;EndpointSuffix=core.windows.net"
     container = args.dir_preds_msgpk
 
@@ -100,7 +103,7 @@ def append_to_available_dates_csv(new_rundatetime, args):
         new_blob.write(download_stream.readall())
 
     df = pd.read_csv(filename)
-    df.loc[len(df.index)] = new_rundatetime 
+    df.loc[len(df.index)] = run_date_dt_str
 
     csv_string = df.to_csv(index=False)
     csv_bytes = csv_string.encode()
@@ -197,7 +200,7 @@ if __name__ == '__main__':
                 rundatetimes_dict[rundatetime] = 1
             
             rundatetimes.append(rundatetime)
-            if rundatetime[-4:] == "0300" and len(rundatetimes) == len_rundatetimes:
+            if rundatetime[-4:] == "0300":
                 for rdt in list(set(rundatetimes)):
                     subprocess.run(["azcopy",
                                     "copy",
