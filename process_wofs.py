@@ -6,6 +6,7 @@ from real_time_scripts import preds_to_msgpk
 import pandas as pd
 import warnings
 import logging
+import subprocess
 warnings.filterwarnings("ignore")
 
 
@@ -161,6 +162,7 @@ if __name__ == '__main__':
             # check to see if message is beyond hours_to_analyze window
             forecastTime = datetime.datetime.strptime(msg_dict['forecastTime'], '%Y%m%d%H%M')
             runtime = datetime.datetime.strptime(msg_dict['runtime'], '%Y%m%d%H%M')
+            forecast_hour = (forecastTime - runtime).total_seconds() / 3600
             if (forecastTime - runtime).total_seconds() > args.hours_to_analyze * 60 * 60:
                 print(f"BEYOND hours_to_analyze WINDOW: {msg_dict['jobId']}: {forecastTime} - {runtime}")
                 with open(f"./logs/{rundate}_msgs_beyond_window.txt", 'a') as file:
@@ -200,12 +202,12 @@ if __name__ == '__main__':
                 rundatetimes_dict[rundatetime] = 1
             
             rundatetimes.append(rundatetime)
-            if rundatetime[-4:] == "0300":
+            if rundatetime[-4:] == "0300" and forecast_hour >= args.hours_to_analyze:
                 for rdt in list(set(rundatetimes)):
                     subprocess.run(["azcopy",
                                     "copy",
                                     "--recursive",
-                                    "--block-blob-tier cool",
+                                    "--block-blob-tier", "cool",
                                     "--check-length=false",
                                     f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
                                     f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"])
