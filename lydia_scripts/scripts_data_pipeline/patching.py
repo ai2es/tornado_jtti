@@ -189,6 +189,7 @@ def main():
     print(f"all_storm_mask_dirs ({len(all_storm_mask_dirs)})", all_storm_mask_dirs[:4] + all_storm_mask_dirs[-4:])
     
     #find which day corresponds to index_primer
+    print("Array index", index_primer)
     this_storm_mask_dir = all_storm_mask_dirs[int(index_primer)]
 
     #pull out the date in YYYYMMDD format
