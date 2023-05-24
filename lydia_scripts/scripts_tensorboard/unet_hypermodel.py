@@ -64,7 +64,7 @@ from tensorboard.plugins.hparams import api
 from tensorboard.plugins.hparams import api_pb2
 from tensorboard.plugins.hparams import summary as hp_summary
 
-import py3nvml
+#import py3nvml
 
 #sys.path.append("../")
 sys.path.append("lydia_scripts")
@@ -73,6 +73,10 @@ from custom_metrics import MaxCriticalSuccessIndex
 #sys.path.append("../../../keras-unet-collection")
 sys.path.append("../keras-unet-collection")
 from keras_unet_collection import models
+
+# Cause any Tensor allocations or operations to be printed
+# Display which devices operations and tensors are assigned to
+tf.debugging.set_log_device_placement(True)
 print(' ')
 
 
@@ -145,13 +149,14 @@ class UNetHyperModel(HyperModel):
 
         in_shape = self.input_shape
 
-        # TODO: other options?
+        # TODO: number of layers
+        num_layers = 6 #= hp.Int("num_layers", min_value=4, step=1, max_value=12)
         latent_dim = hp.Int("latent_dim", min_value=28, step=2, max_value=256)
         #num = hp.Int("n_conv_down", min_value=3, step=1, max_value=10) # number of layers
-        nfilters_per_layer6 = np.around(np.linspace(8, latent_dim, num=6)).astype(int).tolist()
+        nfilters_per_layer6 = np.around(np.linspace(8, latent_dim, num=num_layers)).astype(int).tolist()
         #nfilters_per_layer = list(range(8, latent_dim, 2))
         #nfilters_per_layer2 = [2**i for i in range(3, int(np.log2(latent_dim)))]
-        nfilters_per_layer2 = np.logspace(3, np.log2(latent_dim), num=6, endpoint=True, base=2, dtype=int)
+        nfilters_per_layer2 = np.logspace(3, np.log2(latent_dim), num=num_layers, endpoint=True, base=2, dtype=int)
 
         # List defining number of conv filters per down/up-sampling block
         nfilters_type = hp.Choice("nfilters_type", values=['linear', 'log'])
@@ -167,7 +172,7 @@ class UNetHyperModel(HyperModel):
         # Configuration of downsampling (encoding) blocks
         pool = hp.Choice("pool_down", values=['False', 'ave', 'max'])
         pool = False if pool == 'False' else pool
-        # TODO: look up GELU and Snake
+        # TODO: look up GELU
         activation = hp.Choice("in_activation", values=['PReLU', 'ELU', 'GELU', 'Snake']) #'ReLU', 'LeakyReLU'
 
         # Number of conv layers (after concatenation) per upsampling level
@@ -266,6 +271,9 @@ class UNetHyperModel(HyperModel):
             bn_layer = BatchNormalization()
             #synchronized=self.distribution_strategy, #set and if this layer is used within a tf.distribute strategy
             #TODO: model = insert_batchnorm_after_input(model, bn_layer) #, DB=False)
+
+        # TODO: Class weighting
+        #w_class0 = hp.Float("w_class0", min_value=1e-4, max_value=1e-2, sampling="log") #sampling=linear, step=2
 
         # Optimization
         lr = hp.Choice("learning_rate", values=[1e-3, 1e-4, 1e-5, 1e-6])
@@ -509,7 +517,7 @@ def execute_search(args, tuner, X_train, X_val=None,
                 batch_size=BATCH_SIZE, epochs=NEPOCHS, 
                 shuffle=False, callbacks=callbacks,
                 steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, 
-                workers=2, use_multiprocessing=True) 
+                workers=2, use_multiprocessing=True) #class_weight={0: p0, 1: p1}
 
 def get_rotation_indicies(args, nfolds, DB=0):
     ''' TODO TEST
@@ -1092,7 +1100,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     ax = make_csi_axis(ax=ax, **csiargs)
     ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label) #, lw=2, **plotargs)
     ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
-    text = f'{max_csi:02f}'
+    text = f'{max_csi:.02f}'
     ax.text(sr_of_maxcsi-0.06, pod_of_maxcsi-0.02, text, path_effects=pe1, fontsize=16, color='white')
     ax.legend(loc='upper right')
     ax.set_aspect('equal')
@@ -1105,7 +1113,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
         if np.isnan(srs[i]) or np.isnan(pods[i]): continue
         if i % 3 and i != nthreshs - 1: continue # skip every other threshold except the last
         text = np.char.ljust(f'{t:.02f}', width=4, fillchar='0') #str(np.round(t, 2))
-        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=10, color='white')
+        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=11, color='white')
         #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
     #plt.tight_layout()
@@ -1297,17 +1305,19 @@ if __name__ == "__main__":
     #    print(f'We have {n_physical_devices} GPUs\n')
     #    '''
 
-    tf.debugging.set_log_device_placement(True)
-
     if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
         # Fetch list of allocated logical GPUs; numbered 0, 1, …
         devices = tf.config.get_visible_devices('GPU')
         ndevices = len(devices)
-        print(f'We have {ndevices} GPUs\n')
+        devices_logical = tf.config.list_logical_devices('GPU')
+        print(f'We have {ndevices} GPUs. Logical devices {len(devices_logical)} {devices_logical}\n')
 
         # Set memory growth for each
-        #for device in devices:
-        #    tf.config.experimental.set_memory_growth(device, True)
+        try:
+            for device in devices:
+                tf.config.experimental.set_memory_growth(device, True)
+        except Exception as err:
+            print(err)
     else:
         # No allocated GPUs: do not delete this case!                                                                	 
         tf.config.set_visible_devices([], 'GPU')

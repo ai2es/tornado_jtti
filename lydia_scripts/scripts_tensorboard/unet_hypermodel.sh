@@ -1,13 +1,13 @@
 #!/bin/bash
 
-#SBATCH --partition=gpu
+##SBATCH --partition=gpu
 ##SBATCH --nodelist=c301
-##SBATCH -p ai2es
-##SBATCH --nodelist=c731
-#SBATCH --time=4:30:00
+#SBATCH -p ai2es_a100_4
+##SBATCH --nodelist=c732
+#SBATCH --time=48:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --ntasks=10  #-n 20
+#SBATCH --ntasks=1  #-n 20
 #SBATCH --mem=20G
 #SBATCH --job-name=test__tunning__int_nontor_tor
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
@@ -51,24 +51,24 @@ echo "SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST"
 
 
 # Run hyperparameter search
-python lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
+python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_ZH_only.tf" \
 --in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_nontor_tor/validation1_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
---hps_index=1 \
 --epochs=200 \
---batch_size=128 \
+--batch_size=256 \
 --lrate=5e-4 \
 --number_of_summary_trials=3 \
 --gpu \
---save=0 \
+--save=4 \
 --overwrite \
---tuner_id="debug" \
---dry_run \
 hyper \
---max_epochs=5 \
---factor=3
+--max_epochs=350 \
+--factor=12
+#--hps_index=1 \
+#--tuner_id="debug" \
+#--dry_run \
 #--nogo \
 
 #hyperband, 1 iteration max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials
