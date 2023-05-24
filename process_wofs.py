@@ -1,12 +1,20 @@
-import json, time, argparse, traceback
+import os, glob, json, time, argparse, traceback, datetime
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
-from multiprocessing.pool import Pool, ThreadPool
+from azure.storage.blob import BlobServiceClient
+from multiprocessing.pool import Pool
+from real_time_scripts import preds_to_msgpk
+import pandas as pd
+import warnings
+import logging
+import subprocess
+warnings.filterwarnings("ignore")
 
 
 def process_one_file(wofs_filepath, args):
-    from real_time_scripts import download_file, wofs_to_preds, preds_to_msgpk
+    from real_time_scripts import download_file, wofs_to_preds
     ncar_filepath = download_file.download_file(wofs_filepath, args)
     vm_filepath = wofs_to_preds.wofs_to_preds(ncar_filepath, args)
+    return vm_filepath
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
@@ -17,14 +25,11 @@ def parse_args():
     parser.add_argument('--queue_name_wofs', type=str, required=True,
                         help='WoFS queue name for available files')    
     parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')    
+                        help='NCAR path to storage blob')
+    parser.add_argument('--hours_to_analyze', type=int, required=True,
+                        help='Number of hours to analyze, starting from 0, for each runtime.')
     
     # wofs_to_preds ___________________________________________________
-    # NCAR's queue urls and names and blob url
-    parser.add_argument('--account_url_ncar', type=str, required=True,
-                        help='NCAR queue account url')
-    parser.add_argument('--queue_name_ncar_wofs_to_preds', type=str, required=True,
-                        help='NCAR queue name for downloaded WoFS files')
     parser.add_argument('--vm_datadrive', type=str, required=True,
                         help='NCAR VM path to datadrive')
     
@@ -43,10 +48,18 @@ def parse_args():
                         help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', type=str, nargs='+',
+    parser.add_argument('-Z', '--ZH_only', action='store_true',  
+        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
+    parser.add_argument('-f', '--fields', nargs='+', type=str,
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
+    
+    # Preds to msgpk ___________________________________________________
+    parser.add_argument('--dir_preds_msgpk', type=str, required=True,
+        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
+    parser.add_argument('-v', '--variables', nargs='+', type=str,
+        help='List of string variables to save out from predictions. Ex use: --variables ML_PREDICTED_TOR REFL_10CM')
+    parser.add_argument('-t', '--thresholds', nargs='+', type=float,
+        help='Space delimited list of float thresholds. Ex use: --thresholds 0.08 0.07')
 
     # Model directories and files
     parser.add_argument('--loc_model', type=str, required=True,
@@ -60,16 +73,45 @@ def parse_args():
     parser.add_argument('-d', '--debug_on', action='store_true',
         help='For testing and debugging. Execute without running models or saving data and display output paths')
     
-    # Preds to msgpk ___________________________________________________
-    parser.add_argument('--dir_preds_msgpk', type=str, required=True,
-        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
-    parser.add_argument('--variable', type=str, required=True, 
-        help='Variable to save out from predictions')
-    parser.add_argument('--threshold', type=float, required=True, 
-        help='If probability of tornado is greater than or equal to this threshold value, build tornado tracks')
+    # If loading model weights and using hyperparameters from_weights
+    hyperparams_subparser = parser.add_subparsers(title='model_loading', dest='load_options', 
+        help='optional, additional model loading options')
+    hp_parser = hyperparams_subparser.add_parser('load_weights_hps', 
+        help='Specifiy details to load model weights and UNetHyperModel hyperparameters')
+    hp_parser.add_argument('--hp_path', type=str, required=True,
+        help='Path to the csv containing the top hyperparameters')
+    hp_parser.add_argument('--hp_idx', type=int, default=0,
+        help='Index indicating the row to use within the csv of the top hyperparameters')
     
     args = parser.parse_args()
     return args
+
+def append_to_available_dates_csv(new_rundatetime, args):
+    run_date_dt = datetime.datetime.strptime(new_rundatetime, "%Y%m%d%H%M")
+    if run_date_dt.hour < 4:
+        run_date_dt = run_date_dt - datetime.timedelta(hours=24)
+    run_date_dt_str = run_date_dt.strftime("%Y%m%d%H%M")
+    conn_string = "DefaultEndpointsProtocol=https;AccountName=wofsdltornado;AccountKey=gS4rFYepIg7Rtw0bZcKjelcJ9TNoVEhKV5cZBGc1WEtRZ4eCn35DhDnaDqugDXtfq+aLnA/rD0Bc+ASt4erSzQ==;EndpointSuffix=core.windows.net"
+    container = args.dir_preds_msgpk
+
+    blob_service_client = BlobServiceClient.from_connection_string(conn_string)
+    container_client = blob_service_client.get_container_client(container)
+
+    filename = "available_dates.csv"
+    blob_client = container_client.get_blob_client(filename)
+    with open(filename, "wb") as new_blob:
+        download_stream = blob_client.download_blob()
+        new_blob.write(download_stream.readall())
+
+    df = pd.read_csv(filename)
+    df.loc[len(df.index)] = run_date_dt_str
+
+    csv_string = df.to_csv(index=False)
+    csv_bytes = csv_string.encode()
+    blob_client.upload_blob(csv_bytes, overwrite=True)
+
+    os.remove(filename)
+
 
 if __name__ == '__main__':
     
@@ -79,21 +121,94 @@ if __name__ == '__main__':
                              queue_name=args.queue_name_wofs,
                              message_encode_policy=TextBase64EncodePolicy(),
                              message_decode_policy=TextBase64DecodePolicy())
-    with Pool(4, maxtasksperchild=1) as p:
-        while True:
-            msg = queue_wofs.receive_message(visibility_timeout=5*60)
 
+    if args.hours_to_analyze > 3:
+        len_rundatetimes = 11*args.hours_to_analyze*12 + 10*3*12
+    elif args.hours_to_analyze < 4:
+        len_rundatetimes = 21*args.hours_to_analyze*12
+    else:
+        raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
+    
+    rundatetimes_dict = dict()
+    rundatetimes = []
+    with Pool(9) as p:
+        while True:
+            #properties = queue_wofs.get_queue_properties()
+            #count = properties.approximate_message_count
+            #logging.info("Message count: " + str(count))
+            #if count == 0:
+            #    logging.info("No messages: sleeping")
+            #    time.sleep(10)
+            #    continue
+            msg = queue_wofs.receive_message(visibility_timeout=60)
+
+            # check to see if queue is empty
             if msg == None:
-                print('No message: sleeping.')
+                logging.info('No message: sleeping.')
                 time.sleep(10)
                 continue
 
-            files = json.loads(msg.content)["data"]
+            msg_dict = json.loads(msg.content)
+            rundate = msg_dict['jobId'][7:15]
+
+            # check to see if message has expired
+            datetime_string = msg_dict["data"][0].split('se=')[1].split('%')[0]
+            expiration_datetime = datetime.datetime.strptime(datetime_string, '%Y-%m-%dT%H')
+            if expiration_datetime < datetime.datetime.now():
+                logging.info(f"EXPIRED: {msg_dict['jobId']} - {expiration_datetime}")
+                queue_wofs.delete_message(msg)
+                continue
+            
+            # check to see if message is beyond hours_to_analyze window
+            forecastTime = datetime.datetime.strptime(msg_dict['forecastTime'], '%Y%m%d%H%M')
+            runtime = datetime.datetime.strptime(msg_dict['runtime'], '%Y%m%d%H%M')
+            forecast_hour = (forecastTime - runtime).total_seconds() / 3600
+            if (forecastTime - runtime).total_seconds() > args.hours_to_analyze * 60 * 60:
+                print(f"BEYOND hours_to_analyze WINDOW: {msg_dict['jobId']}: {forecastTime} - {runtime}")
+                with open(f"./logs/{rundate}_msgs_beyond_window.txt", 'a') as file:
+                    file.write(f"{msg.content}\n")
+                queue_wofs.delete_message(msg)
+                continue
+            
+            # begin processing
             try:
-                p.starmap_async(process_one_file, [(wofs_filepath, args) for wofs_filepath in files])
+                result = p.starmap(process_one_file,
+                                         [(wofs_fp, args) for wofs_fp in msg_dict["data"]],
+                                         )
+                print(result)
+                preds_to_msgpk.preds_to_msgpk(result, args)
+                # timestep is done
+
             except Exception as e:
                 print(traceback.format_exc())
+                with open(f"./logs/{rundate}_msgs_errors.txt", 'a') as file:
+                    file.write(f"{msg.content}\n")
                 raise e
+            
+            with open(f"./logs/{rundate}_msgs.txt", 'a') as file:
+                file.write(f"{msg.content}\n")
             queue_wofs.delete_message(msg)
-        p.close()
-        p.join()
+            
+            rundatetime = msg_dict["runtime"]
+            if rundatetime in list(rundatetimes_dict.keys()):
+                rundatetimes_dict[rundatetime] += 1
+                if rundatetime[-2:] == "00":
+                    rundatetime_len = args.hours_to_analyze * 12
+                elif rundatetime[-2:] == "30":
+                    rundatetime_len = min(3, args.hours_to_analyze) * 12
+                if rundatetimes_dict[rundatetime] == rundatetime_len:
+                    append_to_available_dates_csv(rundatetime, args)
+            else:
+                rundatetimes_dict[rundatetime] = 1
+            
+            rundatetimes.append(rundatetime)
+            if rundatetime[-4:] == "0300" and forecast_hour > args.hours_to_analyze:
+                for rdt in list(set(rundatetimes)):
+                    subprocess.run(["azcopy",
+                                    "copy",
+                                    "--recursive",
+                                    "--block-blob-tier", "cool",
+                                    "--check-length=false",
+                                    f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/",
+                                    f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/"])
+                break

@@ -39,23 +39,27 @@ Execution Instructions:
                                                      --write=0
                                                      --debug_on
 """
-import re, os, sys, glob, argparse, logging
+
+import tensorflow as tf
+from tensorflow.python.eager import context
+tf.config.threading.set_inter_op_parallelism_threads(2)
+tf.config.threading.set_intra_op_parallelism_threads(1)
+tf.get_logger().setLevel('INFO')
+tf.autograph.set_verbosity(0)
+import logging
+tf.get_logger().setLevel(logging.ERROR)
+import re, os, sys, glob, argparse, logging, subprocess
 from datetime import datetime, date, time
 from dateutil.parser import parse as parse_date
 import xarray as xr
 import numpy as np
+import pandas as pd
 from netCDF4 import Dataset, date2num, num2date
 from scipy import spatial
 import wrf
 import metpy
 import metpy.calc
-import tensorflow as tf
-from tensorflow.python.eager import context
-tf.config.threading.set_inter_op_parallelism_threads(2)
-tf.config.threading.set_intra_op_parallelism_threads(1)
-
-import json, time, argparse, subprocess
-from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
@@ -97,7 +101,7 @@ def load_wofs_file(filepath, filename_prefix=None, wofs_datetime=None,
 
     # Create Dataset
     wofs = None
-    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, **kwargs).load()
+    wofs = xr.open_dataset(filepath, engine=engine, decode_times=False, decode_coords=True, **kwargs)
     wofs.attrs['filenamepath'] = filepath
 
     if wofs_datetime is None:
@@ -247,35 +251,42 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
     # Get wofs heights
     height = wrf.getvar(wrfin, "height_agl", units='m')
 
-    # Get reflectivity, and U and V winds
+    # Get reflectivity
     Z = wrf.getvar(wrfin, "REFL_10CM")
-    #if not ZH_only:
-    U = wrf.g_wind.get_u_destag(wrfin)
-    V = wrf.g_wind.get_v_destag(wrfin)   
     
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
     Z_agl = wrf.interplevel(Z, height, gridrad_heights)
-    U_agl = wrf.interplevel(U, height, gridrad_heights)
-    V_agl = wrf.interplevel(V, height, gridrad_heights)
-    
-    # Add units to winds to use metpy functions
-    U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
-    
-    # Define grid spacings (for div and vort)
-    #dx = 3000 * (metpy.units.units.meter) 
-    #dy = 3000 * (metpy.units.units.meter) 
-    dx = wrfin.DX * (metpy.units.units.meter) 
-    dy = wrfin.DY * (metpy.units.units.meter) 
 
-    # Calculate divergence and vorticity
-    div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
-    vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+    div = None
+    vort = None
+    if not args.ZH_only:
+        # Get U and V winds
+        U = wrf.g_wind.get_u_destag(wrfin)
+        V = wrf.g_wind.get_v_destag(wrfin)  
+
+        # Interpolate wofs data to gridrad heights
+        U_agl = wrf.interplevel(U, height, gridrad_heights)
+        V_agl = wrf.interplevel(V, height, gridrad_heights)
+
+        # Add units to winds to use metpy functions
+        U = U_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+        V = V_agl.values * (metpy.units.units.meter / metpy.units.units.second)
+
+        # Define grid spacings (for div and vort)
+        #dx = 3000 * (metpy.units.units.meter) 
+        #dy = 3000 * (metpy.units.units.meter) 
+        dx = wrfin.DX * (metpy.units.units.meter) 
+        dy = wrfin.DY * (metpy.units.units.meter) 
+
+        # Calculate divergence and vorticity
+        div = metpy.calc.divergence(U, V, dx=dx, dy=dy)
+        vort = metpy.calc.vorticity(U, V, dx=dx, dy=dy)
+
+        # Grab data, remove metpy.units and xarray.Dataset stuff 
+        div = np.asarray(div)
+        vort = np.asarray(vort)
     
-    # Grab data, remove metpy.units and xarray.Dataset stuff 
-    div = np.asarray(div)
-    vort = np.asarray(vort)
     Z_agl = Z_agl.values 
     uh = wrf.getvar(wrfin, 'UP_HELI_MAX')
     uh = uh.values
@@ -320,7 +331,6 @@ def make_patches(args, radar, window):
     if ndims == 3:
         # Number of channels
         csize = args.patch_shape[2]
-    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 1, 2, or 3 but was {ndims}")
     
     lat_range = range(0, lat_len, xsize - 4)
     lon_range = range(0, lon_len, ysize - 4)
@@ -575,12 +585,12 @@ def load_trainset_stats(args, engine='netcdf4', debug=0, **kwargs):
 
     if debug: print("Training meta data used:", fpath)
 
-    train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load() #, cache=False
+    train_stats = xr.open_dataset(fpath, engine=engine, **kwargs).load()
     train_stats.close()
 
     return train_stats
 
-def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
+def predict(args, wofs, stats, from_weights=False, eval=False, debug=0, **fss_args):
     '''
     Load the model and perform the predictions.
     TODO: predict on arbitrary set of fields
@@ -591,6 +601,7 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
     @param wofs: data to predict on
     @param stats: data field statistics such as mean and standard deviation of 
             the WoFS fields from the training set data
+    @param from_weigths: boolean flag, whether to load the model from weights
     @param eval: TODO whether to compute evaluation results. only available if
             the true labels are also available
     @param debug: int debug flag to print out additional debug information
@@ -600,25 +611,44 @@ def predict(args, wofs, stats, eval=False, debug=0, **fss_args):
 
     @return: the predictions as a numpy array
     '''
+
     from tensorflow import keras
+    from keras_tuner import HyperParameters
+    from scripts_tensorboard.unet_hypermodel import UNetHyperModel
 
     model_path = args.loc_model
 
     if debug: print("Loading model:", model_path)
 
-    if fss_args is None or fss_args == {}:
-        fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
-                    'cutoff': 0.5, 'want_hard_discretization': False}
-    fss = make_fractions_skill_score(**fss_args)
-    model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
-                                                'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+    if not from_weights:
+        if fss_args is None or fss_args == {}:
+            fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+                        'cutoff': 0.5, 'want_hard_discretization': False}
+        fss = make_fractions_skill_score(**fss_args)
+        model = keras.models.load_model(model_path, custom_objects={'fractions_skill_score': fss, 
+                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex})
+
+    else:
+        # Convert csv to Keras Hyperparameters
+        df_hps = pd.read_csv(args.hp_path)
+        best_hps = df_hps.drop(columns=['Unnamed: 0', 'args'])
+        hps_dict = best_hps.iloc[args.hp_idx].to_dict()
+
+        # Set hyperparameters
+        hp = HyperParameters()
+        for k, v in hps_dict.items(): 
+            hp.Fixed(k, value=v)
+
+        hmodel = UNetHyperModel(input_shape=wofs.ZH.shape[1:], n_labels=1)
+        model = hmodel.build(hp)
+        model.load_weights(model_path)
 
     # Normalize the reflectivity data
     ZH_mu = float(stats.ZH_mean.values)
     ZH_std = float(stats.ZH_std.values)
     X = (wofs.ZH - ZH_mu) / ZH_std
     model.make_predict_function() 
-    preds = model.predict(X)
+    preds = model.predict(X, batch_size=100000)
     tf.keras.backend.clear_session()
 
     return preds
@@ -659,14 +689,21 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), debug=0):
         #dims=dims,
         coords=coords
     )
+    
+    _preds = np.zeros((*preds.shape[:-1], 2))
+    # If only the prob of tornado is provided, expand the data
+    if preds.shape[-1] == 1:
+        _p = np.squeeze(preds.copy())
+        _preds[:, :, :, 1] = _p  # probab of tor
+        _preds[:, :, :, 0] = 1 - _p  # probab of no tor
+    else: _preds = preds.copy()
+    
     wofs_preds['predicted_no_tor'] = xr.DataArray(
-        data=preds[:, :, :, 0], #["patch", "x", "y"]
-        #dims=wofs.dims,
+        data=_preds[:, :, :, 0],
         coords=coords
     ) 
     wofs_preds['predicted_tor'] = xr.DataArray(
-        data=preds[:, :, :, 1], #["patch", "x", "y"]
-        #dims=wofs.dims,
+        data=_preds[:, :, :, 1],
         coords=coords
     )
 
@@ -758,33 +795,36 @@ def to_wofsgrid(args, rel_path, wofs_orig, wofs_gridrad, stats, gridrad_spacing=
                             )
 
     # Include select WoFS fields
-    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'Times', 'UP_HELI_MAX']
+    fields = ['COMPOSITE_REFL_10CM', 'REFL_10CM', 'UP_HELI_MAX', 'Times', 'XTIME']
     if not args.ZH_only:
         fields += ['U', 'U10', 'V', 'V10']
     if not args.fields is None:
         fields += args.fields
-        fields = set(fields)
+        fields = list(set(fields))
     wofs_fields = wofs_orig[fields].copy(deep=True)
-    wofs_like = xr.merge([wofs_like, wofs_fields])
+    wofs_like_combined = xr.merge([wofs_like, wofs_fields])
 
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
         savepath = os.path.join(args.vm_datadrive, args.dir_preds, rel_path)
-        os.makedirs(savepath, mode=0o775, exist_ok=True)
+        os.umask(0o002)
+        os.makedirs(savepath, exist_ok=True)
         if args.debug_on: print(f"Save WoFS grid predictions to {savepath}\n")
-        wofs_like.to_netcdf(os.path.join(savepath, f"{str(fname)}_predictions.nc"))
+        encoding_vars = [k for k in wofs_like_combined.variables.keys() if k not in ["Times", "Time"]]
+        encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":2} for var in encoding_vars}
+        encoding["ML_PREDICTED_TOR"]['least_significant_digit'] = 3
+        vm_filepath = savepath + f"{str(fname)}_predictions.nc"
+        wofs_like_combined.to_netcdf(vm_filepath, encoding=encoding)
         
         #blobpath = os.path.join(args.blob_path_ncar, args.dir_preds, rel_path, f'{fname}_predictions.nc')
         #subprocess.run(["azcopy",
         #                "copy",
-        #                "--log-level=ERROR",
-        #                "--check-length=FALSE",
         #                f"{savepath}",
         #                f"{blobpath}"])   
         
-    return predictions, wofs_like, os.path.join(savepath, f"{str(fname)}_predictions.nc")
+    return predictions, wofs_like_combined, vm_filepath
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
                    seconds_since='seconds since 2001-01-01', debug=0):
@@ -899,14 +939,8 @@ def wofs_to_preds(ncar_filepath, args):
     rel_path = ncar_filepath.rsplit('/', 1)[0].split('wrf-wofs/')[1] + '/'
     filename = ncar_filepath.rsplit('/', 1)[1]
     path = os.path.join(args.vm_datadrive, args.dir_wofs, rel_path)
-    os.makedirs(path, mode=0o775, exist_ok=True)
-
-    subprocess.run(["azcopy",
-                    "copy",
-                    f"{ncar_filepath}",
-                    f"{path}/{filename}"]) 
-            
-    wofs, wofs_netcdf = load_wofs_file(f"{path}/{filename}",
+    
+    wofs, wofs_netcdf = load_wofs_file(ncar_filepath,
                                        wofs_datetime=None,
                                        datetime_format=args.datetime_format,
                                        seconds_since=SECS_SINCE,
@@ -920,7 +954,8 @@ def wofs_to_preds(ncar_filepath, args):
                               debug=args.debug_on)
     
     # Compute predictions
-    preds = predict(args, wofs_gridrad, train_stats, debug=args.debug_on) #, **fss_args)
+    from_weights = not args.load_options is None
+    preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, debug=args.debug_on)
     
     # Combine the predictions, reflectivity and select fields into a single dataset
     wofs_combo = combine_fields(args, wofs_gridrad, preds, debug=args.debug_on)
@@ -931,5 +966,5 @@ def wofs_to_preds(ncar_filepath, args):
                                                                       seconds_since=SECS_SINCE, debug=args.debug_on)
     
     print(f"DONE - {vm_filepath}")
-    os.remove(f"{path}{filename}")
-    
+    os.remove(f"{ncar_filepath}")
+    return vm_filepath

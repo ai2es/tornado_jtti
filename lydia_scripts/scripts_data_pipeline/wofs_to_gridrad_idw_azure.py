@@ -20,14 +20,11 @@ Execution Instructions:
 """
 
 import xarray as xr
-print("xr version", xr.__version__)
 import numpy as np
-print("np version", np.__version__)
 import netCDF4
 from netCDF4 import Dataset
 import scipy.spatial
 import wrf
-print("wrf-python version", wrf.__version__)
 import metpy
 import metpy.calc
 import os, sys
