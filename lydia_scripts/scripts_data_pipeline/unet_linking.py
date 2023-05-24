@@ -249,7 +249,7 @@ def main():
     rad_files = glob.glob(rad_dir + '*')
     rad_files.sort()
 
-    yrs_pattern = "(2013|2014|2015|2016|2017|2018)"
+    yrs_pattern = "(2013|2014|2015|2016|2017|2018|2019)"
     for i in range(len(rad_files)):
         # Only perform for specified years
         MATCH = re.search(yrs_pattern, rad_files[i])

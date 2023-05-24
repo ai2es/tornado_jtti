@@ -84,6 +84,7 @@ def transfer_patch(patches_file, vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12]):
             ds = ds.where(ds.n_convective_pixels > 0).dropna(dim='patch')
             
             # Select 50 random patches from all the convective patches
+            print(" patch shape", ds.patch.values.shape)
             random_idxs = list(np.random.randint(low=0, high=ds.patch.values.shape[0], size=50))
             ds = ds.isel(patch=random_idxs)
 
@@ -160,7 +161,6 @@ def transfer_patch(patches_file, vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12]):
                     ds.to_netcdf(ds_fname)
                 #ds.close()
                 del ds
-                
                 return
 
         # This dataset is a 50/50 validation file
@@ -230,12 +230,10 @@ def transfer_patch(patches_file, vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12]):
                     ds.to_netcdf(light_fname)
                 #ds.close()
                 del ds
-                return
 
     else:
         print('This patch file did not follow the file naming conventions and hasn\'t been transfered:')
         print(patches_file)
-        return
     
         
       
