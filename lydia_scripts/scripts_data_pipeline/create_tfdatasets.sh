@@ -6,7 +6,7 @@
 #SBATCH --ntasks=20
 #SBATCH --mem=100G
 #SBATCH --time=24:00:00 #24:05:00
-#SBATCH --job-name=test__save_tfdataset
+#SBATCH --job-name=create_tfdatasets
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
@@ -38,6 +38,6 @@ python -u lydia_scripts/scripts_data_pipeline/create_tfdatasets.py \
 --batch_size=256 \
 --dataset_patches_type='nt' \
 --dataset_labels_type='int' \
---year=2013 2014 2015 2016 2017 2018 \ 
---ZH_only 
+--ZH_only \
+-y 2013 2014 2015 2016 2017 2018 
 #--dry_run

@@ -63,10 +63,6 @@ def get_arguments():
     dataset_labels_type = getattr(args, 'dataset_labels_type')
     if dataset_labels_type not in ['int', 'onehot']:
         raise NameError('dataset_labels_type is invalid')
-    
-    #ZH_only = getattr(args, 'ZH_only')
-    
-    #dry_run = getattr(args, 'dry_run')
 
     return args
 
@@ -272,7 +268,7 @@ def create_dataset(args, all_patchfiles, dsettype='train', vertical_levels=[1,2,
 
     # Load data, combine into one array, and extract desired vertical levels
     print(f'Opening {dsettype} data') #print('Opening Training Data')
-    print(years)
+    print(yrs_pattern, years)
     data_array = xr.open_mfdataset(patches, concat_dim='patch', combine='nested', 
                                    parallel=True, engine='netcdf4') #autoclose=True
     print(data_array)
@@ -378,7 +374,7 @@ def create_dataset(args, all_patchfiles, dsettype='train', vertical_levels=[1,2,
     ds = tf.data.Dataset.from_tensor_slices((X, Y)) #ds_train
 
     # Shuffle and batch the data
-    ds = ds.shuffle(X.shape[0], seed=24).batch(args.batch_size)
+    ds = ds.shuffle(X.shape[0], seed=24)#.batch(args.batch_size)
     print(f"{dsettype} Dataset Elem Spec:", ds.element_spec)
     print(ds)
 
@@ -397,6 +393,7 @@ def create_dataset(args, all_patchfiles, dsettype='train', vertical_levels=[1,2,
 if __name__ == "__main__":
     #get the inputs from the .sh file
     args = get_arguments()  
+    print(args)
 
     if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
         # Fetch list of allocated logical GPUs; numbered 0, 1, …
@@ -433,11 +430,10 @@ if __name__ == "__main__":
     # rotation index
     rot = 0 
     train_end = (nfolds - 2 + rot) % nfolds
-    val_sel = (nfolds - 2 + rot) % nfolds
     test_sel = (nfolds - 1 + rot) % nfolds
     trainset_yrs = all_years[:train_end]
-    valset_yrs = all_years[val_sel]
-    testset_yrs = all_years[test_sel]
+    valset_yrs = [all_years[train_end]]
+    testset_yrs = [all_years[test_sel]]
 
     # Create the training dataset
     ds_train = create_dataset(args, all_patchfiles, dsettype='train', vertical_levels=vertical_levels, years=trainset_yrs)
