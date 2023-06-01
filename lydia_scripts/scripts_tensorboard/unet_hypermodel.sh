@@ -2,14 +2,14 @@
 
 ##SBATCH --partition=gpu
 ##SBATCH --nodelist=c301
-#SBATCH -p ai2es_a100_4
+#SBATCH -p ai2es
 ##SBATCH --nodelist=c732
 #SBATCH --time=48:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1  #-n 20
 #SBATCH --mem=20G
-#SBATCH --job-name=test__tunning__int_nontor_tor
+#SBATCH --job-name=tuner__int_nontor_tor__newgridrad
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
@@ -51,13 +51,16 @@ echo "SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST"
 
 
 # Run hyperparameter search
+#--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_nontor_tor/validation1_ZH_only.tf" \
+#--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_ZH_only.tf" \
 python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
---in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_ZH_only.tf" \
---in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_nontor_tor/validation1_ZH_only.tf" \
+--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf" \
+--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only.tf" \
+--in_dir_test="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
 --epochs=200 \
---batch_size=256 \
+--batch_size=300 \
 --lrate=5e-4 \
 --number_of_summary_trials=3 \
 --gpu \
@@ -67,9 +70,17 @@ hyper \
 --max_epochs=350 \
 --factor=12
 #--hps_index=1 \
-#--tuner_id="debug" \
+
+#--tuner_id="debug_newgridrad" \
+#--dry_run \
+
+#--max_epochs=350 \
+#--factor=12
+
+#--tuner_id="debug_newgridrad" \
 #--dry_run \
 #--nogo \
+
 
 #hyperband, 1 iteration max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials
 #natural_validation_ZH_only.tf

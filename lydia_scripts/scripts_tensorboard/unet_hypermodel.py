@@ -149,14 +149,16 @@ class UNetHyperModel(HyperModel):
 
         in_shape = self.input_shape
 
-        # TODO: number of layers
-        num_layers = 6 #= hp.Int("num_layers", min_value=4, step=1, max_value=12)
+        num_layers = hp.Int("num_layers", min_value=4, step=1, max_value=6)
         latent_dim = hp.Int("latent_dim", min_value=28, step=2, max_value=256)
         #num = hp.Int("n_conv_down", min_value=3, step=1, max_value=10) # number of layers
         nfilters_per_layer6 = np.around(np.linspace(8, latent_dim, num=num_layers)).astype(int).tolist()
         #nfilters_per_layer = list(range(8, latent_dim, 2))
         #nfilters_per_layer2 = [2**i for i in range(3, int(np.log2(latent_dim)))]
         nfilters_per_layer2 = np.logspace(3, np.log2(latent_dim), num=num_layers, endpoint=True, base=2, dtype=int)
+        mask = nfilters_per_layer2 % 2
+        mask[-1] = 0
+        nfilters_per_layer2[mask] += 1 # make odd layers even
 
         # List defining number of conv filters per down/up-sampling block
         nfilters_type = hp.Choice("nfilters_type", values=['linear', 'log'])
@@ -285,7 +287,7 @@ class UNetHyperModel(HyperModel):
         #                                    RMSprop(learning_rate=lr)]
 
         # Build and return the model
-        model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+        model.compile(loss=loss, optimizer=optimizer, metrics=metrics, run_eagerly=True)
         if self.DB: model.summary()
         return model
 
@@ -517,7 +519,7 @@ def execute_search(args, tuner, X_train, X_val=None,
                 batch_size=BATCH_SIZE, epochs=NEPOCHS, 
                 shuffle=False, callbacks=callbacks,
                 steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, 
-                workers=2, use_multiprocessing=True) #class_weight={0: p0, 1: p1}
+                workers=1, use_multiprocessing=False) #class_weight={0: p0, 1: p1}
 
 def get_rotation_indicies(args, nfolds, DB=0):
     ''' TODO TEST
@@ -577,10 +579,10 @@ def prep_data(args, n_labels=None, DB=1):
     """ 
     # Dataset size
     #height = args.elevation
-    x_shape = (None, *args.x_shape) #(None, 32, 32, 12)
-    x_shape_val = args.x_shape #(32, 32, 12)
+    x_shape = (None, *args.x_shape) #args.x_shape #model-->(None, 32, 32, 12)
+    x_shape_val = args.x_shape #(None, *args.x_shape) #(32, 32, 12)
     
-    y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
+    y_shape = args.y_shape #(None, 32, 32, 1) #(None, *args.y_shape)
     y_shape_val = args.y_shape
 
     #if loss == 'binary_focal_crossentropy':
@@ -623,16 +625,161 @@ def prep_data(args, n_labels=None, DB=1):
     '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf'
     '''
 
-    ds_train = tf.data.Dataset.load(args.in_dir, specs)
-    ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
-    #xy_train = np.array(list(ds_train.as_numpy_iterator()))
+    # tf.Dataset helper methods to group storm types into separate datasets
+    def filter_neg(x, y):
+        return tf.math.reduce_all(y <= 0)
+    def filter_pos(x, y):
+        return tf.math.reduce_any(y > 0)
+    
+    # Sample weighting for Dataset element selection
+    weights = [.9, .1] #np.repeat(1 / len(storm_datasets), len(storm_datasets))
+
+    ds_train = tf.data.Dataset.load(args.in_dir) #, specs)#.unbatch()
+    print("Train Dataset:", ds_train)
     #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val)
-    ds_val = ds_val.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = ds_val.prefetch(tf.data.AUTOTUNE)
+    ds_neg = ds_train.filter(filter_neg) #.repeat(2)
+    ds_pos = ds_train.filter(filter_pos) #.repeat(2)
+    nneg = ds_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy() #ds_neg.cardinality().numpy()
+    npos = ds_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy() #ds_pos.cardinality().numpy()
+    print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+    '''
+    if nneg > 0 and npos > 0:
+        ds_train = tf.data.Dataset.sample_from_datasets([ds_neg, ds_pos],
+                                             weights=weights,
+                                             stop_on_empty_dataset=True)
+    '''
+    ds_train = ds_train.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE) #unbatch().batch()
+    ds_train = ds_train.prefetch(2) #tf.data.AUTOTUNE)
+    print("Train Dataset:", ds_train)
+
+    ds_val = tf.data.Dataset.load(args.in_dir_val) #, specs_val)
+    print("Val Dataset:", ds_val)
+    ds_val_neg = ds_val.filter(filter_neg)
+    ds_val_pos = ds_val.filter(filter_pos)
+    nneg = ds_val_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+    npos = ds_val_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+    print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+    ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val = ds_val.prefetch(2)
+    print("Val Dataset:", ds_val)
+
+    ds_test = None
+    if not args.in_dir_test is None:
+        ds_test = tf.data.Dataset.load(args.in_dir_test)
+        print("Test Dataset:", ds_test)
+        ds_test_neg = ds_test.filter(filter_neg)
+        ds_test_pos = ds_test.filter(filter_pos)
+        nneg = ds_test_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+        npos = ds_test_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+        print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+        ds_test = ds_test.batch(args.batch_size)
+        ds_test = ds_test.prefetch(2)
+        print("Test Dataset:", ds_test)
+
     if DB:
         print("Training Dataset Specs:", specs)
         print("Validation Dataset Specs:", specs_val)
+        #print(len(list(ds_train.as_numpy_iterator())))
+        #print(len(list(ds_val.as_numpy_iterator())))
+
+    return (ds_train, ds_val, ds_test)
+
+def sample_data(args, n_labels):
+    '''
+    NOT USED
+    '''
+    # Dataset size
+    #height = args.elevation
+    x_shape = args.x_shape #(None, 32, 32, 12) #(None, *args.x_shape)
+    x_shape_val = args.x_shape #(32, 32, 12)
+    
+    y_shape = args.y_shape #(None, 32, 32, 1) #(None, *args.y_shape)
+    y_shape_val = args.y_shape
+
+    #if loss == 'binary_focal_crossentropy':
+    if n_labels == 1:        
+        #y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
+                     tf.TensorSpec(shape=y_shape, dtype=tf.int64, name='Y'))
+
+        #y_shape_val = args.y_shape #(32, 32, 1)
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
+                         tf.TensorSpec(shape=y_shape_val, dtype=tf.int64, name='Y'))
+
+        # Pick out the correct dataset paths
+        if args.dataset == 'tor':
+            path = "int_tor"
+        elif args.dataset == 'nontor_tor':
+            path = "int_nontor_tor"
+        else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
+    else:
+        # Define the dataset size
+        #y_shape = (None, 32, 32, 2)
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
+                     tf.TensorSpec(shape=y_shape, dtype=tf.float32, name='Y'))
+
+        #y_shape_val = y_shape[1:] #(32, 32, 2)
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
+                         tf.TensorSpec(shape=y_shape_val, dtype=tf.float32, name='Y'))
+
+    # Pick out the correct dataset paths
+    #hparams[HP_DATA_PATCHES_TYPE]
+    if args.dataset == 'tor':
+        path = "onehot_tor"
+    elif args.dataset == 'nontor_tor':
+        path = "onehot_nontor_tor"
+    else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
+        
+    # Read tensorflow datasets
+    '''
+    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf'
+    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf'
+    '''
+
+    # tf.Dataset helper methods to group storm types into separate datasets
+    def filter_neg(x, y):
+        return tf.math.reduce_all(y <= 0)
+    def filter_pos(x, y):
+        return tf.math.reduce_any(y > 0)
+    
+    # Sample weighting for Dataset element selection
+    weights = [.9, .1] #np.repeat(1 / len(storm_datasets), len(storm_datasets))
+
+    ds_train = tf.data.Dataset.load(args.in_dir, specs)#.unbatch()
+    #xy_train = np.array(list(ds_train.as_numpy_iterator()))
+    #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_neg = ds_train.filter(filter_neg) #.repeat(2)
+    ds_pos = ds_train.filter(filter_pos) #.repeat(2)
+    nneg = len(list(ds_neg.as_numpy_iterator()))
+    npos = len(list(ds_pos.as_numpy_iterator()))
+    print("n neg", nneg, "n pos", npos)
+    if nneg > 0 and npos > 0:
+        ds_train = tf.data.Dataset.sample_from_datasets([ds_neg, ds_pos],
+                                             weights=weights,
+                                             stop_on_empty_dataset=True)
+    ds_train = ds_train.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_train = ds_train.prefetch(2) #tf.data.AUTOTUNE)
+
+    ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val).batch(args.batch_size)
+    print(ds_val)
+    ds_val_neg = ds_val.filter(filter_neg) #.repeat()
+    ds_val_pos = ds_val.filter(filter_pos) #.repeat()
+    print(ds_val_neg)
+    print(ds_val_pos)
+    nneg_val = len(list(ds_val_neg.as_numpy_iterator()))
+    npos_val = len(list(ds_val_pos.as_numpy_iterator()))
+    print("val: n neg", nneg, "n pos", npos)
+    if nneg_val > 0 and npos_val > 0:
+        ds_val = tf.data.Dataset.sample_from_datasets([ds_val_neg, ds_val_pos],
+                                          weights=weights,
+                                             stop_on_empty_dataset=True)
+    #ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val = ds_val.prefetch(2) #tf.data.AUTOTUNE)
+    if DB:
+        print("Training Dataset Specs:", specs)
+        print("Validation Dataset Specs:", specs_val)
+        #print(len(list(ds_train.as_numpy_iterator())))
+        #print(len(list(ds_val.as_numpy_iterator())))
 
     return (ds_train, ds_val)
 
@@ -1136,6 +1283,8 @@ def create_argsparser():
                          help='Input directory where the data are stored')
     parser.add_argument('--in_dir_val', type=str, required=True,
                          help='Input directory where the validation data are stored')
+    parser.add_argument('--in_dir_test', type=str, #required=True,
+                         help='Input directory where the test data are stored')
     parser.add_argument('--out_dir', type=str, required=True,
                          help='Output directory for results, models, hyperparameters, etc.')
     parser.add_argument('--out_dir_tuning', type=str, #required=True,
@@ -1255,7 +1404,7 @@ def args2string(args):
 
     args_str = '' #f'{cdatetime}_'
     for arg, val in vars(args).items(): 
-        if arg in ['in_dir', 'in_dir_val', 'out_dir', 'out_dir_tuning',
+        if arg in ['in_dir', 'in_dir_val', 'in_dir_test', 'out_dir', 'out_dir_tuning',
                    'project_name_prefix', 'overwrite', 'dry_run', 'nogo', 'save']:
             continue
         if isinstance(val, bool):
@@ -1283,6 +1432,8 @@ def args2string(args):
 
 
 if __name__ == "__main__":
+    #tf.config.run_functions_eagerly(True)
+    tf.data.experimental.enable_debug_mode()
     args = parse_args()
     cdatetime, argstr = args2string(args)
     if args.dry_run: 
@@ -1319,8 +1470,9 @@ if __name__ == "__main__":
         except Exception as err:
             print(err)
     else:
-        # No allocated GPUs: do not delete this case!                                                                	 
-        tf.config.set_visible_devices([], 'GPU')
+        # No allocated GPUs: do not delete this case!
+        try: tf.config.set_visible_devices([], 'GPU')
+        except Exception as err: print(err)
 
     print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
 
@@ -1328,9 +1480,12 @@ if __name__ == "__main__":
         print('NOGO.')
         exit()
 
+    tf.config.run_functions_eagerly(True)
+    #tf.data.experimental.enable_debug_mode()
+
     tuner, hypermodel = create_tuner(args, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
 
-    ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
+    ds_train, ds_val, ds_test = prep_data(args, n_labels=hypermodel.n_labels)
 
     PROJ_NAME_PREFIX = args.project_name_prefix
     PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
@@ -1457,11 +1612,17 @@ if __name__ == "__main__":
         print("\nEVALUATION")
         train_eval = model.evaluate(ds_train)
         val_eval = model.evaluate(ds_val)
-        #xtest_recon = model.evaluate(ds_test)
+        if not ds_test is None:
+            test_eval = model.evaluate(ds_test)
+
         metrics = H.history.keys()
+        df_index = ['train', 'val']
         evals = [ {k: v for k, v in zip(metrics, train_eval)} ]
         evals.append( {k: v for k, v in zip(metrics, val_eval)} )
-        df_eval = pd.DataFrame(evals, index=['train', 'val'])
+        if not ds_test is None:
+            evals.append( {k: v for k, v in zip(metrics, test_eval)} )
+            df_index.append('test')
+        df_eval = pd.DataFrame(evals, index=df_index)
         print(df_eval)
         fname = os.path.join(dirpath, f"{FN_PREFIX}_eval.csv")
         if args.save in [1, 2, 4]: #args.save > 0
@@ -1497,23 +1658,6 @@ if __name__ == "__main__":
         best_model.build(input_shape=in_shape)
         Hb = best_model.fit(ds_train, validation_data=ds_val, callbacks=[es],
                             batch_size=args.batch_size, epochs=args.epochs)
-
-        # Save best model from hyperparam search
-        model_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.h5")
-        print(f"\nSaving top model")
-        print(model_fnpath)
-        best_model.summary()
-        hypermodel.save_model(model_fnpath, weights=True, #argstr
-                              model=best_model, save_traces=True)
-
-        # Save diagram of model architecture
-        diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.png")
-        plot_model(best_model, to_file=diagram_fnpath,  
-                    show_dtype=True, show_shapes=True, expand_nested=False)
-        # REDUNDANT Save expanded diagram
-        #diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}_expanded.png")
-        #plot_model(best_model, to_file=diagram_fnpath,  
-        #            show_dtype=True, show_shapes=True, expand_nested=True)
         '''
     # Load the latest model
     else:
