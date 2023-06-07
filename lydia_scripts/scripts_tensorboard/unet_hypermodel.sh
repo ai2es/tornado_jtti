@@ -3,7 +3,7 @@
 ##SBATCH --partition=gpu
 ##SBATCH --nodelist=c301
 #SBATCH -p ai2es
-##SBATCH --nodelist=c732
+#SBATCH --nodelist=c731
 #SBATCH --time=48:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
@@ -60,7 +60,7 @@ python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
 --epochs=200 \
---batch_size=300 \
+--batch_size=256 \
 --lrate=5e-4 \
 --number_of_summary_trials=3 \
 --gpu \

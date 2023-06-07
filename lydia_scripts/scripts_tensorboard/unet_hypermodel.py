@@ -77,6 +77,8 @@ from keras_unet_collection import models
 # Cause any Tensor allocations or operations to be printed
 # Display which devices operations and tensors are assigned to
 tf.debugging.set_log_device_placement(True)
+tf.config.run_functions_eagerly(True)
+tf.data.experimental.enable_debug_mode()
 print(' ')
 
 
@@ -230,10 +232,13 @@ class UNetHyperModel(HyperModel):
                 l2 = hp.Choice("l2", values=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6])
 
         # TODO: Dropout??
-        # Single BatchNorm layer after input layer
 
         # Choose the type of unet
+        #att_unet_2d (single regression), r2_unet_2d >=2 layers
+        #resunet_a_2d, u2net_2d >= 3
         unet_type = hp.Choice("unet_type", values=['unet_2d', 'unet_plus_2d', 'unet_3plus_2d'])
+
+        #TODO: weights=[None, 'imagenet']
         if unet_type == 'unet_2d':
             model = models.unet_2d(in_shape, 
                             filter_num, 
@@ -267,6 +272,25 @@ class UNetHyperModel(HyperModel):
                             pool=pool, unpool=unpool,
                             l1=l1, l2=l2, weights=None,
                             batch_norm=batch_norm, name='unet3plus')
+        '''
+        elif unet_type == 'vnet_2d':
+            model = models.vnet_2d((256, 256, 1), filter_num=[16, 32, 64, 128, 256], n_labels=2,
+                      res_num_ini=1, res_num_max=3, 
+                      activation='PReLU', output_activation='Softmax', 
+                      batch_norm=True, pool=False, unpool=False, name='vnet')
+        elif unet_type == 'r2_unet_2d':
+            model = models.r2_unet_2d((None, None, 3), [64, 128, 256, 512], n_labels=2,
+                          stack_num_down=2, stack_num_up=1, recur_num=2,
+                          activation='ReLU', output_activation='Softmax', 
+                          batch_norm=True, pool='max', unpool='nearest', name='r2unet')
+        elif unet_type == 'u2net_2d':
+            model = models.u2net_2d((128, 128, 3), n_labels=2, 
+                        filter_num_down=[64, 128, 256, 512], filter_num_up=[64, 64, 128, 256], 
+                        filter_mid_num_down=[32, 32, 64, 128], filter_mid_num_up=[16, 32, 64, 128], 
+                        filter_4f_num=[512, 512], filter_4f_mid_num=[256, 256], 
+                        activation='ReLU', output_activation=None, 
+                        batch_norm=True, pool=False, unpool=False, deep_supervision=True, name='u2net')
+        '''
 
         # Insert BatchNormalization layer after Input layer
         if not batch_norm:
@@ -875,11 +899,11 @@ def contingency_curves(y, y_preds, threshs):
     tns = tn(y, y_preds)
     return tps, fps, fns, tns
 
-def get_max_csi(y, y_preds, thresh=np.arange(0.05, 1.05, 0.05)):
+def get_max_csi(y, y_preds, thresh):
     ''' TODO
     @param y: true output
     @param y_preds: predicted output
-    @param thresh: probability threholds 
+    @param thresh: probability threholds #thresh=np.arange(0.05, 1.05, 0.05)
     '''
     #tp = tf.keras.metrics.TruePositives(thresholds=thresh.tolist())
     #fp = tf.keras.metrics.FalsePositives(thresholds=thresh.tolist())
@@ -994,8 +1018,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), save=False,
-                          thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
+def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None, figsize=(5, 5), save=False, dpi=180):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
     Based on method from Tensorflow docs.
@@ -1003,8 +1026,8 @@ def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), 
     @param y: true output
     @param y_preds: predicted output
     @param fname: file name to save the figure as
+    @param thresh: list of the thresholds for other performance plots #thresh=np.arange(0.05, 1.05, 0.05)
     @param p: cutoff probability above which is labelled 1
-    @param thresh: list of the thresholds for other performance plots
     @param figsize: tuple with the width and height of the figure
     @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param save: bool flag whether to save the figure
@@ -1121,7 +1144,7 @@ def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=1
 
     return fig, ax
 
-def plot_reliabilty_curve(y, y_preds, fname, n_bins=18, strategy='quantile', 
+def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, strategy='quantile', 
                           fig_ax=None, figsize=(10, 10), save=False, dpi=180, 
                           **kwargs):
     '''
@@ -1132,6 +1155,8 @@ def plot_reliabilty_curve(y, y_preds, fname, n_bins=18, strategy='quantile',
     @param y: true output
     @param y_preds: predicted output
     @param fname: file name to save the figure as
+    @param n_bins:
+    @param strategy: 
     @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param figsize: tuple with the width and height of the figure
     @param save: bool flag whether to save the figure
@@ -1211,12 +1236,13 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
     ax.set_ylabel('POD')
     return ax
 
-def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=None, 
+def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, 
              color='dodgerblue', figsize=(10, 10), save=False, dpi=180, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
     CSI = 1. (this curve is highly senstive to event freq)
+    @param threshs=np.linspace(0, 1, 21)
     @param csiargs: keyword args for make_csi_axis()
     '''
     fig = None
@@ -1432,8 +1458,6 @@ def args2string(args):
 
 
 if __name__ == "__main__":
-    #tf.config.run_functions_eagerly(True)
-    tf.data.experimental.enable_debug_mode()
     args = parse_args()
     cdatetime, argstr = args2string(args)
     if args.dry_run: 
@@ -1460,15 +1484,18 @@ if __name__ == "__main__":
         # Fetch list of allocated logical GPUs; numbered 0, 1, …
         devices = tf.config.get_visible_devices('GPU')
         ndevices = len(devices)
-        devices_logical = tf.config.list_logical_devices('GPU')
-        print(f'We have {ndevices} GPUs. Logical devices {len(devices_logical)} {devices_logical}\n')
 
         # Set memory growth for each
+        #config.gpu_options.allow_growth = True
         try:
             for device in devices:
                 tf.config.experimental.set_memory_growth(device, True)
+            print("Memory growth set")
         except Exception as err:
             print(err)
+
+        devices_logical = tf.config.list_logical_devices('GPU')
+        print(f'We have {ndevices} GPUs. Logical devices {len(devices_logical)} {devices_logical}\n')
     else:
         # No allocated GPUs: do not delete this case!
         try: tf.config.set_visible_devices([], 'GPU')
@@ -1479,9 +1506,6 @@ if __name__ == "__main__":
     if args.nogo:
         print('NOGO.')
         exit()
-
-    tf.config.run_functions_eagerly(True)
-    #tf.data.experimental.enable_debug_mode()
 
     tuner, hypermodel = create_tuner(args, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
 
@@ -1583,10 +1607,11 @@ if __name__ == "__main__":
             fig, axs = plt.subplots(1, 2, figsize=(12, 6))
             axs = axs.ravel()
             #plt.subplots_adjust(wspace=.1)
+            cthresh = np.arange(0.05, 1.05, 0.05), 
             plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                                p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
+                                p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[0]), save=False)        
             plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
-                                p=cutoff_probab, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
+                                p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
             plt.close(fig)
             del fig, axs
 
@@ -1631,10 +1656,11 @@ if __name__ == "__main__":
 
         if args.save in [2, 4]:
             # CSI Curve
+            csithreshs = np.linspace(0, 1, 21)
             fname = os.path.join(dirpath, f"{FN_PREFIX}_csi_train_val.png")
             fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                            label='Train', show_cb=False)
-            plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
+                            threshs=csithreshs, label='Train', show_cb=False)
+            plot_csi(y_val.ravel(), xval_preds.ravel(), fname, threshs=csithreshs, label='Val', 
                             color='orange', save=True, fig_ax=(fig, ax)) #args.save in [2, 4] #args.save >= 2
             plt.close(fig)
             del fig, ax
