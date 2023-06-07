@@ -356,6 +356,7 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
 
     # Get reflectivity
     Z = wrf.getvar(wrfin, "REFL_10CM")
+    print("wofs.REFL_10CM shape", Z.shape)
     
     # Interpolate wofs data to gridrad heights
     gridrad_heights = gridrad_heights * 1000
@@ -1061,15 +1062,17 @@ def plot_pcolormesh(args, data, fname, title, cb_label,
     pcmesh = ax.pcolormesh(data, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
     if not data_contours is None:
         # Contour levels
-        data_qtiles = np.nanquantile(data_contours, [0, .1, .5, 1])
-        data_qtiles.sort()
-        contour = ax.contour(data_contours, levels=[.1, .5]) #[0. 0.08 0.16 0.24 0.32 0.4  0.48 0.56 0.64]
+        qlevels = [0, .1, .5, 1]
+        data_qtiles = np.nanquantile(data_contours, qlevels)
+        #data_qtiles.sort()
+        contour = ax.contour(data_contours, levels=qlevels[1:3]) #[.1, .5] #[0. 0.08 0.16 0.24 0.32 0.4  0.48 0.56 0.64]
         print("contour levels", data_qtiles, contour.levels)
         #chandles, _ = contour.legend_elements()
         #ax.clabel(contour, contour.levels, inline=True, fmt=contour_fmt, fontsize=10)
         #handles, labels = ax.get_legend_handles_labels()
         proxy = [plt.Rectangle((0,0),1,1,fc=pc.get_edgecolor()[0]) for pc in contour.collections]
-        ax.legend(proxy, [rf'$\geq{q:.02f}$' for q in data_qtiles[1:3]], loc='upper left', bbox_to_anchor=(1.16, 1), title='Tor Probabilities')
+        ax.legend(proxy, [rf'$\geq{q:.04f}$ {l*100}% ' for q, l in zip(data_qtiles[1:3], qlevels[1:3])], 
+                  loc='upper left', bbox_to_anchor=(1.16, 1), title='Tor Probability') #, alignment='left'
     ax.set_aspect('equal', 'box') #.axis('equal') #
     ax.set_title(title)
     cb_ = fig.colorbar(pcmesh, ax=ax)
@@ -1181,12 +1184,12 @@ if __name__ == '__main__':
     print("Datetime format:", datetime_fmt)
 
     SECS_SINCE = 'seconds since 2001-01-01'
-    ds_load_args = {'cache': False}
+    ds_load_args = {'decode_times': False} #{'cache': False, 
     wofs, wofs_netcdf = load_wofs_file(wofs_files, args.filename_prefix, 
                                        wofs_datetime=None,
                                        datetime_format=datetime_fmt,
                                        seconds_since=SECS_SINCE, 
-                                       engine='netcdf4', DB=DB)
+                                       engine='netcdf4', DB=DB, **ds_load_args)
                                        
     # Interpolate WoFS grid to GridRad grid
     GRIDRAD_SPACING = 48
@@ -1263,15 +1266,17 @@ if __name__ == '__main__':
                    figsize=(10, 9), DB=DB, **anim_args)
         #plt.close()
 
+        wofs_basefname = os.path.basename(wofs_files)
+
         # Original reflectivity
-        fname = os.path.basename(wofs_files) + f'__ZH_level00.png'
+        fname = wofs_basefname + f'__ZH_level00.png'
         print(" ++ w shape REFL_10CM",  wofs.REFL_10CM.values.shape)
         plot_pcolormesh(args, wofs.REFL_10CM.values[0, 0], fname, 
                         title='Reflectivity 10 cm', cb_label='dBZ', 
                         cmap="Spectral_r", vmin=0, vmax=50, dpi=250, figsize=(10, 9))
 
         # Reflectivity GRIDRAD
-        fname = os.path.basename(wofs_files) + f'__ZH_level00_gridrad.png'
+        fname = wofs_basefname + f'__ZH_level00_gridrad.png'
         print("  ++ g shape ZH", wofs_gridrad.ZH.shape)
         print("  ++ g shape ZH_1km", preds_gridrad_stitched.ZH_1km.shape)
         plot_pcolormesh(args, preds_gridrad_stitched.ZH_1km[0], fname, #wofs_gridrad.ZH[0,:,:,0]
@@ -1281,20 +1286,48 @@ if __name__ == '__main__':
 
         # Predictions WOFS GRID
         pred_max = np.max(preds_wofsgrid.ML_PREDICTED_TOR[0])
-        fname = os.path.basename(wofs_files) + f'__predictions.png'
+        fname = wofs_basefname + f'__predictions.png'
         plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
                         title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
                         cmap="cividis", vmin=0, vmax=pred_max, dpi=250, figsize=(10, 9))
+        # ^^ With contours
+        fname = wofs_basefname + f'__predictions_contours.png'
+        plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
+                        title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
+                        data_contours=preds_wofsgrid.ML_PREDICTED_TOR[0],
+                        cmap="Spectral_r", vmin=0, vmax=pred_max, alpha=.6, dpi=300, figsize=(12, 9)) #cividis
+        # PROBABS Hist
+        fname = wofs_basefname + f'__predictions_hist.png'
+        fig, ax = plt.subplots(2, 1, figsize=(8, 6))
+        ax = ax.ravel()
+        hvals, bins = np.histogram(preds_wofsgrid.ML_PREDICTED_TOR[0], bins='fd', density=False)
+        hvals = hvals / np.sum(hvals)
+        delta = (bins[1] - bins[0]) / 2
+        ax[0].plot(bins[:-1]+delta, hvals, label='Histogram')
+        ax[0].set(title='Tor Predictions Distribution', ylabel='density')
+        ax[0].legend()
+        #vals, bins, patches = ax.hist(hvals, bins=bins, histtype='bar', label='Histogram')
+        cvals = np.cumsum(hvals)
+        ax[1].plot(bins[:-1]+delta, cvals, label='Cumulative')
+        #vals, bins, patches = ax.hist(hvals, bins=bins, histtype='step', label='Cumulative' , cumulative=True)
+        ax[1].set(xlabel='Probability', ylabel='cumulative density')
+        ax[1].legend()
+        if args.write in [3, 4]:
+            #dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
+            fpath = os.path.join(dir_figs, fname)
+            print("  Saving", fpath)
+            plt.savefig(fpath, dpi=250)
+        plt.close()
 
         # Predictions GRIDRAD GRID
-        fname = os.path.basename(wofs_files) + f'__predictions_gridrad.png'
+        fname = wofs_basefname + f'__predictions_gridrad.png'
         plot_pcolormesh(args, preds_gridrad_stitched.predicted_tor[0], fname, 
                         title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
                         cmap="cividis", vmin=0, vmax=pred_max, dpi=250, figsize=(10, 9)) #1
 
 
         # Composite Reflectivity with prediction contours (WoFS)
-        fname = os.path.basename(wofs_files) + f'__ZH_composite_predictions.png'
+        fname = wofs_basefname + f'__ZH_composite_predictions.png'
         print(" ++ shape predictions", preds_wofsgrid.ML_PREDICTED_TOR.shape)
         print(" ++ shape composite", preds_wofsgrid.COMPOSITE_REFL_10CM.shape)
         ZH_composite = preds_wofsgrid.COMPOSITE_REFL_10CM.values[0] #.max(axis=3)
@@ -1304,7 +1337,7 @@ if __name__ == '__main__':
                         cmap="Spectral_r", vmin=0, vmax=50, alpha=.6, dpi=300, figsize=(13, 10))
         
         # Updraft
-        fname = os.path.basename(wofs_files) + f'__updraft_helicity_predictions.png'
+        fname = wofs_basefname + f'__updraft_helicity_predictions.png'
         uh_min = np.min(preds_wofsgrid.ML_PREDICTED_TOR[0])
         uh_max = np.max(preds_wofsgrid.ML_PREDICTED_TOR[0])
         print(" ++ shape uh", preds_wofsgrid.UP_HELI_MAX.shape)
@@ -1312,7 +1345,7 @@ if __name__ == '__main__':
         plot_pcolormesh(args, UH, fname, 
                         title='Updraft Helicity (WoFS Grid)', 
                         cb_label='', data_contours=preds_wofsgrid.ML_PREDICTED_TOR[0],
-                        cmap="Spectral_r", vmin=uh_min, vmax=uh_max, dpi=300, figsize=(13, 10))
+                        cmap="Spectral_r", vmin=uh_min, vmax=uh_max, alpha=.6, dpi=300, figsize=(13, 10))
 
         npatches = wofs_combo.ZH_composite.values.shape[0]
         for pi in range(0, npatches, 25):
@@ -1325,14 +1358,14 @@ if __name__ == '__main__':
             cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
             cb_ZH_distr.set_label('dBZ', rotation=0)
 
-            fname = os.path.basename(wofs_files) + f'__patch{pi:03d}_ZH_distr.png'
+            fname = wofs_basefname + f'__patch{pi:03d}_ZH_distr.png'
             fpath = os.path.join(dir_figs, fname)
             print("  Saving", fpath)
             plt.savefig(fpath, dpi=250)
             
 
             # Predictions heatmap
-            fname = os.path.basename(wofs_files) + f'__patch{pi:03d}_ZH_distr_preds.png'
+            fname = wofs_basefname + f'__patch{pi:03d}_ZH_distr_preds.png'
             plot_pcolormesh(args, wofs_combo.predicted_tor.values[pi], fname, 
                             title=f'Prediction (patch {pi:03d})', cb_label='$p_{tor}$', 
                             cmap="coolwarm", vmin=0, vmax=1, dpi=200, figsize=(9, 8))
