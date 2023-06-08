@@ -202,13 +202,13 @@ if __name__ == '__main__':
                 rundatetimes_dict[rundatetime] = 1
             
             rundatetimes.append(rundatetime)
-            if rundatetime[-4:] == "0300" and forecast_hour >= args.hours_to_analyze:
+            if rundatetime[-4:] == "0300" and forecast_hour > args.hours_to_analyze:
                 for rdt in list(set(rundatetimes)):
                     subprocess.run(["azcopy",
                                     "copy",
                                     "--recursive",
                                     "--block-blob-tier", "cool",
                                     "--check-length=false",
-                                    f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/{rdt[-4:]}",
-                                    f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/{rundate}/"])
+                                    f"{args.vm_datadrive}/{args.dir_preds}/{rundate[:4]}/{rundate}/",
+                                    f"{args.blob_url_ncar}/{args.dir_preds}/{rundate[:4]}/"])
                 break

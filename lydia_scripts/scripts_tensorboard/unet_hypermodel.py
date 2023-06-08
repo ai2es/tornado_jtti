@@ -64,7 +64,7 @@ from tensorboard.plugins.hparams import api
 from tensorboard.plugins.hparams import api_pb2
 from tensorboard.plugins.hparams import summary as hp_summary
 
-import py3nvml
+#import py3nvml
 
 #sys.path.append("../")
 sys.path.append("lydia_scripts")
@@ -73,6 +73,12 @@ from custom_metrics import MaxCriticalSuccessIndex
 #sys.path.append("../../../keras-unet-collection")
 sys.path.append("../keras-unet-collection")
 from keras_unet_collection import models
+
+# Cause any Tensor allocations or operations to be printed
+# Display which devices operations and tensors are assigned to
+tf.debugging.set_log_device_placement(True)
+tf.config.run_functions_eagerly(True)
+tf.data.experimental.enable_debug_mode()
 print(' ')
 
 
@@ -145,13 +151,16 @@ class UNetHyperModel(HyperModel):
 
         in_shape = self.input_shape
 
-        # TODO: other options?
+        num_layers = hp.Int("num_layers", min_value=4, step=1, max_value=6)
         latent_dim = hp.Int("latent_dim", min_value=28, step=2, max_value=256)
         #num = hp.Int("n_conv_down", min_value=3, step=1, max_value=10) # number of layers
-        nfilters_per_layer6 = np.around(np.linspace(8, latent_dim, num=6)).astype(int).tolist()
+        nfilters_per_layer6 = np.around(np.linspace(8, latent_dim, num=num_layers)).astype(int).tolist()
         #nfilters_per_layer = list(range(8, latent_dim, 2))
         #nfilters_per_layer2 = [2**i for i in range(3, int(np.log2(latent_dim)))]
-        nfilters_per_layer2 = np.logspace(3, np.log2(latent_dim), num=6, endpoint=True, base=2, dtype=int)
+        nfilters_per_layer2 = np.logspace(3, np.log2(latent_dim), num=num_layers, endpoint=True, base=2, dtype=int)
+        mask = nfilters_per_layer2 % 2
+        mask[-1] = 0
+        nfilters_per_layer2[mask] += 1 # make odd layers even
 
         # List defining number of conv filters per down/up-sampling block
         nfilters_type = hp.Choice("nfilters_type", values=['linear', 'log'])
@@ -167,7 +176,7 @@ class UNetHyperModel(HyperModel):
         # Configuration of downsampling (encoding) blocks
         pool = hp.Choice("pool_down", values=['False', 'ave', 'max'])
         pool = False if pool == 'False' else pool
-        # TODO: look up GELU and Snake
+        # TODO: look up GELU
         activation = hp.Choice("in_activation", values=['PReLU', 'ELU', 'GELU', 'Snake']) #'ReLU', 'LeakyReLU'
 
         # Number of conv layers (after concatenation) per upsampling level
@@ -223,10 +232,13 @@ class UNetHyperModel(HyperModel):
                 l2 = hp.Choice("l2", values=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6])
 
         # TODO: Dropout??
-        # Single BatchNorm layer after input layer
 
         # Choose the type of unet
+        #att_unet_2d (single regression), r2_unet_2d >=2 layers
+        #resunet_a_2d, u2net_2d >= 3
         unet_type = hp.Choice("unet_type", values=['unet_2d', 'unet_plus_2d', 'unet_3plus_2d'])
+
+        #TODO: weights=[None, 'imagenet']
         if unet_type == 'unet_2d':
             model = models.unet_2d(in_shape, 
                             filter_num, 
@@ -260,12 +272,34 @@ class UNetHyperModel(HyperModel):
                             pool=pool, unpool=unpool,
                             l1=l1, l2=l2, weights=None,
                             batch_norm=batch_norm, name='unet3plus')
+        '''
+        elif unet_type == 'vnet_2d':
+            model = models.vnet_2d((256, 256, 1), filter_num=[16, 32, 64, 128, 256], n_labels=2,
+                      res_num_ini=1, res_num_max=3, 
+                      activation='PReLU', output_activation='Softmax', 
+                      batch_norm=True, pool=False, unpool=False, name='vnet')
+        elif unet_type == 'r2_unet_2d':
+            model = models.r2_unet_2d((None, None, 3), [64, 128, 256, 512], n_labels=2,
+                          stack_num_down=2, stack_num_up=1, recur_num=2,
+                          activation='ReLU', output_activation='Softmax', 
+                          batch_norm=True, pool='max', unpool='nearest', name='r2unet')
+        elif unet_type == 'u2net_2d':
+            model = models.u2net_2d((128, 128, 3), n_labels=2, 
+                        filter_num_down=[64, 128, 256, 512], filter_num_up=[64, 64, 128, 256], 
+                        filter_mid_num_down=[32, 32, 64, 128], filter_mid_num_up=[16, 32, 64, 128], 
+                        filter_4f_num=[512, 512], filter_4f_mid_num=[256, 256], 
+                        activation='ReLU', output_activation=None, 
+                        batch_norm=True, pool=False, unpool=False, deep_supervision=True, name='u2net')
+        '''
 
         # Insert BatchNormalization layer after Input layer
         if not batch_norm:
             bn_layer = BatchNormalization()
             #synchronized=self.distribution_strategy, #set and if this layer is used within a tf.distribute strategy
             #TODO: model = insert_batchnorm_after_input(model, bn_layer) #, DB=False)
+
+        # TODO: Class weighting
+        #w_class0 = hp.Float("w_class0", min_value=1e-4, max_value=1e-2, sampling="log") #sampling=linear, step=2
 
         # Optimization
         lr = hp.Choice("learning_rate", values=[1e-3, 1e-4, 1e-5, 1e-6])
@@ -277,7 +311,7 @@ class UNetHyperModel(HyperModel):
         #                                    RMSprop(learning_rate=lr)]
 
         # Build and return the model
-        model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+        model.compile(loss=loss, optimizer=optimizer, metrics=metrics, run_eagerly=True)
         if self.DB: model.summary()
         return model
 
@@ -509,7 +543,7 @@ def execute_search(args, tuner, X_train, X_val=None,
                 batch_size=BATCH_SIZE, epochs=NEPOCHS, 
                 shuffle=False, callbacks=callbacks,
                 steps_per_epoch=5 if DB else None, #verbose=2, #max_queue_size=10, 
-                workers=2, use_multiprocessing=True) 
+                workers=1, use_multiprocessing=False) #class_weight={0: p0, 1: p1}
 
 def get_rotation_indicies(args, nfolds, DB=0):
     ''' TODO TEST
@@ -569,10 +603,10 @@ def prep_data(args, n_labels=None, DB=1):
     """ 
     # Dataset size
     #height = args.elevation
-    x_shape = (None, *args.x_shape) #(None, 32, 32, 12)
-    x_shape_val = args.x_shape #(32, 32, 12)
+    x_shape = (None, *args.x_shape) #args.x_shape #model-->(None, 32, 32, 12)
+    x_shape_val = args.x_shape #(None, *args.x_shape) #(32, 32, 12)
     
-    y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
+    y_shape = args.y_shape #(None, 32, 32, 1) #(None, *args.y_shape)
     y_shape_val = args.y_shape
 
     #if loss == 'binary_focal_crossentropy':
@@ -615,16 +649,161 @@ def prep_data(args, n_labels=None, DB=1):
     '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf'
     '''
 
-    ds_train = tf.data.Dataset.load(args.in_dir, specs)
-    ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
-    #xy_train = np.array(list(ds_train.as_numpy_iterator()))
+    # tf.Dataset helper methods to group storm types into separate datasets
+    def filter_neg(x, y):
+        return tf.math.reduce_all(y <= 0)
+    def filter_pos(x, y):
+        return tf.math.reduce_any(y > 0)
+    
+    # Sample weighting for Dataset element selection
+    weights = [.9, .1] #np.repeat(1 / len(storm_datasets), len(storm_datasets))
+
+    ds_train = tf.data.Dataset.load(args.in_dir) #, specs)#.unbatch()
+    print("Train Dataset:", ds_train)
     #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val)
-    ds_val = ds_val.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = ds_val.prefetch(tf.data.AUTOTUNE)
+    ds_neg = ds_train.filter(filter_neg) #.repeat(2)
+    ds_pos = ds_train.filter(filter_pos) #.repeat(2)
+    nneg = ds_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy() #ds_neg.cardinality().numpy()
+    npos = ds_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy() #ds_pos.cardinality().numpy()
+    print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+    '''
+    if nneg > 0 and npos > 0:
+        ds_train = tf.data.Dataset.sample_from_datasets([ds_neg, ds_pos],
+                                             weights=weights,
+                                             stop_on_empty_dataset=True)
+    '''
+    ds_train = ds_train.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE) #unbatch().batch()
+    ds_train = ds_train.prefetch(2) #tf.data.AUTOTUNE)
+    print("Train Dataset:", ds_train)
+
+    ds_val = tf.data.Dataset.load(args.in_dir_val) #, specs_val)
+    print("Val Dataset:", ds_val)
+    ds_val_neg = ds_val.filter(filter_neg)
+    ds_val_pos = ds_val.filter(filter_pos)
+    nneg = ds_val_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+    npos = ds_val_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+    print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+    ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val = ds_val.prefetch(2)
+    print("Val Dataset:", ds_val)
+
+    ds_test = None
+    if not args.in_dir_test is None:
+        ds_test = tf.data.Dataset.load(args.in_dir_test)
+        print("Test Dataset:", ds_test)
+        ds_test_neg = ds_test.filter(filter_neg)
+        ds_test_pos = ds_test.filter(filter_pos)
+        nneg = ds_test_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+        npos = ds_test_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+        print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+        ds_test = ds_test.batch(args.batch_size)
+        ds_test = ds_test.prefetch(2)
+        print("Test Dataset:", ds_test)
+
     if DB:
         print("Training Dataset Specs:", specs)
         print("Validation Dataset Specs:", specs_val)
+        #print(len(list(ds_train.as_numpy_iterator())))
+        #print(len(list(ds_val.as_numpy_iterator())))
+
+    return (ds_train, ds_val, ds_test)
+
+def sample_data(args, n_labels):
+    '''
+    NOT USED
+    '''
+    # Dataset size
+    #height = args.elevation
+    x_shape = args.x_shape #(None, 32, 32, 12) #(None, *args.x_shape)
+    x_shape_val = args.x_shape #(32, 32, 12)
+    
+    y_shape = args.y_shape #(None, 32, 32, 1) #(None, *args.y_shape)
+    y_shape_val = args.y_shape
+
+    #if loss == 'binary_focal_crossentropy':
+    if n_labels == 1:        
+        #y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
+                     tf.TensorSpec(shape=y_shape, dtype=tf.int64, name='Y'))
+
+        #y_shape_val = args.y_shape #(32, 32, 1)
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
+                         tf.TensorSpec(shape=y_shape_val, dtype=tf.int64, name='Y'))
+
+        # Pick out the correct dataset paths
+        if args.dataset == 'tor':
+            path = "int_tor"
+        elif args.dataset == 'nontor_tor':
+            path = "int_nontor_tor"
+        else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
+    else:
+        # Define the dataset size
+        #y_shape = (None, 32, 32, 2)
+        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
+                     tf.TensorSpec(shape=y_shape, dtype=tf.float32, name='Y'))
+
+        #y_shape_val = y_shape[1:] #(32, 32, 2)
+        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
+                         tf.TensorSpec(shape=y_shape_val, dtype=tf.float32, name='Y'))
+
+    # Pick out the correct dataset paths
+    #hparams[HP_DATA_PATCHES_TYPE]
+    if args.dataset == 'tor':
+        path = "onehot_tor"
+    elif args.dataset == 'nontor_tor':
+        path = "onehot_nontor_tor"
+    else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
+        
+    # Read tensorflow datasets
+    '''
+    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf'
+    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf'
+    '''
+
+    # tf.Dataset helper methods to group storm types into separate datasets
+    def filter_neg(x, y):
+        return tf.math.reduce_all(y <= 0)
+    def filter_pos(x, y):
+        return tf.math.reduce_any(y > 0)
+    
+    # Sample weighting for Dataset element selection
+    weights = [.9, .1] #np.repeat(1 / len(storm_datasets), len(storm_datasets))
+
+    ds_train = tf.data.Dataset.load(args.in_dir, specs)#.unbatch()
+    #xy_train = np.array(list(ds_train.as_numpy_iterator()))
+    #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_neg = ds_train.filter(filter_neg) #.repeat(2)
+    ds_pos = ds_train.filter(filter_pos) #.repeat(2)
+    nneg = len(list(ds_neg.as_numpy_iterator()))
+    npos = len(list(ds_pos.as_numpy_iterator()))
+    print("n neg", nneg, "n pos", npos)
+    if nneg > 0 and npos > 0:
+        ds_train = tf.data.Dataset.sample_from_datasets([ds_neg, ds_pos],
+                                             weights=weights,
+                                             stop_on_empty_dataset=True)
+    ds_train = ds_train.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_train = ds_train.prefetch(2) #tf.data.AUTOTUNE)
+
+    ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val).batch(args.batch_size)
+    print(ds_val)
+    ds_val_neg = ds_val.filter(filter_neg) #.repeat()
+    ds_val_pos = ds_val.filter(filter_pos) #.repeat()
+    print(ds_val_neg)
+    print(ds_val_pos)
+    nneg_val = len(list(ds_val_neg.as_numpy_iterator()))
+    npos_val = len(list(ds_val_pos.as_numpy_iterator()))
+    print("val: n neg", nneg, "n pos", npos)
+    if nneg_val > 0 and npos_val > 0:
+        ds_val = tf.data.Dataset.sample_from_datasets([ds_val_neg, ds_val_pos],
+                                          weights=weights,
+                                             stop_on_empty_dataset=True)
+    #ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val = ds_val.prefetch(2) #tf.data.AUTOTUNE)
+    if DB:
+        print("Training Dataset Specs:", specs)
+        print("Validation Dataset Specs:", specs_val)
+        #print(len(list(ds_train.as_numpy_iterator())))
+        #print(len(list(ds_val.as_numpy_iterator())))
 
     return (ds_train, ds_val)
 
@@ -720,11 +899,11 @@ def contingency_curves(y, y_preds, threshs):
     tns = tn(y, y_preds)
     return tps, fps, fns, tns
 
-def get_max_csi(y, y_preds, thresh=np.arange(0.05, 1.05, 0.05)):
+def get_max_csi(y, y_preds, thresh):
     ''' TODO
     @param y: true output
     @param y_preds: predicted output
-    @param thresh: probability threholds 
+    @param thresh: probability threholds #thresh=np.arange(0.05, 1.05, 0.05)
     '''
     #tp = tf.keras.metrics.TruePositives(thresholds=thresh.tolist())
     #fp = tf.keras.metrics.FalsePositives(thresholds=thresh.tolist())
@@ -839,8 +1018,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), save=False,
-                          thresh=np.arange(0.05, 1.05, 0.05), dpi=180):
+def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None, figsize=(5, 5), save=False, dpi=180):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
     Based on method from Tensorflow docs.
@@ -848,8 +1026,8 @@ def plot_confusion_matrix(y, y_preds, fname, p=.5, fig_ax=None, figsize=(5, 5), 
     @param y: true output
     @param y_preds: predicted output
     @param fname: file name to save the figure as
+    @param thresh: list of the thresholds for other performance plots #thresh=np.arange(0.05, 1.05, 0.05)
     @param p: cutoff probability above which is labelled 1
-    @param thresh: list of the thresholds for other performance plots
     @param figsize: tuple with the width and height of the figure
     @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param save: bool flag whether to save the figure
@@ -966,7 +1144,7 @@ def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=1
 
     return fig, ax
 
-def plot_reliabilty_curve(y, y_preds, fname, n_bins=18, strategy='quantile', 
+def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, strategy='quantile', 
                           fig_ax=None, figsize=(10, 10), save=False, dpi=180, 
                           **kwargs):
     '''
@@ -977,6 +1155,8 @@ def plot_reliabilty_curve(y, y_preds, fname, n_bins=18, strategy='quantile',
     @param y: true output
     @param y_preds: predicted output
     @param fname: file name to save the figure as
+    @param n_bins:
+    @param strategy: 
     @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param figsize: tuple with the width and height of the figure
     @param save: bool flag whether to save the figure
@@ -1056,12 +1236,13 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
     ax.set_ylabel('POD')
     return ax
 
-def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=None, 
+def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, 
              color='dodgerblue', figsize=(10, 10), save=False, dpi=180, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
     CSI = 1. (this curve is highly senstive to event freq)
+    @param threshs=np.linspace(0, 1, 21)
     @param csiargs: keyword args for make_csi_axis()
     '''
     fig = None
@@ -1092,7 +1273,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
     ax = make_csi_axis(ax=ax, **csiargs)
     ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label) #, lw=2, **plotargs)
     ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
-    text = f'{max_csi:02f}'
+    text = f'{max_csi:.02f}'
     ax.text(sr_of_maxcsi-0.06, pod_of_maxcsi-0.02, text, path_effects=pe1, fontsize=16, color='white')
     ax.legend(loc='upper right')
     ax.set_aspect('equal')
@@ -1105,7 +1286,7 @@ def plot_csi(y, y_preds, fname, label, threshs=np.linspace(0, 1, 21), fig_ax=Non
         if np.isnan(srs[i]) or np.isnan(pods[i]): continue
         if i % 3 and i != nthreshs - 1: continue # skip every other threshold except the last
         text = np.char.ljust(f'{t:.02f}', width=4, fillchar='0') #str(np.round(t, 2))
-        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=10, color='white')
+        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=11, color='white')
         #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
     #plt.tight_layout()
@@ -1128,6 +1309,8 @@ def create_argsparser():
                          help='Input directory where the data are stored')
     parser.add_argument('--in_dir_val', type=str, required=True,
                          help='Input directory where the validation data are stored')
+    parser.add_argument('--in_dir_test', type=str, #required=True,
+                         help='Input directory where the test data are stored')
     parser.add_argument('--out_dir', type=str, required=True,
                          help='Output directory for results, models, hyperparameters, etc.')
     parser.add_argument('--out_dir_tuning', type=str, #required=True,
@@ -1247,7 +1430,7 @@ def args2string(args):
 
     args_str = '' #f'{cdatetime}_'
     for arg, val in vars(args).items(): 
-        if arg in ['in_dir', 'in_dir_val', 'out_dir', 'out_dir_tuning',
+        if arg in ['in_dir', 'in_dir_val', 'in_dir_test', 'out_dir', 'out_dir_tuning',
                    'project_name_prefix', 'overwrite', 'dry_run', 'nogo', 'save']:
             continue
         if isinstance(val, bool):
@@ -1297,20 +1480,26 @@ if __name__ == "__main__":
     #    print(f'We have {n_physical_devices} GPUs\n')
     #    '''
 
-    tf.debugging.set_log_device_placement(True)
-
     if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
         # Fetch list of allocated logical GPUs; numbered 0, 1, …
         devices = tf.config.get_visible_devices('GPU')
         ndevices = len(devices)
-        print(f'We have {ndevices} GPUs\n')
 
         # Set memory growth for each
-        #for device in devices:
-        #    tf.config.experimental.set_memory_growth(device, True)
+        #config.gpu_options.allow_growth = True
+        try:
+            for device in devices:
+                tf.config.experimental.set_memory_growth(device, True)
+            print("Memory growth set")
+        except Exception as err:
+            print(err)
+
+        devices_logical = tf.config.list_logical_devices('GPU')
+        print(f'We have {ndevices} GPUs. Logical devices {len(devices_logical)} {devices_logical}\n')
     else:
-        # No allocated GPUs: do not delete this case!                                                                	 
-        tf.config.set_visible_devices([], 'GPU')
+        # No allocated GPUs: do not delete this case!
+        try: tf.config.set_visible_devices([], 'GPU')
+        except Exception as err: print(err)
 
     print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
 
@@ -1320,7 +1509,7 @@ if __name__ == "__main__":
 
     tuner, hypermodel = create_tuner(args, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
 
-    ds_train, ds_val = prep_data(args, n_labels=hypermodel.n_labels)
+    ds_train, ds_val, ds_test = prep_data(args, n_labels=hypermodel.n_labels)
 
     PROJ_NAME_PREFIX = args.project_name_prefix
     PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
@@ -1418,10 +1607,11 @@ if __name__ == "__main__":
             fig, axs = plt.subplots(1, 2, figsize=(12, 6))
             axs = axs.ravel()
             #plt.subplots_adjust(wspace=.1)
+            cthresh = np.arange(0.05, 1.05, 0.05), 
             plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                                p=cutoff_probab, fig_ax=(fig, axs[0]), save=False)        
+                                p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[0]), save=False)        
             plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
-                                p=cutoff_probab, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
+                                p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
             plt.close(fig)
             del fig, axs
 
@@ -1447,11 +1637,17 @@ if __name__ == "__main__":
         print("\nEVALUATION")
         train_eval = model.evaluate(ds_train)
         val_eval = model.evaluate(ds_val)
-        #xtest_recon = model.evaluate(ds_test)
+        if not ds_test is None:
+            test_eval = model.evaluate(ds_test)
+
         metrics = H.history.keys()
+        df_index = ['train', 'val']
         evals = [ {k: v for k, v in zip(metrics, train_eval)} ]
         evals.append( {k: v for k, v in zip(metrics, val_eval)} )
-        df_eval = pd.DataFrame(evals, index=['train', 'val'])
+        if not ds_test is None:
+            evals.append( {k: v for k, v in zip(metrics, test_eval)} )
+            df_index.append('test')
+        df_eval = pd.DataFrame(evals, index=df_index)
         print(df_eval)
         fname = os.path.join(dirpath, f"{FN_PREFIX}_eval.csv")
         if args.save in [1, 2, 4]: #args.save > 0
@@ -1460,10 +1656,11 @@ if __name__ == "__main__":
 
         if args.save in [2, 4]:
             # CSI Curve
+            csithreshs = np.linspace(0, 1, 21)
             fname = os.path.join(dirpath, f"{FN_PREFIX}_csi_train_val.png")
             fig, ax = plot_csi(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                            label='Train', show_cb=False)
-            plot_csi(y_val.ravel(), xval_preds.ravel(), fname, label='Val', 
+                            threshs=csithreshs, label='Train', show_cb=False)
+            plot_csi(y_val.ravel(), xval_preds.ravel(), fname, threshs=csithreshs, label='Val', 
                             color='orange', save=True, fig_ax=(fig, ax)) #args.save in [2, 4] #args.save >= 2
             plt.close(fig)
             del fig, ax
@@ -1487,23 +1684,6 @@ if __name__ == "__main__":
         best_model.build(input_shape=in_shape)
         Hb = best_model.fit(ds_train, validation_data=ds_val, callbacks=[es],
                             batch_size=args.batch_size, epochs=args.epochs)
-
-        # Save best model from hyperparam search
-        model_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.h5")
-        print(f"\nSaving top model")
-        print(model_fnpath)
-        best_model.summary()
-        hypermodel.save_model(model_fnpath, weights=True, #argstr
-                              model=best_model, save_traces=True)
-
-        # Save diagram of model architecture
-        diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}.png")
-        plot_model(best_model, to_file=diagram_fnpath,  
-                    show_dtype=True, show_shapes=True, expand_nested=False)
-        # REDUNDANT Save expanded diagram
-        #diagram_fnpath = os.path.join(dirpath, f"model00_{cdatetime}_expanded.png")
-        #plot_model(best_model, to_file=diagram_fnpath,  
-        #            show_dtype=True, show_shapes=True, expand_nested=True)
         '''
     # Load the latest model
     else:

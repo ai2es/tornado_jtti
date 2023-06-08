@@ -40,13 +40,14 @@ def get_arguments():
     dry_run = getattr(args, 'dry_run')
 
 
-def transfer_patch(patches_file):
+def transfer_patch(patches_file, vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12]):
 
 
     path_length = len(input_xarray_path)  
 
     # Make the output directory structure
     outpath = output_path + patches_file[path_length:path_length+4]
+    '''
     print(f"Making dir outpath={outpath} [dry_run={dry_run}]")
     if not os.path.exists(outpath):
         try:
@@ -56,18 +57,20 @@ def transfer_patch(patches_file):
                 os.mkdir(outpath)
         except Exception as err:
             print(err)
+    '''
 
-    outpath2 = output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13]
+    #outpath2 = output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13]
+    outpath2 = os.path.join(output_path, patches_file[path_length:path_length+4], patches_file[path_length+5:path_length+13])
     print(f"Making dir outpath2={outpath2} [dry_run={dry_run}]")
     if not os.path.exists(outpath2):
         try:
             #os.mkdir(output_path + '/' + patches_file[path_length:path_length+4] + '/' + patches_file[path_length+5:path_length+13])
             if not dry_run:
                 print(f"Making directory {outpath2} [dry_run={dry_run}]")
-                os.mkdir(outpath2)
+                os.makedirs(outpath2) #os.mkdir(outpath2)
         except Exception as err:
             print(err)
-            
+    
     # We want to save out the patches based on their file type
     if '_nontor_' in patches_file:
         
@@ -81,11 +84,13 @@ def transfer_patch(patches_file):
             ds = ds.where(ds.n_convective_pixels > 0).dropna(dim='patch')
             
             # Select 50 random patches from all the convective patches
+            print(" patch shape", ds.patch.values.shape)
             random_idxs = list(np.random.randint(low=0, high=ds.patch.values.shape[0], size=50))
             ds = ds.isel(patch=random_idxs)
 
             # Keep only the 12 desired vertical levels (each km agl)
-            ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+            #ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+            ds = ds.sel(z=vertical_levels)
 
             # Save and close the dataset
             #ds_fname = output_path + patches_file[path_length:]
@@ -114,7 +119,8 @@ def transfer_patch(patches_file):
             ds = ds.isel(patch=random_idxs)
 
             # Select only the vertical levels we want for training
-            ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+            #ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+            ds = ds.sel(z=vertical_levels)
 
             # Save and close the dataset
             if dry_run: 
@@ -143,7 +149,8 @@ def transfer_patch(patches_file):
                 ds = xr.load_dataset(patches_file) #xr.open_dataset(patches_file)
 
                 # Select the vertical levels we want for the ML model
-                ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+                #ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+                ds = ds.sel(z=vertical_levels)
 
                 # Save and close dataset
                 if dry_run: 
@@ -154,7 +161,6 @@ def transfer_patch(patches_file):
                     ds.to_netcdf(ds_fname)
                 #ds.close()
                 del ds
-                
                 return
 
         # This dataset is a 50/50 validation file
@@ -169,7 +175,8 @@ def transfer_patch(patches_file):
                 ds = xr.open_dataset(patches_file)
 
                 # Select the vertical levels we want
-                ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+                #ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+                ds = ds.sel(z=vertical_levels)
 
                 # Save out the data
                 if dry_run:
@@ -207,7 +214,8 @@ def transfer_patch(patches_file):
                 ds = xr.open_dataset(patches_file)
 
                 # Select the vertical levels for this Ml model
-                ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])               
+                #ds = ds.sel(z=[1,2,3,4,5,6,7,8,9,10,11,12])
+                ds = ds.sel(z=vertical_levels)
                 
                 # Select 50 random patches from this time
                 random_idxs = list(np.random.randint(low=0, high=ds.patch.values.shape[0], size=50))
@@ -222,18 +230,16 @@ def transfer_patch(patches_file):
                     ds.to_netcdf(light_fname)
                 #ds.close()
                 del ds
-                return
 
     else:
         print('This patch file did not follow the file naming conventions and hasn\'t been transfered:')
         print(patches_file)
-        return
     
         
       
 def main():
 
-    #get the inputs from the .sh file
+    # Get command line arguments
     get_arguments()  
       
     # Find the filepaths for all the patches we want to reduce
@@ -246,7 +252,7 @@ def main():
     # Transfer patches in parallel
     with mp.Pool(processes=20) as p:
         #tqdm.tqdm(p.map(transfer_patch, all_patches), total=len(all_patches))
-        p.map(transfer_patch, all_patches[:10])
+        p.map(transfer_patch, all_patches)
 
 
 
