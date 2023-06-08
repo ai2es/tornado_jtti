@@ -12,9 +12,9 @@ python -u process_wofs.py  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
 --with_nans  \
 --ZH_only  \
---fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX  \
+--fields UP_HELI_MAX U V W WSPD10MAX W_UP_MAX P PB PH PHB HGT  \
 --dir_preds_msgpk="wofs-dl-preds" \
---variables ML_PREDICTED_TOR COMPOSITE_REFL_10CM UP_HELI_MAX \
+--variables ML_PREDICTED_TOR COMPOSITE_REFL_10CM UP_HELI_MAX  \
 --thresholds 0.08 20 25 \
 --loc_model="lydia_scripts/models/2023_04_06_18_23_50/2023_04_06_18_23_50_hp_model01.h5"  \
 --file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
