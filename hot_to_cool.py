@@ -10,12 +10,15 @@ def parse_args():
     return args
 
 def set_properties_directory(dt_dir):
-    subprocess.run(["azcopy",
-                    "set-properties",
-                    f"https://wofsdltornado.blob.core.windows.net/wofs-dl-preds/{dt_dir}",
-                    "--block-blob-tier=cool",
-                    "--recursive=true"])
-    
+    try:
+        subprocess.run(["azcopy",
+                        "set-properties",
+                        f"https://wofsdltornado.blob.core.windows.net/wofs-dl-preds/{dt_dir}",
+                        "--block-blob-tier=cool",
+                        "--recursive=true"])
+    except Exception as e:
+        print(traceback.format_exc())
+            
 if __name__ == '__main__':
     
     args = parse_args()
@@ -26,7 +29,4 @@ if __name__ == '__main__':
     dirs = [dt.strftime('%Y%m%d%H%M') for dt in dts]
 
     with Pool(7) as p:
-        try:
-            p.map(set_properties_directory, dirs)
-        except Exception as e:
-            print(traceback.format_exc())
+        p.map(set_properties_directory, dirs)
