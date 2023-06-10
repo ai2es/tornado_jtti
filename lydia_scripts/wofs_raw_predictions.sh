@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 ##SBATCH -n 20
 #SBATCH --mem-per-cpu=1000
-#SBATCH --job-name=newgridrad__wofs_raw_predictions
+#SBATCH --job-name=newgridrad__wofs2023_raw_predictions
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
@@ -30,9 +30,14 @@ conda activate tf_experiments #tf_tornado #
 
 python --version
 
-WOFS_ROOT="/ourdisk/hpc/ai2es/wofs" #"/ourdisk/hpc/ai2es/tornado/wofs-preds-2023"  #
-WOFS_REL_PATH="2019/20190430/1930/ENS_MEM_2" #"20230511/1800/ENS_MEM_17"  #
-WOFS_FILE="wrfwof_d01_2019-04-30_20:35:00" #"wrfwof_d01_2023-05-11_19_05_00_predictions.nc"  #
+WOFS_ROOT="/ourdisk/hpc/ai2es/tornado/wofs-preds-2023"  
+WOFS_REL_PATH="20230602/1800/ENS_MEM_17"  #"20230511/1800/ENS_MEM_17" #
+WOFS_FILE="wrfwof_d01_2023-06-02_20_35_00_predictions.nc" #"wrfwof_d01_2019-04-30_20:35:00"  #
+
+## 2019
+#WOFS_ROOT="/ourdisk/hpc/ai2es/wofs" 
+#WOFS_REL_PATH="2019/20190430/1930/ENS_MEM_2" 
+#WOFS_FILE="wrfwof_d01_2019-04-30_20:35:00" 
 
 #WOFS_REL_PATH="2019/20190517/0300/ENS_MEM_12"
 #WOFS_FILE="wrfwof_d01_2019-05-18_03:15:00"
@@ -40,9 +45,9 @@ WOFS_FILE="wrfwof_d01_2019-04-30_20:35:00" #"wrfwof_d01_2023-05-11_19_05_00_pred
 python -u lydia_scripts/wofs_raw_predictions.py \
 --loc_wofs="${WOFS_ROOT}/${WOFS_REL_PATH}/${WOFS_FILE}"  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
---dir_preds="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/${WOFS_REL_PATH}"  \
---dir_patches="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_patches/${WOFS_REL_PATH}" \
---dir_figs="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/${WOFS_REL_PATH}/${WOFS_FILE}" \
+--dir_preds="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/2023/${WOFS_REL_PATH}"  \
+--dir_patches="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_patches/2023/${WOFS_REL_PATH}" \
+--dir_figs="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2023/${WOFS_REL_PATH}/${WOFS_FILE}" \
 --with_nans  \
 -Z  \
 -f U WSPD10MAX W_UP_MAX \
