@@ -14,8 +14,11 @@ python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
 
 """
 
+import wandb
+from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
+
 import os, io, sys, random, shutil
-import pickle
+import pickle, copy
 import time, datetime
 #from absl import app
 #from absl import flags
@@ -54,11 +57,12 @@ from tensorflow.keras.metrics import AUC
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras import Model
 
-from keras_tuner import HyperModel
+from keras_tuner import HyperModel, Tuner
 from keras_tuner.tuners import RandomSearch, Hyperband, BayesianOptimization
 #from tensorboard.plugins.hparams import api as hp
 from keras_tuner.engine import tuner as tuner_module
 from keras_tuner.engine import oracle as oracle_module
+from keras_tuner.engine import tuner_utils
 
 from tensorboard.plugins.hparams import api
 from tensorboard.plugins.hparams import api_pb2
@@ -315,6 +319,83 @@ class UNetHyperModel(HyperModel):
         if self.DB: model.summary()
         return model
 
+#'''
+class HyperbandWAB(Hyperband):
+    """ TODO: Test
+    Custom Tuner subclassed from `kt.Tuner`
+    """
+    def __init__(self, hypermodel=None, cli_args=None, **kwargs): #*tuner_args, 
+        '''
+        Class constructor
+        :param cli_args: command line interface (CLI) arguments
+        '''
+        # Command line args to dict
+        args_dict = copy.deepcopy(vars(cli_args))
+        for k in ['in_dir', 'in_dir_val', 'in_dir_test', 'out_dir', 'out_dir_tuning']: #'project_name_prefix', 'overwrite', 'dry_run', 'nogo', 'save']:
+            args_dict.pop(k)
+        self.cli_args = args_dict
+        super().__init__(hypermodel=hypermodel, **kwargs) #*tuner_args, 
+  
+    def run_trial(self, trial, *args, **kwargs):
+        '''
+        The overridden `run_trial` function
+
+        Args:
+            trial: The trial object that holds information for the
+            current trial.
+            *args: positional args for
+            **kwargs: keyword args for
+        '''
+        # Not using `ModelCheckpoint` to support MultiObjective.
+        # It can only track one of the metrics to save the best model.
+        model_checkpoint = tuner_utils.SaveBestEpoch(
+            objective=self.oracle.objective,
+            filepath=self._get_checkpoint_fname(trial.trial_id),
+        )
+
+        # WANDB INITIALIZATION
+        # Pass configuration so the runs are tagged with the hyperparams
+        # Enables use of the comparison UI widgets in the wandb dashboard off the shelf.
+        cargs = self.cli_args
+
+        config = cargs
+        config.update(trial.hyperparameters.values)
+
+        PROJ_NAME_PREFIX = cargs['project_name_prefix']
+        PROJ_NAME = f'{PROJ_NAME_PREFIX}_{cargs.tuner}'
+        PROJ_DATE = cargs['cdatetime']
+        tuner_dir = cargs['out_dir_tuning'] if not cargs['out_dir_tuning'] is None  else cargs['out_dir']
+
+        wandb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_wandb{PROJ_DATE}')
+        wandb_ckpt_path = os.path.join(tuner_dir, f'{PROJ_NAME}_wandb_model_ckpts{PROJ_DATE}')
+
+        #group = ''
+        #job_type = 'test' #'full'
+        #tags = ['nontor_tor', 'newgridrad', 'train2013-2017']
+        run = wandb.init(project='unet_hypermodel_test', config=config, sync_tensorboard=True, dir=wandb_path) #resume='auto', entity='ai2es', 
+
+        original_callbacks = kwargs.pop("callbacks", []) + [WandbMetricsLogger(log_freq=5)] #, WandbModelCheckpoint(wandb_ckpt_path)]
+
+        # Run the training process multiple times.
+        histories = []
+        for execution in range(self.executions_per_trial):
+            copied_kwargs = copy.copy(kwargs)
+            callbacks = self._deepcopy_callbacks(original_callbacks)
+            self._configure_tensorboard_dir(callbacks, trial, execution)
+            callbacks.append(tuner_utils.TunerCallback(self, trial))
+            # Only checkpoint the best epoch across all executions.
+            callbacks.append(model_checkpoint)
+            copied_kwargs["callbacks"] = callbacks
+            obj_value = self._build_and_fit_model(trial, *args, **copied_kwargs)
+            histories.append(obj_value)
+            # Log the epoch loss for WANDB
+            #run.log({'epoch_loss':epoch_loss, 'epoch':epoch})
+            run.log(obj_value)
+
+        # Finish the wandb run
+        run.finish()
+        return histories
+
 def insert_batchnorm_after_input(model, bn_layer, DB=False):
     '''
     Insert a BatchNormalization layer after the input layer of an existing 
@@ -454,8 +535,9 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
             **tuner_args
         )
     elif args.tuner in ['hyper', 'hyperband']:
-        tuner = Hyperband(
+        tuner = HyperbandWAB( #Hyperband(
             hypermodel,
+            cli_args=args,
             max_epochs=args.max_epochs, #10, #max train epochs per model. recommended slightly higher than expected epochs to convergence 
             factor=args.factor, #3, #int reduction factor for epochs and number of models per bracket
             hyperband_iterations=args.hyperband_iterations, #2, #>=1,  number of times to iterate over full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. set as high a value as is within your resource budget
@@ -491,6 +573,16 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
     print('\n==============================')
     tuner.search_space_summary()
     print(' ')
+
+    # start a new wandb run to track this script
+    '''
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="unet_hypermodel__test",
+        # track hyperparameters and run metadata
+        config=tuner.get_best_hyperparameters(1)[0] #tuner_args
+    )
+    '''
 
     return tuner, hypermodel
 
@@ -1460,9 +1552,11 @@ def args2string(args):
 if __name__ == "__main__":
     args = parse_args()
     cdatetime, argstr = args2string(args)
+    args.cdatetime = cdatetime
     if args.dry_run: 
         print(cdatetime)
         print(argstr)
+        print(args, "\n\n")
 
     # Grab select GPU(s)
     #if args.gpu: 
@@ -1480,6 +1574,7 @@ if __name__ == "__main__":
     #    print(f'We have {n_physical_devices} GPUs\n')
     #    '''
 
+    ndevices = 0
     if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
         # Fetch list of allocated logical GPUs; numbered 0, 1, …
         devices = tf.config.get_visible_devices('GPU')
@@ -1495,13 +1590,17 @@ if __name__ == "__main__":
             print(err)
 
         devices_logical = tf.config.list_logical_devices('GPU')
-        print(f'We have {ndevices} GPUs. Logical devices {len(devices_logical)} {devices_logical}\n')
+        print(f'Visible devices {ndevices} {devices}. \nLogical devices {len(devices_logical)} {devices_logical}\n')
     else:
         # No allocated GPUs: do not delete this case!
         try: tf.config.set_visible_devices([], 'GPU')
         except Exception as err: print(err)
 
     print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
+
+    if ndevices == 0:
+        print(f'Terminating run. nGPUs is {ndevices}')
+        exit()
 
     if args.nogo:
         print('NOGO.')

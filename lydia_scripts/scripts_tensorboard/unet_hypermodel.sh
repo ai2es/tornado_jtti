@@ -3,13 +3,13 @@
 ##SBATCH --partition=gpu
 ##SBATCH --nodelist=c301
 #SBATCH -p ai2es
-#SBATCH --nodelist=c731
-#SBATCH --time=48:00:00
+##SBATCH --nodelist=c731
+#SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1  #-n 20
 #SBATCH --mem=20G
-#SBATCH --job-name=tuner__int_nontor_tor__newgridrad
+#SBATCH --job-name=tuner__wandb
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
@@ -30,8 +30,9 @@ conda activate tf
 #bash 
 # if conda env tornado does not exist
 #conda env create --name tornado --file environment.yml
-#conda activate tf_tornado
-#conda install -c anaconda -y tensorflow-gpu
+#conda activate tf_experiments #tf_tornado
+#conda install -c conda-forge wandb
+#conda install -c anaconda -y tensorflow-gpu 
 
 
 python --version
@@ -60,19 +61,19 @@ python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
 --epochs=200 \
---batch_size=256 \
+--batch_size=300 \
 --lrate=5e-4 \
 --number_of_summary_trials=3 \
 --gpu \
---save=4 \
+--save=0 \
 --overwrite \
+--tuner_id="debug_wandb" \
+--dry_run \
 hyper \
---max_epochs=350 \
---factor=12
+--max_epochs=4 \
+--factor=2
 #--hps_index=1 \
 
-#--tuner_id="debug_newgridrad" \
-#--dry_run \
 
 #--max_epochs=350 \
 #--factor=12
