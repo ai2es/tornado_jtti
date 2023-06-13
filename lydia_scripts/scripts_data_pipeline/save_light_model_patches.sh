@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --partition=normal
+#SBATCH --partition=ai2es  #normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=20 ##-n 20
 #SBATCH --mem=10G
 #SBATCH --time=12:30:00
-#SBATCH --job-name=test__save_light_data
+#SBATCH --job-name=2019__save_light_data
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti

@@ -85,6 +85,8 @@ def transfer_patch(patches_file, vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12]):
             
             # Select 50 random patches from all the convective patches
             print(" patch shape", ds.patch.values.shape)
+            npatches = ds.patch.values.shape[0]
+            if npatches <= 0: return
             random_idxs = list(np.random.randint(low=0, high=ds.patch.values.shape[0], size=50))
             ds = ds.isel(patch=random_idxs)
 
