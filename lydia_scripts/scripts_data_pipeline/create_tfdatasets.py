@@ -425,7 +425,7 @@ if __name__ == "__main__":
 
     # Data set years list
     print(args.years)
-    all_years = ['2013', '2014', '2015', '2016', '2017', '2018'] # TODO: 2019
+    all_years = args.years #['2013', '2014', '2015', '2016', '2017', '2018', '2019']
     nfolds = len(all_years)
     # rotation index
     rot = 0 

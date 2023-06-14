@@ -4,9 +4,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
-#SBATCH --mem=100G
-#SBATCH --time=24:00:00 #24:05:00
-#SBATCH --job-name=create_tfdatasets
+#SBATCH --mem=200G
+#SBATCH --time=12:00:00 #24:05:00
+#SBATCH --job-name=2013_2019__create_tfdatasets
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
@@ -19,11 +19,11 @@
 #source /home/lydiaks2/.bashrc
 source ~/.bashrc
 bash 
-#conda activate tf_gpu
-conda activate tf_tornado
+conda activate tf_experiments #tf_tornado #
 
 #. /home/fagg/tf_setup.sh
 #conda activate tf
+
 
 # dataset_patches_type should be a list containing the patch types we want to include in training and 50/50 validation sets
 # 'n' for nontor patches, 't' for tornadic patches, 's' for sigtor patches
@@ -39,5 +39,5 @@ python -u lydia_scripts/scripts_data_pipeline/create_tfdatasets.py \
 --dataset_patches_type='nt' \
 --dataset_labels_type='int' \
 --ZH_only \
--y 2013 2014 2015 2016 2017 2018 
+-y 2013 2014 2015 2016 2017 2018 2019 
 #--dry_run

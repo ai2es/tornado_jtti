@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --partition=normal
+#SBATCH --partition=ai2es #normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
 #SBATCH --mem=10G
@@ -11,7 +11,7 @@
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
-#SBATCH --array=427-447%20
+#SBATCH --array=427-446%20
 ##SBATCH --array=1-214,262%20
 
 ###############################################################
