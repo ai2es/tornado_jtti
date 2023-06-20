@@ -24,7 +24,7 @@ bash
 conda activate gewitter 
 #this_spc_date_string='20130520'
 
-echo "SLURM_ARRAY_INDEX=$SLURM_ARRAY_INDEX"
+echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 python --version
 
 #python -u /home/lydiaks2/tornado_project/scripts_data_pipeline/patching.py \
