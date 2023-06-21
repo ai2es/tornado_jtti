@@ -130,6 +130,8 @@ def create_argsparser(args_list=None):
         help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
     parser.add_argument('-f', '--fields', type=str, nargs='+', #type=list,
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
+    parser.add_argument('--interp_method', type=int, default=0,
+        help='WoFS to GridRad (and vice versa) interpolation method. 0 to use scipy.interpolate.RectBivariateSpline. 1 to use scipy.spatial.cKDTree')
 
     # Model directories and files
     parser.add_argument('--loc_model', type=str, required=True,
@@ -388,15 +390,16 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
                         title='Z0 (WoFS Grid)', cb_label='dBZ', cmap="Spectral_r", 
                         vmin=0, vmax=65, dpi=dpi, figsize=figsize, close=True, save=save)
         fname = wofs_basefname + f'__debug_Zs.png'
-        fig, axs = plt.subplots(4, 9, figsize=(25, 12))
+        fig, axs = plt.subplots(5, 10, figsize=(25, 12))
         fig.suptitle('WoFS Grid')
         axs = axs.ravel()
+        nwh = Z.shape[0] # n wofs heights
         for i, ax in enumerate(axs):
-            cb_label = None if i < 35 else 'dBZ'
+            cb_label = None if i < nwh-1 else 'dBZ'
             plot_pcolormesh(args, Z[i], fname, fig_ax=(fig, ax, axs.tolist()),
                             title=f'Z{i}', vmin=0, vmax=65, 
                             cb_label=cb_label, cmap="Spectral_r", dpi=550, 
-                            figsize=figsize, close=(i == 35), save=(i == 35))
+                            figsize=figsize, close=(i == nwh-1), save=(i == nwh-1))
 
         fname = wofs_basefname + f'__debug_Zhist.png'
         print(fname) #Z.stack()
@@ -612,108 +615,111 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
     xlon_vals = np.squeeze(wofs.XLONG.values)
 
 
-    # TODO: if method == 0:
-    REFL_10CM_final = np.zeros((1, Z_agl.shape[0], lats_len, lons_len), float)
-    wlats = xlat_vals[:, 0]
-    wlons = xlon_vals[0, :]
-    for h in range(Z_agl.shape[0]):
-        Z_interpolator = RectBivariateSpline(wlons, wlats, Z_agl[h].T) 
-        #,bbox=[None, None, None, None]) #, kx=3, ky=3, s=0)
-        # Evaluate each (x,y) coordinate
-        REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lons, new_gridrad_lats, grid=True).T 
+    nheights = Z_agl.shape[0]
+    REFL_10CM_final = np.zeros((1, nheights, lats_len, lons_len), float)
+    uh_final = np.zeros((1, lats_len, lons_len), float)
+    vort_final = None
+    div_final = None
+    if method == 0:
+        wlats = xlat_vals[:, 0]
+        wlons = xlon_vals[0, :]
+        for h in range(nheights):
+            Z_interpolator = RectBivariateSpline(wlons, wlats, Z_agl[h].T) 
+            # Evaluate each (x,y) coordinate
+            REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lons, new_gridrad_lats, grid=True).T 
+        uh_interpolator = RectBivariateSpline(wlats, wlons, uh) 
+        uh_final[0] = uh_interpolator(new_gridrad_lats, new_gridrad_lons, grid=True)
+        
+        if not Z_only:
+            nvort_levels = vort.shape[0]
+            vort_final = np.zeros((1, lats_len, lons_len, nvort_levels), float)
+            div_final = np.zeros((1, lats_len, lons_len, nvort_levels), float)
+            for h in range(nvort_levels):
+                v_interp = RectBivariateSpline(wlats, wlons, vorts[h]) 
+                vort_final[0, :, :, h] = v_interp(new_gridrad_lats, new_gridrad_lons, grid=True)
+                #vorts .reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).
+                d_interp = RectBivariateSpline(wlats, wlons, divs[h]) 
+                div_final[0, :, :, h] = d_interp(new_gridrad_lats, new_gridrad_lons, grid=True)
+                #divs .reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3)
 
+    elif method == 1:
+        # List of all lat/lon grid points from original wofs grid
+        wofs_lats_lons = np.stack((xlat_vals.ravel(), xlon_vals.ravel())).T
 
-    # List of all lat/lon grid points from original wofs grid
-    wofs_lats_lons = np.stack((xlat_vals.ravel(), xlon_vals.ravel())).T
+        # KD Tree with wofs grid points
+        tree = spatial.cKDTree(wofs_lats_lons)
+        
+        # For each gridrad point, find k(=4) closest wofs grid points
+        distances, points = tree.query(new_gridrad_lats_lons, k=4)
+        if DB:
+            print(" new_gridrad_lats_lons", new_gridrad_lats_lons.shape)
+            print(" wofs_lats_lons", wofs_lats_lons.shape)
+            print(" # inf dists", np.isinf(distances).sum())
+        
+        # For points found above, identify each wofs coordinate value (bottom_top is constant)
+        d1_len = xlat_vals.shape[0]
+        d2_len = xlat_vals.shape[1]
+        time_points, south_north_points, west_east_points = np.unravel_index(points, (1, d1_len, d2_len)) 
+        #np.unravel_index(points, (1, 300, 300))
+        
+        # Repeat the x,y indices 29 times to select all data
+        heights_len = gridrad_heights.size
+        south_north = south_north_points.reshape(south_north_points.shape[0], 1, south_north_points.shape[1])
+        south_north_points_3d = np.tile(south_north, (1, heights_len, 1))
+        west_east = west_east_points.reshape(west_east_points.shape[0], 1, west_east_points.shape[1])
+        west_east_points_3d = np.tile(west_east, (1, heights_len, 1))
+        distances_3d = np.tile(distances.reshape(distances.shape[0], 1, distances.shape[1]), (1, heights_len, 1))
 
-    # KD Tree with wofs grid points
-    tree = spatial.cKDTree(wofs_lats_lons)
-    
-    # For each gridrad point, find k(=4) closest wofs grid points
-    distances, points = tree.query(new_gridrad_lats_lons, k=4)
+        # Make z coordinate indices. TODO: This might be able to be improved, but works fine.
+        for i in range(heights_len):
+            if i == 0:
+                bottom_top_3d = np.zeros((south_north_points.shape[0],
+                            south_north_points.shape[1], 1), dtype=int) 
+            else:
+                bottom_top_3d = np.append(bottom_top_3d, np.ones((south_north_points.shape[0], 
+                            south_north_points.shape[1], 1), dtype=int) * i, axis=2)
+        bottom_top_3d = np.swapaxes(bottom_top_3d, 1, 2)
+
+        # Selecting data 
+        refls = Z_agl[bottom_top_3d, south_north_points_3d, west_east_points_3d]
+        uhs = uh[south_north_points, west_east_points]
+
+        if not Z_only:
+            vorts = vort[bottom_top_3d, south_north_points_3d, west_east_points_3d]
+            divs = div[bottom_top_3d, south_north_points_3d, west_east_points_3d]
+
+        # Perform IDW interpolation and reshape data to shape to (Time, Altitude, Latitude, Longitude)
+        dist3d_sq = distances_3d**2
+        dist_sq = distances**2
+        if DB:
+            print("uh shape", uhs.shape)
+            print(f"dist3d_sq={np.quantile(dist3d_sq, [0, .5, 1])}")
+            print(f"dist_sq={np.quantile(dist_sq, [0, .5, 1])}")
+
+        # x, y coords for wofs grid and equivalent for gridrad, separate for each level
+        REFL_10CM_final = np.swapaxes(np.swapaxes((np.sum(refls / dist3d_sq, axis=2) / np.sum(1. / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, Z_agl.shape[0]), 1, 3), 2, 3).astype(np.float32)
+        uh_final = (np.sum(uhs / dist_sq, axis=1) / np.sum(1. / dist_sq, axis=1)).reshape(1, lats_len, lons_len).astype(np.float32)
+
+        if not Z_only:
+            vort_final = np.swapaxes(np.swapaxes((np.sum(vorts / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
+            div_final = np.swapaxes(np.swapaxes((np.sum(divs / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
+
     if DB:
-        print(" new_gridrad_lats_lons", new_gridrad_lats_lons.shape)
-        print(" wofs_lats_lons", wofs_lats_lons.shape)
-        print(" # inf dists", np.isinf(distances).sum())
-    
-    # For points found above, identify each wofs coordinate value (bottom_top is constant)
-    d1_len = xlat_vals.shape[0]
-    d2_len = xlat_vals.shape[1]
-    time_points, south_north_points, west_east_points = np.unravel_index(points, (1, d1_len, d2_len)) 
-    #np.unravel_index(points, (1, 300, 300))
-    
-    # Repeat the x,y indices 29 times to select all data
-    heights_len = gridrad_heights.size
-    south_north = south_north_points.reshape(south_north_points.shape[0], 1, south_north_points.shape[1])
-    south_north_points_3d = np.tile(south_north, (1, heights_len, 1))
-    west_east = west_east_points.reshape(west_east_points.shape[0], 1, west_east_points.shape[1])
-    west_east_points_3d = np.tile(west_east, (1, heights_len, 1))
-    distances_3d = np.tile(distances.reshape(distances.shape[0], 1, distances.shape[1]), (1, heights_len, 1))
-
-    # Make z coordinate indices. TODO: This might be able to be improved, but works fine.
-    for i in range(heights_len):
-        if i == 0:
-            bottom_top_3d = np.zeros((south_north_points.shape[0],
-                        south_north_points.shape[1], 1), dtype=int) 
-        else:
-            bottom_top_3d = np.append(bottom_top_3d, np.ones((south_north_points.shape[0], 
-                        south_north_points.shape[1], 1), dtype=int) * i, axis=2)
-    bottom_top_3d = np.swapaxes(bottom_top_3d, 1, 2)
-
-    # Selecting data 
-    refls = Z_agl[bottom_top_3d, south_north_points_3d, west_east_points_3d]
-    uhs = uh[south_north_points, west_east_points]
-
-    if not Z_only:
-        vorts = vort[bottom_top_3d, south_north_points_3d, west_east_points_3d]
-        divs = div[bottom_top_3d, south_north_points_3d, west_east_points_3d]
-
-    # Perform IDW interpolation and reshape data to shape to (Time, Altitude, Latitude, Longitude)
-    dist3d_sq = distances_3d**2
-    dist_sq = distances**2
-    if DB:
-        print("uh shape", uhs.shape)
-        print(f"dist3d_sq={np.quantile(dist3d_sq, [0, .5, 1])}")
-        print(f"dist_sq={np.quantile(dist_sq, [0, .5, 1])}")
-
-    #elif method == 1:
-    # x, y coords for wofs grid and equivalent for gridrad, separate for each level
-    #REFL_10CM_final = np.swapaxes(np.swapaxes((np.sum(refls / dist3d_sq, axis=2) / np.sum(1. / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, Z_agl.shape[0]), 1, 3), 2, 3).astype(np.float32)
-    uh_final = (np.sum(uhs / dist_sq, axis=1) / np.sum(1. / dist_sq, axis=1)).reshape(1, lats_len, lons_len).astype(np.float32)
-
-    if args.dry_run:
-        Z_max = np.nanmax(refls)
         Z_agl_max = np.nanmax(REFL_10CM_final)
-        _mx = np.max([Z_max, Z_agl_max])
-        print(f" to gridrad:: Zmax={Z_max} Zaglmax={Z_agl_max}")
+        print(f" to gridrad:: Zaglmax={Z_agl_max}")
         
         wofs_basefname = os.path.basename(args.loc_wofs)
         figsize = (12, 12)
         dpi = 300
 
-        refls_shape = np.swapaxes(np.swapaxes((np.sum(refls, axis=2)).reshape(1, lats_len, lons_len, Z_agl.shape[0]), 1, 3), 2, 3).astype(np.float32)
-        print(" refls", refls.shape)
-        print(" refls reshape", refls_shape.shape)
+        #refls_shape = np.swapaxes(np.swapaxes((np.sum(refls, axis=2)).reshape(1, lats_len, #lons_len, Z_agl.shape[0]), 1, 3), 2, 3).astype(np.float32)
+        #print(" refls", refls.shape)
+        #print(" refls reshape", refls_shape.shape)
+        print(" uh shape", uh.shape)
         print(" refls final", REFL_10CM_final.shape)
-        print("n NANs gridrad", np.isnan(REFL_10CM_final.ravel()).sum())
-        print("n inf gridrad", np.count_nonzero(np.isinf(REFL_10CM_final.ravel())))
+        print(" n NANs gridrad", np.isnan(REFL_10CM_final.ravel()).sum())
+        print(" n inf gridrad", np.count_nonzero(np.isinf(REFL_10CM_final.ravel())))
 
-        '''
-        fig, axs = plt.subplots(3, 4, figsize=(20, 20))
-        axs = axs.ravel()
-        fname = wofs_basefname + f'__debugtogridrad_Z00.png'
-        print(fname)
-        for ax in axs:
-            _, ax = plot_pcolormesh(args, Z_agl[0], fname, 
-                            title='Z0 (WoFS Grid)', cb_label='dBZ', cmap="Spectral_r", 
-                            vmin=0, vmax=_mx, dpi=dpi, figsize=figsize, DB=True)
-        fname = wofs_basefname + f'__debugtogridrad_Zhist.png'
-        print(fname)
-        refl_data = np.nan_to_num(refls.ravel(), copy=True, nan=-20)
-        plot_hist(args, refl_data, title='WoFS Grid (all levels)', xlabel='Reflectivity',
-                  ylabels=['density', 'cum density'], fname=fname, figsize=(8, 6),
-                  dpi=120) #, **hist_args)
-        '''
         _Zcomposit = np.nanmax(REFL_10CM_final[0], axis=0)
         fname = wofs_basefname + f'__debugtogridrad_Z_composite_gridrad.png'
         print(fname)
@@ -749,9 +755,6 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
                   ylabels=['density', 'cum density'], fname=fname, figsize=(8, 6),
                   dpi=120) #, **hist_args)
 
-    if not Z_only:
-        vort_final = np.swapaxes(np.swapaxes((np.sum(vorts / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
-        div_final = np.swapaxes(np.swapaxes((np.sum(divs / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
     
     # Put data into DataArrays with same dimensions, coordinates, and variable fields as gridrad
     dtime = wofs['Time'].values[0]
@@ -796,7 +799,7 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
     if args.with_nans:
         wofs_regridded = wofs_regridded.where(wofs_regridded.ZH > 0)
 
-        if args.dry_run:
+        if DB:
             fname = wofs_basefname + f'__debugtogridrad_with_nans_Z00_gridrad.png'
             print(fname)
             plot_pcolormesh(args, wofs_regridded["ZH"][0, 0], fname, 
@@ -1002,7 +1005,7 @@ def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
     return wofs_preds
 
 def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48, 
-                 seconds_since='seconds since 2001-01-01', DB=0):
+                 method=0, seconds_since='seconds since 2001-01-01', DB=0):
     '''
     Interpolate the WofS predictions data back into the original WoFS grid
 
@@ -1018,6 +1021,9 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     @param stats: dataset containing the mean and STD from the training data
     @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
             1 / (gridrad_spacing) degrees
+    @param method: int to select interpolation method (default method==0)
+            method==0: use scipy.interpolate.RectBivariateSpline (prefered)
+            method==1: use scipy.spatial.cKDTree
     @param seconds_since: string seconds since date statement to use for creating
             NETCDF4 datetime integers. string of the form since describing the 
             time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
@@ -1033,56 +1039,68 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
                                     gridrad_spacing=gridrad_spacing, 
                                     seconds_since=seconds_since, DB=DB)
     
-    # Add the stitched file to the list of stitched files     
-    #stitched_preds.append(predictions)
+    wofs_lats = wofs_orig.XLAT.values[0, :, 0] #wofs_orig.XLAT.values[0].ravel()
+    wofs_lons = wofs_orig.XLONG.values[0, 0, :] #wofs_orig.XLONG.values[0].ravel()
+    predictions_idw = np.zeros((wofs_lats.size, wofs_lons.size), float)
+    gridrad_lats = None
+    gridrad_lons = None
+    if method == 0:
+        _, gridrad_lats, gridrad_lons = calculate_output_lats_lons(wofs_orig, gridrad_spacing=gridrad_spacing)
+        p_interpolator = RectBivariateSpline(gridrad_lats[:-1], gridrad_lons[:-1],
+                                            predictions.predicted_tor.isel(time=0)) 
+        # Evaluate each (x,y) coordinate
+        predictions_idw = p_interpolator(wofs_lats, wofs_lons, grid=True)
 
-    # Calculate number of grid points required to add to each side to get to the full WoFS grid
-    to_add_east_west = round((wofs_orig.XLONG.max().values - predictions.lon.max().values + 360) * gridrad_spacing + 1)
-    to_add_north_south = round((wofs_orig.XLAT.max().values - predictions.lat.max().values) * gridrad_spacing + 1)
+    elif method == 1:
+        # Calculate number of grid points required to add to each side to get to the full WoFS grid
+        to_add_east_west = round((wofs_orig.XLONG.max().values - predictions.lon.max().values + 360) * gridrad_spacing + 1)
+        to_add_north_south = round((wofs_orig.XLAT.max().values - predictions.lat.max().values) * gridrad_spacing + 1)
 
-    # Pad the top, bottom, left and right of the grid toobtain the exact size of the original WoFS file grid
-    zeros_east_west = np.zeros((predictions.predicted_tor.isel(time=0).shape[0], to_add_east_west))
-    padded_east_west = np.concatenate((zeros_east_west, predictions.predicted_tor.isel(time=0).values, zeros_east_west), axis=1)
-    zeros_north_south = np.zeros((to_add_north_south, padded_east_west.shape[1]))
-    padded_predictions = np.concatenate((zeros_north_south, padded_east_west, zeros_north_south), axis=0)
+        # Pad the top, bottom, left and right of the grid toobtain the exact size of the original WoFS file grid
+        zeros_east_west = np.zeros((predictions.predicted_tor.isel(time=0).shape[0], to_add_east_west))
+        padded_east_west = np.concatenate((zeros_east_west, predictions.predicted_tor.isel(time=0).values, zeros_east_west), axis=1)
+        zeros_north_south = np.zeros((to_add_north_south, padded_east_west.shape[1]))
+        padded_predictions = np.concatenate((zeros_north_south, padded_east_west, zeros_north_south), axis=0)
 
-    # Calculate lats and lons of gridrad grid, which is padded with 0s on each side
-    padded_lats = np.linspace(predictions.lat.min().values - to_add_north_south / gridrad_spacing, 
-                                predictions.lat.max().values + to_add_north_south / gridrad_spacing, padded_predictions.shape[0])
-    padded_lons = np.linspace(predictions.lon.min().values - to_add_east_west / gridrad_spacing, 
-                                predictions.lon.max().values + to_add_east_west / gridrad_spacing, padded_predictions.shape[1])
+        # Calculate lats and lons of gridrad grid, which is padded with 0s on each side
+        padded_lats = np.linspace(predictions.lat.min().values - to_add_north_south / gridrad_spacing, 
+                                    predictions.lat.max().values + to_add_north_south / gridrad_spacing, padded_predictions.shape[0])
+        padded_lons = np.linspace(predictions.lon.min().values - to_add_east_west / gridrad_spacing, 
+                                    predictions.lon.max().values + to_add_east_west / gridrad_spacing, padded_predictions.shape[1])
 
-    # Place lats and lons into 2D arrays from 1D arrays
-    plons_len = padded_lons.size
-    plats_len = padded_lats.size
-    gridrad_lats = np.tile(padded_lats, plons_len).reshape(plons_len, plats_len).T
-    gridrad_lons = np.tile(padded_lons - 360, plats_len).reshape(plats_len, plons_len)
-    # Combine these 2 arrays into 1
-    gridrad_lats_lons = np.stack((np.ravel(gridrad_lats), np.ravel(gridrad_lons))).T
-    
-    # Extract the lats and lons from the wofs grid which we are interpolating to
-    wofs_lats_lons = np.stack((np.ravel(wofs_orig.XLAT.values[0]), np.ravel(wofs_orig.XLONG.values[0]))).T
-    
-    # Make the KD Tree
-    tree = spatial.cKDTree(gridrad_lats_lons)
+        # Place lats and lons into 2D arrays from 1D arrays
+        plons_len = padded_lons.size
+        plats_len = padded_lats.size
+        gridrad_lats = np.tile(padded_lats, plons_len).reshape(plons_len, plats_len).T
+        gridrad_lons = np.tile(padded_lons - 360, plats_len).reshape(plats_len, plons_len)
+        # Combine these 2 arrays into 1
+        gridrad_lats_lons = np.stack((np.ravel(gridrad_lats), np.ravel(gridrad_lons))).T
+        
+        # Extract the lats and lons from the wofs grid which we are interpolating to
+        wofs_lats_lons = np.stack((np.ravel(wofs_orig.XLAT.values[0]), np.ravel(wofs_orig.XLONG.values[0]))).T
+        
+        # Make the KD Tree
+        tree = spatial.cKDTree(gridrad_lats_lons)
 
-    # Query the tree at the desired points
-    # For each wofs point, find the closest gridrad gridpoint
-    distances, points = tree.query(wofs_lats_lons, k=4)
+        # Query the tree at the desired points
+        # For each wofs point, find the closest gridrad gridpoint
+        distances, points = tree.query(wofs_lats_lons, k=4)
 
-    # Get the indices of the interpolation points in the new padded gridrad grid
-    lat_points, lon_points = np.unravel_index(points, (plats_len, plons_len))
+        # Get the indices of the interpolation points in the new padded gridrad grid
+        lat_points, lon_points = np.unravel_index(points, (plats_len, plons_len))
 
-    # Use inverse distance weighting to get the new grid
-    predictions_not_idw = padded_predictions[lat_points, lon_points]
-    dist_sq = distances**2
-    #>predictions_idw = (np.sum(predictions_not_idw / dist_sq, axis=1) / np.sum(1. / dist_sq, axis=1)).reshape(wofs_orig.XLAT.values.shape[1:])
+        # Use inverse distance weighting to get the new grid
+        predictions_not_idw = padded_predictions[lat_points, lon_points]
+        dist_sq = distances**2
+        predictions_idw = (np.sum(predictions_not_idw / dist_sq, axis=1) / np.sum(1. / dist_sq, axis=1)).reshape(wofs_orig.XLAT.values.shape[1:])
 
-    _, gridrad_lats, gridrad_lons = calculate_output_lats_lons(wofs_orig, gridrad_spacing=gridrad_spacing)
+        if args.dry_run:
+            print(f" to_wofs:: dist_sq={np.quantile(dist_sq, [0, .5, 1])}")
+            print(" padded_predictions", padded_predictions.shape)
+            print(" predictions_not_idw", predictions_not_idw.shape)
 
     if args.dry_run:
-        print(f" to_wofs:: dist_sq={np.quantile(dist_sq, [0, .5, 1])}")
-        print(" predictions.lat", predictions.lat.shape)
+        print(" to_wofs:: predictions.lat", predictions.lat.shape)
         print(" gridrad_lats", gridrad_lats.shape)
         print(" predictions.lat", np.quantile(predictions.lat, [0, .5, 1]))
         print(" gridrad_lats", np.quantile(gridrad_lats, [0, .5, 1]))
@@ -1090,18 +1108,8 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
         print(" gridrad_lons", gridrad_lons.shape)
         print(" predictions.lon", np.quantile(predictions.lon, [0, .5, 1]))
         print(" gridrad_lons", np.quantile(gridrad_lons, [0, .5, 1]))
-        print(" padded_predictions", padded_predictions.shape)
-        print(" predictions_not_idw", predictions_not_idw.shape)
-        #print(" predictions_idw", predictions_idw.shape)
         print(" predictions.predicted_tor.isel(time=0)", predictions.predicted_tor.isel(time=0).shape)
-    
-    wofs_lats = wofs_orig.XLAT.values[0, :, 0] #wofs_orig.XLAT.values[0].ravel()
-    wofs_lons = wofs_orig.XLONG.values[0, 0, :] #wofs_orig.XLONG.values[0].ravel()
-    predictions_idw = np.zeros((wofs_lats.size, wofs_lons.size), float)
-    p_interpolator = RectBivariateSpline(gridrad_lats[:-1], gridrad_lons[:-1], #predictions.lat, predictions.lon, 
-                                         predictions.predicted_tor.isel(time=0)) 
-    # Evaluate each (x,y) coordinate
-    predictions_idw = p_interpolator(wofs_lats, wofs_lons, grid=True)
+
 
     # Create Dataset formatted like the raw WoFS file
     wofs_like = xr.Dataset(data_vars=dict(ML_PREDICTED_TOR=(["Time", "south_north", "west_east"], 
@@ -1298,7 +1306,8 @@ def plot_hist(args, data, title, xlabel, ylabels, fname, figsize=(8, 6),
 
 def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
                     data_contours=None, cmap="Spectral_r", vmin=0, vmax=50, 
-                    alpha=None, dpi=250, figsize=(10, 9), close=False, save=False):
+                    alpha=None, dpi=250, figsize=(10, 9), tight=True, 
+                    close=False, save=False):
     '''
     Use matplotlib pcolormesh to plot the data
 
@@ -1349,12 +1358,12 @@ def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
                   loc='upper left', bbox_to_anchor=(1.16, 1), title='Tor Probability') #, alignment='left'
     ax.set_aspect('equal', 'box') #.axis('equal') #
     ax.set_title(title)
+    if tight: plt.tight_layout()
     if not cb_label is None:
         _axs = ax if fig_ax is None else fig_ax[2]
         cb_ = fig.colorbar(pcmesh, ax=_axs) #fig.colorbar(pcmesh, ax=ax)
         cb_.set_label(cb_label, rotation=-90, labelpad=15)
     #plt.legend(loc='upper left', bbox_to_anchor=(1.5, 1))
-    plt.tight_layout()
 
     if save: #args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
@@ -1471,8 +1480,9 @@ if __name__ == '__main__':
     GRIDRAD_SPACING = 48
     GRIDRAD_HEIGHTS = np.arange(1, 13, step=1, dtype=int)
     wofs_gridrad, wofs_regridded = to_gridrad(args, wofs, wofs_netcdf, 
-                                    gridrad_spacing=GRIDRAD_SPACING, 
-                                    gridrad_heights=GRIDRAD_HEIGHTS, DB=DB)
+                                        method=args.interp_method,
+                                        gridrad_spacing=GRIDRAD_SPACING, 
+                                        gridrad_heights=GRIDRAD_HEIGHTS, DB=DB)
 
     # Prepare data for prediction
     # Load training data statistics
@@ -1489,48 +1499,9 @@ if __name__ == '__main__':
 
     # Interpolate back to WoFS grid
     preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
-                                           train_stats, gridrad_spacing=GRIDRAD_SPACING, 
-                                           seconds_since=SECS_SINCE, DB=DB)
-
-    '''
-    # Interpolate back to WoFS grid
-    # Predictions for multiple times
-    forecast_times = set(wofs_combo.time.values)
-    stitched_preds = []
-    on_wofsgrid = []
-
-    #Iterate over each forecast time. First stitch patches, then interpolate them  to the WoFS grid
-    for ftime in forecast_times:
-        wofs_orig_instant = wofs_orig.where(wofs_orig.time==ftime, drop=True)
-
-        preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, train_stats, 
+                                           train_stats, method=args.interp_method,
                                            gridrad_spacing=GRIDRAD_SPACING, 
                                            seconds_since=SECS_SINCE, DB=DB)
-
-        stitched_preds.append(preds_gridrad_stitched)
-        on_wofsgrid.append(preds_wofsgrid)
-
-    # Combine all stitched predictions from each time into a time sorted Dataset
-    ds_stitched_preds = xr.concat(stitched_preds, dim='time')
-    ds_stitched_preds = ds_stitched_preds.sortby('time')
-    ds_stitched_preds.attrs = wofs_orig.attrs
-
-    ds_wofsgrid = xr.concat(on_wofsgrid, dim='Time')
-    ds_wofsgrid = ds_wofsgrid.sortby('Time')
-    ds_wofsgrid.attrs = wofs_orig.attrs
-
-    if args.write in [2, 4]:
-        fname = os.path.basename(wofs_orig.filenamepath)
-        fname, file_extension = os.path.splitext(fname)
-
-        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions_gridrad_stitched.nc')
-        print("Save interpolated file", savepath)
-        ds_stitched_preds.to_netcdf(savepath)
-        
-        savepath = os.path.join(args.dir_preds, f'all_wofs_predictions.nc')
-        print(f"Save interpolated file to {savepath}\n")
-        ds_wofsgrid.to_netcdf(savepath)
-    '''
 
 
     # Plot data
