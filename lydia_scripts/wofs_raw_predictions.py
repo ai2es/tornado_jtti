@@ -1404,7 +1404,24 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50,
     #import imageio
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
+    nframes = wofs['patch'].size
 
+    def plotter(data_mesh, data_contour, i, ax, cmap="Spectral_r", vmin=0, vmax=65): 
+        '''
+        :param data_mesh: data to plot in pclolrmesh
+        :param data_contour: data to plot as contours
+        :param i: index
+        '''
+        ZH_distr = ax.pcolormesh(data_mesh, cmap=cmap, vmin=vmin, vmax=vmax)
+
+        ax.contour(data_contour)
+        ax.set_aspect('equal', 'box') #.axis('equal') #
+        ax.set_title('Composite Reflectivity')
+        ax.text(0, -3, f'patch {i:03d}')
+        return ZH_distr, ax
+
+    vmin = 0
+    vmax = 65
     def draw_storm_frame(pi):
         '''
         Draw a patch as a single frame
@@ -1412,14 +1429,21 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50,
         '''
         ax.clear()
 
-        ZH_distr = ax.pcolormesh(wofs.ZH_composite.values[pi], cmap="Spectral_r", vmin=0, vmax=50)
+        plotter(wofs.ZH_composite.values[pi], wofs.predicted_tor.values[pi], pi, 
+                ax, cmap="Spectral_r", vmin=vmin, vmax=vmax)
+
+        '''
+        ZH_distr = ax.pcolormesh(wofs.ZH_composite.values[pi], 
+                                 cmap="Spectral_r", vmin=0, vmax=50)
         if pi == 0: 
             cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
             cb_ZH_distr.set_label('dBZ', rotation=-90)
+
         ax.contour(wofs.predicted_tor.values[pi])
         ax.set_aspect('equal', 'box') #.axis('equal') #
         ax.set_title('Composite Reflectivity')
         ax.text(0, -3, f'patch {pi:03d}')
+        '''
 
         fig.canvas.draw() # draw the canvas, cache renderer
         image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
@@ -1431,9 +1455,17 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50,
     #fnpath = os.path.join(fndir, f"{self.session}_kinematics_movie.gif")
     fname = os.path.basename(wofs.filenamepath) + f'__{suffix}.gif'
 
-    nframes = wofs['patch'].size
+    # Plot first frame ot get colorbar to render properly
+    ZH_distr, ax = plotter(wofs.ZH_composite.values[0], 
+                           wofs.predicted_tor.values[0], 0,
+                           ax, cmap="Spectral_r", vmin=vmin, vmax=vmax)
+    cb_ZH_distr = fig.colorbar(ZH_distr, ax=ax)
+    cb_ZH_distr.set_label('dBZ', rotation=-90)
+
     animator = FuncAnimation(fig, draw_storm_frame, frames=nframes, 
                              interval=interval, **kwargs)
+    print(" n fig axes", len(fig.axes)) #fig.delaxes(fig.axes[-1])
+
     if args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
         fnpath = os.path.join(dir_figs, fname)
