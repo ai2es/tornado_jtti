@@ -1,15 +1,14 @@
 #!/bin/bash
 
 ##SBATCH --partition=gpu
-##SBATCH --nodelist=c301
-#SBATCH -p ai2es
+#SBATCH -p ai2es #gpu #
 ##SBATCH --nodelist=c731
-#SBATCH --time=12:00:00
+#SBATCH --time=8:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --ntasks=1  #-n 20
-#SBATCH --mem=20G
-#SBATCH --job-name=tuner__wandb
+#SBATCH --ntasks=10  #-n 20
+#SBATCH --mem=32G
+#SBATCH --job-name=tuner__test_resample
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
@@ -34,6 +33,15 @@ conda activate tf
 #conda install -c conda-forge wandb
 #conda install -c anaconda -y tensorflow-gpu 
 
+#conda activate tf_tornado 
+#conda uninstall protobuf
+#>conda install -c conda-forge tensorflow
+#conda install -c conda-forge tensorflow-gpu
+#conda install -c conda-forge tensorboard
+#>conda install -c conda-forge keras-tuner
+#conda install -c conda-forge wandb
+#conda clean --all -v
+
 
 python --version
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
@@ -55,14 +63,15 @@ echo "SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST"
 #--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_nontor_tor/validation1_ZH_only.tf" \
 #--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_ZH_only.tf" \
 python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
---in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf" \
---in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only.tf" \
---in_dir_test="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf" \
+--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only_2013_2016.tf" \
+--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only_2017.tf" \
+--in_dir_test="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only_2018.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
---epochs=200 \
---batch_size=300 \
---lrate=5e-4 \
+--epochs=10 \
+--batch_size=1024 \
+--lrate=1e-3 \
+--wandb_tags test resample \
 --number_of_summary_trials=3 \
 --gpu \
 --save=0 \
@@ -70,14 +79,18 @@ python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --tuner_id="debug_wandb" \
 --dry_run \
 hyper \
---max_epochs=4 \
+--max_epochs=5 \
 --factor=2
+#--hyperband_iterations=2
 #--hps_index=1 \
 
+#--resample .9 .1 \
+#--class_weight .1 .9 \
 
-#--max_epochs=350 \
-#--factor=12
+#--max_epochs=320 \
+#--factor=10
 
+#--overwrite \
 #--tuner_id="debug_newgridrad" \
 #--dry_run \
 #--nogo \
