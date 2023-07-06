@@ -389,7 +389,7 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
         print(fname)
         plot_pcolormesh(args, Z[0], fname, 
                         title='Z0 (WoFS Grid)', cb_label='dBZ', cmap="Spectral_r", 
-                        vmin=0, vmax=65, dpi=dpi, figsize=figsize, close=True, save=save)
+                        vmin=0, vmax=60, dpi=dpi, figsize=figsize, close=True, save=save)
         fname = wofs_basefname + f'__debug_Zs.png'
         fig, axs = plt.subplots(5, 10, figsize=(25, 12))
         fig.suptitle('WoFS Grid')
@@ -398,7 +398,7 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
         for i, ax in enumerate(axs):
             cb_label = None if i < nwh-1 else 'dBZ'
             plot_pcolormesh(args, Z[i], fname, fig_ax=(fig, ax, axs.tolist()),
-                            title=f'Z{i}', vmin=0, vmax=65, 
+                            title=f'Z{i}', vmin=0, vmax=60, 
                             cb_label=cb_label, cmap="Spectral_r", dpi=550, 
                             figsize=figsize, close=(i == nwh-1), save=(i == nwh-1))
 
@@ -413,7 +413,7 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
         print(fname)
         plot_pcolormesh(args, Z_agl[0], fname, 
                         title='Z0 (GridRad Grid)', cb_label='dBZ', cmap="Spectral_r", 
-                        vmin=0, vmax=65, dpi=dpi, figsize=figsize, close=True, save=save)
+                        vmin=0, vmax=60, dpi=dpi, figsize=figsize, close=True, save=save)
         fname = wofs_basefname + f'__debug_Zs_gridrad.png'
         fig, axs = plt.subplots(3, 4, figsize=(15, 12))
         axs = axs.ravel()
@@ -421,7 +421,7 @@ def extract_netcdf_dataset_fields(args, wrfin, gridrad_heights):
             if i > 11: break
             cb_label = None if i < 11 else 'dBZ'
             plot_pcolormesh(args, Z_agl[i], fname, fig_ax=(fig, ax, axs.tolist()),
-                            title=f'$Z{i}$ (GridRad Grid)', vmin=0, vmax=65, 
+                            title=f'$Z{i}$ (GridRad Grid)', vmin=0, vmax=60, 
                             cb_label=cb_label, cmap="Spectral_r", dpi=400, 
                             figsize=figsize, close=(i == 11), save=(i == 11))
         
@@ -682,11 +682,9 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
             print(f" {h}: # NANs Z_imputed =", np.isnan(Z_imputed.ravel()).sum())
 
             Z_interpolator = RectBivariateSpline(wlats, wlons, Z_imputed) #Z_agl[h]) #
-            #Z_interpolator = RectBivariateSpline(wlons, wlats, Z_agl[h].T) 
 
             # Evaluate each (x,y) coordinate
             REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lats, new_gridrad_lons, grid=True)
-            #REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lons, new_gridrad_lats, grid=True).T 
             print(f" {h}: # NANs REFL_10CM_final =", np.isnan(REFL_10CM_final[0, h].ravel()).sum())
 
         # Interpolate updraft helicity
@@ -702,10 +700,9 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
             for h in range(nvort_levels):
                 v_interp = RectBivariateSpline(wlats, wlons, vorts[h]) 
                 vort_final[0, :, :, h] = v_interp(new_gridrad_lats, new_gridrad_lons, grid=True)
-                #vorts .reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).
+
                 d_interp = RectBivariateSpline(wlats, wlons, divs[h]) 
                 div_final[0, :, :, h] = d_interp(new_gridrad_lats, new_gridrad_lons, grid=True)
-                #divs .reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3)
 
     elif method == 1:
         # List of all lat/lon grid points from original wofs grid
@@ -784,14 +781,14 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
         fname = wofs_basefname + f'__debugtogridrad_Z_composite_gridrad.png'
         print(fname)
         plot_pcolormesh(args, _Zcomposit, fname, 
-                        title=f'Z Max (GridRad Grid)', vmin=0, vmax=65, 
+                        title=f'Z Max (GridRad Grid)', vmin=0, vmax=60, 
                         cb_label='dBZ', cmap="Spectral_r", dpi=dpi, 
                         figsize=(12, 10), close=True, save=(args.write in [3, 4]))
 
         fname = wofs_basefname + f'__debugtogridrad_Z00_gridrad.png'
         print(fname)
         plot_pcolormesh(args, REFL_10CM_final[0, 0], fname, 
-                        title=f'Z00 (GridRad Grid)', vmin=0, vmax=65, 
+                        title=f'Z00 (GridRad Grid)', vmin=0, vmax=60, 
                         cb_label='dBZ', cmap="Spectral_r", dpi=dpi, 
                         figsize=(12, 10), close=True, save=(args.write in [3, 4]))
         
@@ -802,7 +799,7 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
         for i, ax in enumerate(axs):
             cb_label = None if i < 11 else 'dBZ'
             plot_pcolormesh(args, REFL_10CM_final[0, i], fname, fig_ax=(fig, ax, axs.tolist()),
-                            title=f'Z{i} (GridRad Grid)', vmin=0, vmax=65, 
+                            title=f'Z{i} (GridRad Grid)', vmin=0, vmax=60, 
                             cb_label=cb_label, cmap="Spectral_r", dpi=400, 
                             figsize=figsize, close=(i == 11), save=(i == 11))
 
@@ -861,7 +858,7 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
             fname = wofs_basefname + f'__debugtogridrad_with_nans_Z00_gridrad.png'
             print(fname)
             plot_pcolormesh(args, wofs_regridded["ZH"][0, 0], fname, 
-                            title=f'Z00 (GridRad Grid)', vmin=0, vmax=65, 
+                            title=f'Z00 (GridRad Grid)', vmin=0, vmax=60, 
                             cb_label='dBZ', cmap="Spectral_r", dpi=dpi, 
                             figsize=(12, 10), close=True, save=(args.write in [3, 4]))
             
@@ -873,7 +870,7 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
                 cb_label = None if i < 11 else 'dBZ'
                 plot_pcolormesh(args, wofs_regridded["ZH"][0, i], fname, 
                                 fig_ax=(fig, ax, axs.tolist()),
-                                title=f'Z{i} (GridRad Grid)', vmin=0, vmax=65, 
+                                title=f'Z{i} (GridRad Grid)', vmin=0, vmax=60, 
                                 cb_label=cb_label, cmap="Spectral_r", dpi=400, 
                                 figsize=figsize, close=(i == 11), save=(i == 11))
 
@@ -1314,11 +1311,9 @@ def contour_fmt(x):
     return f"{x:.02f}"
     #return rf"{s}" if plt.rcParams["text.usetex"] else f"{s}"
 
-def plot_hist(args, data, title, xlabel, ylabels, fname, figsize=(8, 6), 
-              dpi=120, **hist_args):
+def plot_hist(args, data, title, xlabel, ylabels, fname, show_text=True,
+              figsize=(8, 6), dpi=120, **hist_args):
     '''
-    @param **hist_args: key word args for np.histogram
-
     @param args: command line args. see create_argsparser()
         Relevant arguments
             write
@@ -1329,8 +1324,9 @@ def plot_hist(args, data, title, xlabel, ylabels, fname, figsize=(8, 6),
     @param title: figure title
     @param xlabel: xlabel
     @param ylabel: list of length two of the ylabels for each plot
-    @param dpi: integer for the saved figure resolution as dots per inch
     @param figsize: as tuple for the figure width and height
+    @param dpi: integer for the saved figure resolution as dots per inch
+    @param **hist_args: key word args for np.histogram
 
     @return: the fig and the axes objects
     '''
@@ -1338,7 +1334,7 @@ def plot_hist(args, data, title, xlabel, ylabels, fname, figsize=(8, 6),
     # Normalize the hist values
 
     hvals = hvals / np.sum(hvals)
-    # center the bins
+    # Center the bins
     delta = (bins[1] - bins[0]) / 2
     cbins = bins[:-1] + delta
 
@@ -1347,10 +1343,11 @@ def plot_hist(args, data, title, xlabel, ylabels, fname, figsize=(8, 6),
     #vals, bins, patches = ax.hist(hvals, bins=bins, histtype='step', label='Cumulative' , cumulative=True)
     ax[0].plot(cbins, hvals, label='Histogram')
     ax[0].set(title=title, ylabel=ylabels[0]) #title='Tor Predictions Distribution', ylabel='density'
-    for c, v in zip(cbins, hvals):
-        ax[0].text(c, v+.01, f'{v:.02f}', fontsize=11)
+    if show_text:
+        for c, v in zip(cbins, hvals):
+            ax[0].text(c, v+.01, f'{v:.02f}', fontsize=11)
     cvals = np.cumsum(hvals)
-    ax[1].plot(bins[:-1]+delta, cvals, label='Cumulative')
+    ax[1].plot(cbins, cvals, label='Cumulative')
     ax[1].set(xlabel=xlabel, ylabel=ylabels[1]) #xlabel='Probability', ylabel='cumulative density'
     
     if args.write in [3, 4]:
@@ -1389,6 +1386,9 @@ def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
     @param alpha: float indicating the alpha value for the color plot
     @param dpi: integer for the saved figure resolution as dots per inch
     @param figsize: as tuple for the figure width and height
+    @param tight: bool whether to use plt.tight_layout() on the figure
+    @param close: bool whether to close the figure after plotting and saving
+    @param save: bool whether to save the figure
 
     @return: the fig and the axes objects
     '''
@@ -1405,29 +1405,29 @@ def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
         # Contour levels
         qlevels = [0, .1, .5, 1]
         data_qtiles = np.nanquantile(data_contours, qlevels)
-        #data_qtiles.sort()
         contour = ax.contour(data_contours, levels=qlevels[1:3]) #[.1, .5] #[0. 0.08 0.16 0.24 0.32 0.4  0.48 0.56 0.64]
         print("contour levels", data_qtiles, contour.levels)
-        #chandles, _ = contour.legend_elements()
-        #ax.clabel(contour, contour.levels, inline=True, fmt=contour_fmt, fontsize=10)
-        #handles, labels = ax.get_legend_handles_labels()
-        proxy = [plt.Rectangle((0,0),1,1,fc=pc.get_edgecolor()[0]) for pc in contour.collections]
-        ax.legend(proxy, [rf'$\geq{q:.04f}$ {l*100}% ' for q, l in zip(data_qtiles[1:3], qlevels[1:3])], 
+        proxy = [plt.Rectangle((0,0), 1, 1, fc=pc.get_edgecolor()[0]) for pc in contour.collections]
+        ax.legend(proxy, 
+                  [rf'$\geq{q:.04f}$ {l*100}th% ' for q, l in zip(data_qtiles[1:3], qlevels[1:3])], 
                   loc='upper left', bbox_to_anchor=(1.16, 1), title='Tor Probability') #, alignment='left'
+        
+    if tight: plt.tight_layout()
+
     ax.set_aspect('equal', 'box') #.axis('equal') #
     ax.set_title(title)
+
     if not cb_label is None:
         _axs = ax if fig_ax is None else fig_ax[2]
         cb_ = fig.colorbar(pcmesh, ax=_axs) #fig.colorbar(pcmesh, ax=ax)
         cb_.set_label(cb_label, rotation=-90, labelpad=15)
-    #plt.legend(loc='upper left', bbox_to_anchor=(1.5, 1))
-    if tight: plt.tight_layout()
 
-    if save: #args.write in [3, 4]:
+    if save: 
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
         fpath = os.path.join(dir_figs, fname)
         print("  Saving", fpath)
         plt.savefig(fpath, dpi=dpi)
+
     if close: plt.close()
 
     return fig, ax
@@ -1464,7 +1464,7 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50,
     fig, ax = plt.subplots(1, 1, figsize=figsize)
     nframes = wofs['patch'].size
 
-    def plotter(data_mesh, data_contour, i, ax, cmap="Spectral_r", vmin=0, vmax=65): 
+    def plotter(data_mesh, data_contour, i, ax, cmap="Spectral_r", vmin=0, vmax=60): 
         '''
         :param data_mesh: data to plot in pclolrmesh
         :param data_contour: data to plot as contours
@@ -1596,6 +1596,7 @@ if __name__ == '__main__':
 
     # Plot data
     if args.write in [3, 4]:
+        save = True
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
 
         anim_args = {'repeat': True, 'repeat_delay': 100}
@@ -1613,8 +1614,8 @@ if __name__ == '__main__':
         print(" ++ w shape REFL_10CM",  wofs.REFL_10CM.values.shape)
         plot_pcolormesh(args, wofs.REFL_10CM.values[0, 0], fname, 
                         title='Reflectivity 10 cm', cb_label='dBZ', 
-                        cmap="Spectral_r", vmin=0, vmax=65, dpi=300, figsize=(10, 9), 
-                        close=True, save=(args.write in [3, 4]))
+                        cmap="Spectral_r", vmin=0, vmax=60, dpi=300, figsize=(10, 9), 
+                        close=True, save=save)
 
         # Reflectivity GRIDRAD
         fname = wofs_basefname + f'__ZH_level00_gridrad.png'
@@ -1623,14 +1624,14 @@ if __name__ == '__main__':
         print("  ++ regrid shape ZH", wofs_regridded.ZH.shape)
         plot_pcolormesh(args, preds_gridrad_stitched.ZH_1km[0], fname, #wofs_gridrad.ZH[0,:,:,0]
                         title='Reflectivity (GridRad Grid)', cb_label='Reflectivity', 
-                        cmap="Spectral_r", vmin=0, vmax=65, dpi=300, figsize=(10, 9), 
-                        close=True, save=(args.write in [3, 4]))
+                        cmap="Spectral_r", vmin=0, vmax=60, dpi=300, figsize=(10, 9), 
+                        close=True, save=save)
         
         fname = wofs_basefname + f'__ZH_level00_gridrad1.png'
         plot_pcolormesh(args, wofs_regridded.ZH[0, 0], fname, 
                         title='Reflectivity (GridRad Grid)', 
-                        cb_label='Reflectivity', cmap="Spectral_r", vmin=0, vmax=65, 
-                        dpi=300, figsize=(10, 9), close=True, save=(args.write in [3, 4]))
+                        cb_label='Reflectivity', cmap="Spectral_r", vmin=0, vmax=60, 
+                        dpi=300, figsize=(10, 9), close=True, save=save)
 
 
         # Predictions WOFS GRID
@@ -1639,29 +1640,34 @@ if __name__ == '__main__':
         plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
                         title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
                         cmap="cividis", vmin=0, vmax=pred_max, dpi=300, 
-                        figsize=(10, 9), close=True, save=(args.write in [3, 4]))
+                        figsize=(10, 9), close=True, save=save)
         # ^^ With contours
         fname = wofs_basefname + f'__predictions_contours.png'
         plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
                         title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
                         data_contours=preds_wofsgrid.ML_PREDICTED_TOR[0],
                         cmap="Spectral_r", vmin=0, vmax=pred_max, alpha=.6, 
-                        dpi=300, figsize=(12, 9), close=True, save=(args.write in [3, 4])) #cividis
+                        dpi=300, figsize=(15, 9), close=True, save=save) #cividis
         # PROBABS Hist
         fname = wofs_basefname + f'__predictions_hist.png'
-        #fig, ax = plot_hist(args, preds_data, title='Tor Predictions Distribution', xlabel='Probability', ylabels=['density', 'cum. density'], fname, figsize=(8, 6))
-        fig, ax = plt.subplots(2, 1, figsize=(8, 6))
-        ax = ax.ravel()
         preds_data = np.nan_to_num(preds_wofsgrid.ML_PREDICTED_TOR[0], copy=True, nan=-0.1)
+        
+        hist_args = {'bins': 'fd', 'density': False}
+        fig, ax = plot_hist(args, preds_data, title='Tor Predictions Distribution', 
+                            xlabel='Probability', ylabels=['density', 'cum. density'], 
+                            show_text=False, fname=fname, figsize=(8, 6), **hist_args)
+        '''fig, ax = plt.subplots(2, 1, figsize=(8, 6))
+        ax = ax.ravel()
+        #preds_data = np.nan_to_num(preds_wofsgrid.ML_PREDICTED_TOR[0], copy=True, nan=-0.1)
         hvals, bins = np.histogram(preds_data, bins='fd', density=False)
         hvals = hvals / np.sum(hvals)
         delta = (bins[1] - bins[0]) / 2
-        ax[0].plot(bins[:-1]+delta, hvals, label='Histogram')
+        ax[0].plot(bins[:-1] + delta, hvals, label='Histogram')
         ax[0].set(title='Tor Predictions Distribution', ylabel='density')
         #ax[0].legend()
         #vals, bins, patches = ax.hist(hvals, bins=bins, histtype='bar', label='Histogram')
         cvals = np.cumsum(hvals)
-        ax[1].plot(bins[:-1]+delta, cvals, label='Cumulative')
+        ax[1].plot(bins[:-1] + delta, cvals, label='Cumulative')
         #vals, bins, patches = ax.hist(hvals, bins=bins, histtype='step', label='Cumulative' , cumulative=True)
         ax[1].set(xlabel='Probability', ylabel='cumulative density')
         #ax[1].legend()
@@ -1669,13 +1675,13 @@ if __name__ == '__main__':
         fpath = os.path.join(dir_figs, fname)
         print("  Saving", fpath)
         plt.savefig(fpath, dpi=120)
-        plt.close()
+        plt.close()'''
 
         # Predictions GRIDRAD GRID
         fname = wofs_basefname + f'__predictions_gridrad.png'
         plot_pcolormesh(args, preds_gridrad_stitched.predicted_tor[0], fname, 
                         title='Predicted Tor (GridaRad Grid)', cb_label='$p_{tor}$', 
-                        cmap="cividis", vmin=0, vmax=pred_max, dpi=300, figsize=(10, 9), close=True, save=(args.write in [3, 4])) #1
+                        cmap="cividis", vmin=0, vmax=pred_max, dpi=300, figsize=(10, 9), close=True, save=save) #1
 
 
         # Composite Reflectivity with prediction contours (WoFS)
@@ -1686,8 +1692,8 @@ if __name__ == '__main__':
         plot_pcolormesh(args, ZH_composite, fname, 
                         title='Composite Reflectivity - (WoFS Grid)', cb_label='dBZ', 
                         data_contours=preds_wofsgrid.ML_PREDICTED_TOR[0], 
-                        cmap="Spectral_r", vmin=0, vmax=50, alpha=.6, dpi=300, 
-                        figsize=(13, 10), close=True, save=(args.write in [3, 4]))
+                        cmap="Spectral_r", vmin=0, vmax=60, alpha=.6, dpi=300, 
+                        figsize=(15, 9), close=True, save=save)
         
         # Updraft
         fname = wofs_basefname + f'__updraft_helicity_predictions.png'
@@ -1699,7 +1705,7 @@ if __name__ == '__main__':
                         title='Updraft Helicity (WoFS Grid)', 
                         cb_label='', data_contours=preds_wofsgrid.ML_PREDICTED_TOR[0],
                         cmap="Spectral_r", vmin=uh_min, vmax=uh_max, alpha=.6, dpi=300, 
-                        figsize=(13, 10), close=True, save=True)
+                        figsize=(15, 9), close=True, save=True)
 
         npatches = wofs_combo.ZH_composite.values.shape[0]
         for pi in range(0, npatches, 25):
