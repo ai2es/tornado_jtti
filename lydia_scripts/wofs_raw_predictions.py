@@ -54,6 +54,7 @@ print("pd version", pd.__version__)
 from netCDF4 import Dataset, date2num, num2date
 #import scipy
 from scipy import spatial
+from scipy.ndimage import uniform_filter, generic_filter, binary_dilation, grey_dilation
 from scipy.interpolate import RectBivariateSpline
 #print("scipy version", scipy.__version__)
 import wrf #wrf-python=1.3.2.5==py38h0e9072a_0
@@ -570,6 +571,55 @@ def make_patches(args, radar, window):
     
     return ds_patches
 
+def impute_nans(data, method, value=None, k=3):
+    '''
+    Impute NaN values using the specified method. If method='value' and value is
+            set, use the value
+    :param data: the nd array to impute
+    :param method: string or function handle for the method to use. options are
+            'value': use the provided value in the parameter value
+
+            'kmean': use the mean of the k-neighbors
+            'kmedian': use the median of the k-neighbors
+            'kmin': use the min of the k-neighbors
+            'kmax': use the max of the k-neighbors
+
+            'mean': use the overall mean of the data
+            'median': use the overall median of the data
+            'min': use the overall min of the data
+            'max': use the overall max of the data
+    :param value: float. specific value to set all NaNs to if method == 'value'
+    :param k: int for the square neighborhood size to consider
+    :return: the imputed data array
+    '''
+    # dict of summary function options
+    funcs = {'mean': np.nanmean, 'median': np.nanmedian, 
+               'min': np.nanmin, 'max': np.nanmax}
+    
+    are_nan = np.isnan(data)
+    
+    data_imputed = None
+    if method == 'value' and value is not None:
+        data_imputed = np.nan_to_num(data, True, value)
+
+    elif method in ['kmean', 'kmedian', 'kmin', 'kmax']:
+        data_filter = data.copy()
+        key = method[1:]
+        sum_func = funcs[key]
+        data_filter = generic_filter(data_filter, sum_func, size=k)
+
+        data_imputed = data.copy()
+        data_imputed[are_nan] = data_filter[are_nan]
+
+    elif method in ['mean', 'median', 'min', 'max']:
+        sum_func = funcs[key]
+        data_imputed = data.copy()
+        data_imputed[are_nan] = sum_func(data)
+
+    else: 
+        raise ValueError(f'impute_nans:: method must be one of [value, kmean, kmedian, kmin, kmax, mean, median, min, max]. but was {method}')
+    return data_imputed
+
 def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
                gridrad_heights=np.arange(1, 13, step=1, dtype=int), DB=0):
     '''
@@ -621,19 +671,34 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
     vort_final = None
     div_final = None
     if method == 0:
+        # WoFS latitude and longitude coordinates to interpolate from
         wlats = xlat_vals[:, 0]
         wlons = xlon_vals[0, :]
+
         for h in range(nheights):
-            Z_interpolator = RectBivariateSpline(wlons, wlats, Z_agl[h].T) 
+            are_nan = np.isnan(Z_agl[h])
+            print(f" {h}: # NANs Z_agl =", np.isnan(Z_agl[h].ravel()).sum())
+            Z_imputed = impute_nans(Z_agl[h], method='kmedian', value=None, k=3)
+            print(f" {h}: # NANs Z_imputed =", np.isnan(Z_imputed.ravel()).sum())
+
+            Z_interpolator = RectBivariateSpline(wlats, wlons, Z_imputed) #Z_agl[h]) #
+            #Z_interpolator = RectBivariateSpline(wlons, wlats, Z_agl[h].T) 
+
             # Evaluate each (x,y) coordinate
-            REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lons, new_gridrad_lats, grid=True).T 
+            REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lats, new_gridrad_lons, grid=True)
+            #REFL_10CM_final[0, h] = Z_interpolator(new_gridrad_lons, new_gridrad_lats, grid=True).T 
+            print(f" {h}: # NANs REFL_10CM_final =", np.isnan(REFL_10CM_final[0, h].ravel()).sum())
+
+        # Interpolate updraft helicity
         uh_interpolator = RectBivariateSpline(wlats, wlons, uh) 
         uh_final[0] = uh_interpolator(new_gridrad_lats, new_gridrad_lons, grid=True)
         
+        # Interpolate divergence and vorticity
         if not Z_only:
             nvort_levels = vort.shape[0]
             vort_final = np.zeros((1, lats_len, lons_len, nvort_levels), float)
             div_final = np.zeros((1, lats_len, lons_len, nvort_levels), float)
+
             for h in range(nvort_levels):
                 v_interp = RectBivariateSpline(wlats, wlons, vorts[h]) 
                 vort_final[0, :, :, h] = v_interp(new_gridrad_lats, new_gridrad_lons, grid=True)
@@ -680,7 +745,7 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
                             south_north_points.shape[1], 1), dtype=int) * i, axis=2)
         bottom_top_3d = np.swapaxes(bottom_top_3d, 1, 2)
 
-        # Selecting data 
+        # Select data 
         refls = Z_agl[bottom_top_3d, south_north_points_3d, west_east_points_3d]
         uhs = uh[south_north_points, west_east_points]
 
@@ -705,18 +770,13 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
             div_final = np.swapaxes(np.swapaxes((np.sum(divs / dist3d_sq, axis=2) / np.sum(1 / dist3d_sq, axis=2)).reshape(1, lats_len, lons_len, vort.shape[0]), 1, 3), 2, 3).astype(np.float32)
 
     if DB:
-        Z_agl_max = np.nanmax(REFL_10CM_final)
-        print(f" to gridrad:: Zaglmax={Z_agl_max}")
-        
         wofs_basefname = os.path.basename(args.loc_wofs)
         figsize = (12, 12)
         dpi = 300
 
-        #refls_shape = np.swapaxes(np.swapaxes((np.sum(refls, axis=2)).reshape(1, lats_len, #lons_len, Z_agl.shape[0]), 1, 3), 2, 3).astype(np.float32)
-        #print(" refls", refls.shape)
-        #print(" refls reshape", refls_shape.shape)
         print(" uh shape", uh.shape)
         print(" refls final", REFL_10CM_final.shape)
+        print(f" to gridrad:: Zaglmax={np.nanmax(REFL_10CM_final)}")
         print(" n NANs gridrad", np.isnan(REFL_10CM_final.ravel()).sum())
         print(" n inf gridrad", np.count_nonzero(np.isinf(REFL_10CM_final.ravel())))
 
@@ -741,8 +801,6 @@ def to_gridrad(args, wofs, wofs_netcdf, method=0, gridrad_spacing=48,
         axs = axs.ravel()
         for i, ax in enumerate(axs):
             cb_label = None if i < 11 else 'dBZ'
-            nnans = np.isnan(REFL_10CM_final[0, i]).sum()
-            print(f" {i} n nans={nnans}")
             plot_pcolormesh(args, REFL_10CM_final[0, i], fname, fig_ax=(fig, ax, axs.tolist()),
                             title=f'Z{i} (GridRad Grid)', vmin=0, vmax=65, 
                             cb_label=cb_label, cmap="Spectral_r", dpi=400, 
@@ -1358,12 +1416,12 @@ def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
                   loc='upper left', bbox_to_anchor=(1.16, 1), title='Tor Probability') #, alignment='left'
     ax.set_aspect('equal', 'box') #.axis('equal') #
     ax.set_title(title)
-    if tight: plt.tight_layout()
     if not cb_label is None:
         _axs = ax if fig_ax is None else fig_ax[2]
         cb_ = fig.colorbar(pcmesh, ax=_axs) #fig.colorbar(pcmesh, ax=ax)
         cb_.set_label(cb_label, rotation=-90, labelpad=15)
     #plt.legend(loc='upper left', bbox_to_anchor=(1.5, 1))
+    if tight: plt.tight_layout()
 
     if save: #args.write in [3, 4]:
         dir_figs = args.dir_preds if args.dir_figs is None  else args.dir_figs
