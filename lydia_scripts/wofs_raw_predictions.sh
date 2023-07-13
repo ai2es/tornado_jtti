@@ -4,13 +4,13 @@
 #SBATCH --nodes=1
 ##SBATCH -n 20
 #SBATCH --mem-per-cpu=1000
-#SBATCH --job-name=debug_idw__wofs_preds
+#SBATCH --job-name=wofs_preds_20230602_1900_ENS3
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
-
+#SBATCH --array=0-37%20
 
 ##########################################################
 
@@ -18,37 +18,25 @@
 source ~/.bashrc
 bash
 conda activate tf_experiments #tf_tornado #
-#conda uninstall protobuf
-#>conda install -c conda-forge tensorflow
-#conda install -c conda-forge tensorflow-gpu
-#conda install tensorflow-gpu
-#conda install -c conda-forge tensorboard
-#>conda install -c conda-forge keras-tuner
-#conda install -c conda-forge wandb
-#conda clean --all -v
-#conda uninstall tensorflow_datasets
-#conda remove cftime
 
 python --version
 
+
+# Select WoFS file
 echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
 
 WOFS_ROOT="/ourdisk/hpc/ai2es/tornado/wofs-preds-2023"  
-WOFS_REL_PATH="20230602/1800/ENS_MEM_17"  #"20230511/1800/ENS_MEM_17" #
-WOFS_FILE="wrfwof_d01_2023-06-02_20_35_00_predictions.nc" #"wrfwof_d01_2019-04-30_20:35:00"  #
-#/ourdisk/hpc/ai2es/tornado/wofs-preds-2023/20230602/1800/ENS_MEM_17/wrfwof_d01_2023-06-02_20_35_00_predictions.nc
-#/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2023/20230602/1800/ENS_MEM_17/wrfwof_d01_2023-06-02_20_35_00_predictions.nc/
+WOFS_REL_PATH="20230602/1900/ENS_MEM_3"  
 
-## 2019
-#WOFS_ROOT="/ourdisk/hpc/ai2es/wofs" 
-#WOFS_REL_PATH="2019/20190430/1930/ENS_MEM_2" 
-#WOFS_FILE="wrfwof_d01_2019-04-30_20:35:00" 
+wofs_files=($(ls $WOFS_ROOT/$WOFS_REL_PATH))
+echo "WOFS DIR ${WOFS_ROOT}/${WOFS_REL_PATH}"
+echo "WOFS FILES:: ${wofs_files[@]}"
 
-#WOFS_REL_PATH="2019/20190517/0300/ENS_MEM_12"
-#WOFS_FILE="wrfwof_d01_2019-05-18_03:15:00"
+WOFS_FILE=${wofs_files[$SLURM_ARRAY_TASK_ID]}
+echo "Predicting for $WOFS_FILE"
 
 
-
+# Execute predictions
 python -u lydia_scripts/wofs_raw_predictions.py \
 --loc_wofs="${WOFS_ROOT}/${WOFS_REL_PATH}/${WOFS_FILE}"  \
 --datetime_format="%Y-%m-%d_%H:%M:%S"  \
@@ -60,19 +48,13 @@ python -u lydia_scripts/wofs_raw_predictions.py \
 --file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_metadata_ZH_only.nc" \
 --with_nans  \
 -Z  \
---write=3 \
---dry_run
+--write=1 
+#--dry_run
 
 
+# WoFS data prior to 2023
 #--loc_wofs="/ourdisk/hpc/ai2es/wofs/${WOFS_REL_PATH}/${WOFS_FILE}"  \
-
-#--loc_model="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tornado_unet_hyper/2023_05_02_17_29_29_hp_model00.h5" \ ## trained on old gridrad
-
-
-#--loc_model="/ourdisk/hpc/ai2es/tornado/unet/ZH_only/initialrun_model2/initialrun_model2.h5" \
-#--file_trainset_stats="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_onehot_nontor_tor/training_metadata_ZH_only.nc" \
 
 
 #fields UP_HELI_MAX U U10 V V10
-#YYYY-MM-DD_hh:mm:ss
 
