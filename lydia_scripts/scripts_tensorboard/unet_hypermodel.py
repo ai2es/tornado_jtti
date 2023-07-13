@@ -15,7 +15,8 @@ python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
 """
 
 import wandb
-from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
+from wandb.keras import WandbMetricsLogger, WandbCallback
+wandb.login()
 
 import os, io, sys, random, shutil
 import pickle, copy
@@ -42,6 +43,7 @@ font = {#'family' : 'normal',
         #'weight' : 'bold',
         'size'   : 14}
 matplotlib.rc('font', **font)
+
 # Display all pd.DataFrame columns
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -72,8 +74,6 @@ from tensorboard.plugins.hparams import api
 from tensorboard.plugins.hparams import api_pb2
 from tensorboard.plugins.hparams import summary as hp_summary
 
-#import py3nvml
-
 #sys.path.append("../")
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
@@ -86,7 +86,7 @@ from keras_unet_collection import models
 # Display which devices operations and tensors are assigned to
 tf.debugging.set_log_device_placement(True)
 tf.config.run_functions_eagerly(True)
-tf.data.experimental.enable_debug_mode()
+#tf.data.experimental.enable_debug_mode()
 print(' ')
 
 
@@ -111,9 +111,9 @@ class UNetHyperModel(HyperModel):
         '''
         Class constructor
         '''
-        #TODO expection handling
+        #TODO exception handling
         self.input_shape = input_shape
-        #TODO expection handling
+        #TODO exception handling
         self.n_labels = n_labels if not n_labels is None or n_labels > 0 else 1
         self.name = name
         self.tune_optimizer = tune_optimizer
@@ -184,7 +184,6 @@ class UNetHyperModel(HyperModel):
         # Configuration of downsampling (encoding) blocks
         pool = hp.Choice("pool_down", values=['False', 'ave', 'max'])
         pool = False if pool == 'False' else pool
-        # TODO: look up GELU
         activation = hp.Choice("in_activation", values=['PReLU', 'ELU', 'GELU', 'Snake']) #'ReLU', 'LeakyReLU'
 
         # Number of conv layers (after concatenation) per upsampling level
@@ -246,7 +245,8 @@ class UNetHyperModel(HyperModel):
         #resunet_a_2d, u2net_2d >= 3
         unet_type = hp.Choice("unet_type", values=['unet_2d', 'unet_plus_2d', 'unet_3plus_2d', 'r2_unet_2d'])
 
-        #TODO: weights=[None, 'imagenet']
+        #TODO: pretrain_weights = hp.Choice("pretrain_weights", values=['None', 'imagenet'])
+
         if unet_type == 'unet_2d':
             model = models.unet_2d(in_shape, 
                             filter_num, 
@@ -281,7 +281,7 @@ class UNetHyperModel(HyperModel):
                             l1=l1, l2=l2, weights=None,
                             batch_norm=batch_norm, name='unet3plus')
         elif unet_type == 'r2_unet_2d':
-            recur_num = hp.Int("recur_num", min_value=1, step=1, max_value=3)
+            recur_num = hp.Int("recur_num", min_value=1, step=1, max_value=2)
             model = models.r2_unet_2d(in_shape, filter_num, #(None, None, 3), [64, 128, 256, 512]
                             n_labels=n_labels,
                             stack_num_down=stack_num_down, 
@@ -333,7 +333,7 @@ class HyperbandWAB(Hyperband):
     """ 
     Custom Tuner for Weights and Biases
     """
-    def __init__(self, hypermodel=None, cli_args=None, **kwargs): #*tuner_args, 
+    def __init__(self, hypermodel=None, cli_args=None, wandb_path=None, **kwargs): #*tuner_args, 
         '''
         Class constructor
         :param cli_args: command line interface (CLI) arguments
@@ -341,10 +341,11 @@ class HyperbandWAB(Hyperband):
         # Command line args to dict
         args_dict = copy.deepcopy(vars(cli_args))
         self.tags = args_dict['wandb_tags']
-        for k in ['in_dir', 'in_dir_val', 'in_dir_test', 'class_weight', 'resample',
-                  'dry_run', 'nogo', 'overwrite', 'save', 'wandb_tags']: #, 'out_dir', 'out_dir_tuning']: #'project_name_prefix']:
+        for k in ['in_dir', 'in_dir_val', 'in_dir_test', 'dry_run', 'nogo', 
+                  'overwrite', 'save', 'wandb_tags']: #, 'out_dir', 'out_dir_tuning']: #'project_name_prefix']:
             args_dict.pop(k, None)
         self.cli_args = args_dict
+        self.wandb_path = wandb_path
         super().__init__(hypermodel=hypermodel, **kwargs) #*tuner_args, 
   
     def run_trial(self, trial, *args, **kwargs):
@@ -369,10 +370,10 @@ class HyperbandWAB(Hyperband):
         # Enables use of the comparison UI widgets in the wandb dashboard off the shelf.
         cargs = copy.deepcopy(self.cli_args)
 
-        PROJ_NAME_PREFIX = cargs['project_name_prefix']
-        PROJ_NAME = f'{PROJ_NAME_PREFIX}_{cargs["tuner"]}'
-        PROJ_DATE = cargs['cdatetime']
-        tuner_dir = cargs['out_dir_tuning'] if not cargs['out_dir_tuning'] is None  else cargs['out_dir']
+        #PROJ_NAME_PREFIX = cargs['project_name_prefix']
+        #PROJ_NAME = f'{PROJ_NAME_PREFIX}_{cargs["tuner"]}'
+        #PROJ_DATE = cargs['cdatetime']
+        #tuner_dir = cargs['out_dir_tuning'] if not cargs['out_dir_tuning'] is None  else cargs['out_dir']
 
         cargs.pop('out_dir')
         cargs.pop('out_dir_tuning')
@@ -381,30 +382,29 @@ class HyperbandWAB(Hyperband):
         config.update(hp.values)
 
         #tb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_{PROJ_DATE}_tb')
-        wandb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_{PROJ_DATE}_wandb')
-        wandb_ckpt_path = os.path.join(tuner_dir, f'{PROJ_NAME}_wandb_model_ckpts{PROJ_DATE}')
+        wandb_path = self.wandb_path #os.path.join(tuner_dir, f'{PROJ_NAME}_{PROJ_DATE}_wandb')
+        #wandb_ckpt_path = os.path.join(tuner_dir, f'{PROJ_NAME}_wandb_model_ckpts{PROJ_DATE}')
         if not os.path.exists(wandb_path):
             try:
                 os.mkdir(wandb_path)
                 print(f"Making dir {wandb_path}")
             except Exception as err:
                 print(f"CAUGHT:: {err}")
+                wandb_path = tuner_dir
 
-        #wandb.tensorboard.patch(root_logdir=tuner_dir)
+        run = wandb.init(project='unet_hypermodel_test0', config=config, 
+                         #sync_tensorboard=True, 
+                         dir=wandb_path, tags=self.tags) 
+                         #resume='auto', entity='ai2es',  
 
-        #group = ''
-        #job_type = 'run_test' #'run_full'
-        #tags = ['nontor_tor', 'newgridrad', 'train2013-2017']
-        run = wandb.init(project='unet_hypermodel_test', config=config, 
-                         sync_tensorboard=True, dir=wandb_path, tags=self.tags) #resume='auto', entity='ai2es',  
-
-        original_callbacks = kwargs.pop("callbacks", []) + [WandbMetricsLogger(log_freq=5)] #, WandbModelCheckpoint(wandb_ckpt_path)]
-        #histories = super().run_trial(trial, *args, **kwargs)
+        original_callbacks = kwargs.pop("callbacks", []) + [WandbMetricsLogger()] 
+        #WandbMetricsLogger()] #WandbCallback(save_model=False, compute_flops=True)]
 
         # From Hyperband superclass
         if "tuner/epochs" in hp.values:
             kwargs["epochs"] = hp.values["tuner/epochs"]
             kwargs["initial_epoch"] = hp.values["tuner/initial_epoch"]
+        #histories = super().run_trial(trial, *args, **kwargs)
 
         # Run the training process multiple times
         histories = []
@@ -413,23 +413,24 @@ class HyperbandWAB(Hyperband):
             callbacks = self._deepcopy_callbacks(original_callbacks)
             self._configure_tensorboard_dir(callbacks, trial, execution)
             callbacks.append(tuner_utils.TunerCallback(self, trial))
-            # Only checkpoint the best epoch across all executions.
+            # Only checkpoint the best epoch across all executions
             callbacks.append(model_checkpoint)
             copied_kwargs["callbacks"] = callbacks
 
             obj_value = self._build_and_fit_model(trial, *args, **copied_kwargs)
             histories.append(obj_value)
             print("obj_value.history", obj_value.history)
-            # Log the epoch loss for WANDB
+            # Log the history for WANDB
+            #hist_dict = print({f'tn_{k}': v for k, v in obj_value.history.items()})
             df = pd.DataFrame(obj_value.history)
             df = df.assign(execution_index=[execution] * df.shape[0])
             print("df", df)
-            # Convert DataFrame to a list of dictionaries
-            _historys = df.to_dict(orient='records')
-            #print("_historys", _historys)
-            for _hist in _historys:
-                run.log(_hist)
-            #run.log({'epoch_loss':epoch_loss, 'epoch':epoch})
+            wb_table = wandb.Table(dataframe=df)
+            run.log({"history": wb_table})
+            # Convert DataFrame to a list of dictionaries to log
+            #>_historys = df.to_dict(orient='records')
+            #>for _hist in _historys:
+            #>    run.log(_hist) #run.log({'epoch_loss':epoch_loss, 'epoch':epoch})
 
         # Finish the wandb run
         run.finish()
@@ -507,7 +508,7 @@ def insert_batchnorm_after_input(model, bn_layer, DB=False):
             print(f"{k}: {v}")
     return new_model
 
-def create_tuner(args, strategy=None, DB=1, **kwargs):
+def create_tuner(args, wandb_path=None, strategy=None, DB=1, **kwargs):
     '''
     Create the Keras Tuner. Tuner can be instance of RandomSearch, Hyperband, 
     BayeOpt, custom or Tuner (the base Tuner class) when no tuner is selected.
@@ -543,26 +544,27 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
     #model_new.set_weights(weights)
 
     tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
+    
+    PROJ_NAME_PREFIX = args.project_name_prefix
+    PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'   
 
     tuner_args = {
-        'distribution_strategy': strategy, #TODO 
+        'distribution_strategy': strategy, #TODO: for multi-gpu 
         'objective': args.objective, #'val_MaxCriticalSuccessIndex', name of objective to optimize (whether to minimize or maximize is automatically inferred for built-in metrics)
         #'max_retries_per_trial': args.max_retries_per_trial,
         #'max_consecutive_failed_trials': args.max_consecutive_failed_trials,
-        'executions_per_trial': args.executions_per_trial, #3
+        'executions_per_trial': args.executions_per_trial, 
         'logger': None, #TODO Optional instance of kerastuner.Logger class for streaming logs for monitoring.
         'tuner_id': args.tuner_id, # Optional string, used as ID of this Tuner.
-        'overwrite': args.overwrite, #TODO: If False, reload existing project. Otherwise, overwrite the project.
-        'directory': tuner_dir #args.out_dir #TODO: relative path to working dir
+        'overwrite': args.overwrite, #If False, reload existing project. Otherwise, overwrite project
+        'directory': tuner_dir #wandb.run.dir #args.out_dir #TODO
     }
         #'seed': None,
         #'hyperparameters': None,
         #'tune_new_entries': True,
         #'allow_new_entries': True,
 
-    MAX_TRIALS = args.max_trials 
-    PROJ_NAME_PREFIX = args.project_name_prefix
-    PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
+    MAX_TRIALS = args.max_trials  
 
     # Select tuner
     tuner = None
@@ -574,9 +576,10 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
             **tuner_args
         )
     elif args.tuner in ['hyper', 'hyperband']:
-        tuner = HyperbandWAB( #Hyperband(
+        tuner = HyperbandWAB( #Hyperband( #
             hypermodel,
             cli_args=args,
+            wandb_path=wandb_path,
             max_epochs=args.max_epochs, #10, #max train epochs per model. recommended slightly higher than expected epochs to convergence 
             factor=args.factor, #3, #int reduction factor for epochs and number of models per bracket
             hyperband_iterations=args.hyperband_iterations, #2, #>=1,  number of times to iterate over full Hyperband algorithm. One iteration will run approximately max_epochs * (math.log(max_epochs, factor) ** 2) cumulative epochs across all trials. set as high a value as is within your resource budget
@@ -614,21 +617,11 @@ def create_tuner(args, strategy=None, DB=1, **kwargs):
     tuner.search_space_summary()
     print(' ')
 
-    # start a new wandb run to track this script
-    '''
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="unet_hypermodel__test",
-        # track hyperparameters and run metadata
-        config=tuner.get_best_hyperparameters(1)[0] #tuner_args
-    )
-    '''
-
     return tuner, hypermodel
 
-def execute_search(args, tuner, X_train, X_val=None, 
-                   callbacks=None, cdatetime='', DB=0, **kwargs):
-    ''' TODO
+def execute_search(args, tuner, X_train, X_val=None, callbacks=[], 
+                   train_val_steps=None, cdatetime='', DB=0, **kwargs):
+    '''
     Execute the hyperparameter search. Calls tuner.search()
     @param args: the command line args object. See create_argsparser() for
             details about the command line arguments
@@ -645,6 +638,7 @@ def execute_search(args, tuner, X_train, X_val=None,
     @param X_val: optional Tensorflow Dataset
     @params callbacks: overwrite the default callbacks. Default callbacks are 
             EarlyStopping and Tensorboard. (TODO: [Maybe] ModelCheckpoint)
+    @param train_val_steps: dict with keys 'steps_per_epoch' and val_steps
     @param cdatetime: formatted datetime string appended to Tensorboard directory name
     @param DB: debug flag to print the resulting hyperparam search space
     @param kwargs: additional keyword arguments
@@ -656,36 +650,38 @@ def execute_search(args, tuner, X_train, X_val=None,
     
     tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
 
-    if callbacks is None:
+
+    if len(callbacks) == 0:
         # TODO: separate arg for objective and monitor?
         es = EarlyStopping(monitor=args.objective, #start_from_epoch=10, 
                             patience=args.patience, min_delta=args.min_delta, 
                             restore_best_weights=True)
-        tb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_{cdatetime}_tb')
-        tb = TensorBoard(tb_path, histogram_freq=5) #--logdir=
-        #cp = ModelCheckpoint(filepath=f"{tuner_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_weights_only=True, save_freq=5*BATCH_SIZE)
+        #tb_path = os.path.join(wandb.run.dir, f'{PROJ_NAME}_tb') #os.path.join(tuner_dir, f'{PROJ_NAME}_{cdatetime}_tb')
+        #print(" tb path", tb_path)
+        #tb = TensorBoard(tb_path) #, histogram_freq=2) #--logdir=
+        #cp = ModelCheckpoint(filepath=f"{tuner_dir}/checkpoints/{PROJ_NAME}', verbose=1, save_freq=5*BATCH_SIZE) #save_weights_only=True, 
         #manager = tf.train.CheckpointManager(ckpt, './tf_ckpts', max_to_keep=3)
-        callbacks = [es, tb]
-        
-    # Convert class weights into a dict
-    '''
-    if not args.class_weight is None:
-        class_weight = {key: val for key, val in enumerate(args.class_weight)}
-        print(f"Class weights {class_weight}")
-    '''
+        callbacks = [es] #, tb] #
+
+    if train_val_steps is None:
+        train_val_steps = {'steps_per_epoch': None, 'val_steps': None}
+    print(" exe_Search:: train_val_steps", train_val_steps)
 
     # Perform the hyperparameter search
     print("\nExecuting hyperparameter search...")
     tuner.search(X_train, 
                 validation_data=X_val, 
                 validation_batch_size=None, 
-                batch_size=BATCH_SIZE, epochs=NEPOCHS, 
+                #batch_size=BATCH_SIZE, 
+                epochs=NEPOCHS, 
                 shuffle=False, callbacks=callbacks,
-                steps_per_epoch=5 if DB else None, 
-                #class_weight=class_weight, #dict # not supported for tf Dataset
-                #sample_weight=ds_weights, # not supported for tf Dataset
+                steps_per_epoch=train_val_steps['steps_per_epoch'], #5 if DB else train_val_steps['steps_per_epoch'], #None, 
+                validation_steps=train_val_steps['val_steps'], #5 if DB else train_val_steps['val_steps'], #None,
                 #verbose=2, #max_queue_size=10, 
-                workers=1, use_multiprocessing=False) #class_weight={0: p0, 1: p1}
+                workers=2, use_multiprocessing=True)
+    
+    # Finish the wandb run
+    #run.finish()
 
 def get_rotation_indicies(args, nfolds, DB=0):
     ''' TODO TEST
@@ -730,21 +726,117 @@ def take_rotation_data(args, data, folds, r=0):
     #outs_validation = np.concatenate(np.take(outs, folds_validation), axis=0)
     return np.concatenate(np.take(data, folds[r]), axis=0)        
 
-def prep_data(args, n_labels=None, DB=1):
+def get_dataset_size(ds):
+    return ds.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+
+def resample_dataset(args, ds_list, weights, stop_on_empty_dataset=True, 
+                     method='sample', init_dist=None, ntake=10000, DB=False):
+    ''' TODO
+    Resample the dataset using one of three approaches
+    @param weights: list of sample weights for each Dataset in the ds_list; target distribution
+    @param method: string, either 'sample' to use tf.Dataset.sample_from_dataset()
+            or 'resample' to use tf.Dataset.rejection_resample()
+    @return: tf.data.Dataset
+    '''
+    ds = None
+
+    if method == 'take':
+        for i, _ds in enumerate(ds_list):
+            count = int(weights[i] * ntake)
+            _ds = _ds.repeat().take(count)
+            if ds is None: ds = _ds
+            else: ds = ds.concatenate(_ds)
+
+        '''
+        if DB:
+            nneg = ds.reduce(0, lambda res, x,y: res + tf.math.reduce_any(y <= 0), name="num_elements").numpy()
+            npos = ds.reduce(0, lambda res, x,y: res + tf.math.reduce_any(y > 0), name="num_elements").numpy()
+            pneg = nneg / (nneg + npos)
+            ppos = npos / (nneg + npos)
+            print(f" resmaple:: #neg={nneg} ({pneg}) #pos={npos} ({ppos})")
+
+            #checking ratio
+            #_neg = ds_val.filter(filter_neg, name='_nt_val') 
+            #_pos = ds_val.filter(filter_pos, name='_t_val')
+            #nn = get_dataset_size(_neg) 
+            #np = get_dataset_size(_pos) 
+            #print(f"(resampled) n neg {nn} ({nn / (nn + np)}) n pos {np} ({np / (nn + np)}) ")
+        '''
+
+    elif method == 'sample':
+        for i, _ds in enumerate(ds_list):
+            ds_list[i] = _ds.repeat()
+        
+        ds = tf.data.Dataset.sample_from_datasets(ds_list, #[ds_neg, ds_pos],
+                                                  weights=weights,
+                                                  stop_on_empty_dataset=stop_on_empty_dataset)
+    else: 
+        def which_class(x, y):
+            return tf.cast(tf.math.reduce_any(y > 0), dtype=tf.int32)
+        
+        ds = ds_list[0].rejection_resample(
+                class_func=which_class, 
+                #class_func=lambda f, l: which_class(f),
+                #class_func=lambda x, y: tf.py_function(which_class, [x, y], [tf.int32]), 
+                #class_func=lambda x, y: tf.cast(tf.math.reduce_any(y > 0), dtype=tf.int32), #which_class, #map input dataset to scalar tf.int32. Values in [0, num_classes).
+                target_dist=weights, #float type tensor, shaped [num_classes]
+                initial_dist=init_dist, #(Optional.) float tensor, shaped [num_classes]. If not provided, true class distribution estimated live
+                name='resample') # returns ds of tuples (label, (feat, label))
+        if DB:
+            print(" spec:", ds.element_spec)
+            _ds = list(ds.as_numpy_iterator())
+            _ds = [lst[0] for lst in _ds]
+            print(" rejection_resample:: _ds[0]", _ds[:5])
+            #zero, one = np.bincount(_ds) / len(_ds) 
+            #print("rejection sample 1", len(_ds), zero, one)
+
+        # Remove resample class_func result
+        #(<tf.Tensor 'args_1:0' shape=(32, 32, 12) dtype=float32>, <tf.Tensor 'args_2:0' shape=(32, 32, 1) dtype=int64>)
+        specs = (tf.TensorSpec(shape=(32, 32, 12), dtype=tf.float32), 
+                     tf.TensorSpec(shape=(32, 32, 1), dtype=tf.int64))
+        #@tf.autograph.experimental.do_not_convert
+        def identity(class_func_result, data):
+            return data
+        ds = ds.map(lambda class_func_result, data: data) # returns ds of tuples (feat, label)
+        '''
+        if DB:
+            ds_np = list(ds.as_numpy_iterator())
+            ds_np = [lst[1] for lst in ds_np]
+            print(" map:: ds_np[0]", ds_np[:5])
+            #zero, one = np.bincount(ds_np) / len(ds_np)  #n
+            #print("rejection sample 2", zero, one, len(ds_np))
+        '''
+
+        # Repeat resampled dataset so it's at least as big as the original dataset
+        print("ds.cardinality().numpy()", ds.cardinality().numpy())
+        ds = ds.repeat(2).take(ds.cardinality().numpy())
+        if DB:
+            ds_np = list(ds.as_numpy_iterator())
+            ds_np = [lst[1] for lst in ds_np]
+            print(" take:: ds_np[0]", ds_np[:5])
+            #zero, one = np.bincount(ds_np) / len(ds_np)  #n
+            #print("rejection sample 3", zero, one, len(ds_np))
+
+    #ds = ds.cache(filename=cache_file)
+    return ds
+
+def prep_data(args, n_labels=None, sample_method='sample', DB=1):
     """ 
-    # TODO: dataset split https://www.tensorflow.org/tutorials/structured_data/imbalanced_data
     Load and prepare the data.
+    dataset split https://www.tensorflow.org/tutorials/structured_data/imbalanced_data
     @param args: the command line args object. See create_argsparser() for
             details about the command line arguments
             Command line arguments relevant to this method:
 
     @param n_labels: number of class labels. If None, tune as a hyperparameter in 
                 that can either be 1 or 2.
+    @param method: string, either 'sample' to use tf.Dataset.sample_from_dataset()
+            or 'resample' to use tf.Dataset.rejection_resample()
 
     @return: tuple with the training and validation sets as Tensorflow Datasets
     """ 
     # Dataset size
-    x_shape = (None, *args.x_shape) #args.x_shape #model-->(None, 32, 32, 12)
+    x_shape = args.x_shape #(None, *args.x_shape) #model-->(None, 32, 32, 12)
     x_shape_val = args.x_shape #(None, *args.x_shape) #(32, 32, 12)
     
     y_shape = args.y_shape #(None, 32, 32, 1) #(None, *args.y_shape)
@@ -770,93 +862,116 @@ def prep_data(args, n_labels=None, DB=1):
                          tf.TensorSpec(shape=y_shape_val, dtype=tf.float32, name='Y'))
 
     # tf.Dataset helper methods
+    #tf.py_function(
+    #@tf.function
+    #@tf.autograph.experimental.do_not_convert
     def filter_neg(x, y):
         # Get non tornadic storms
         return tf.math.reduce_all(y <= 0)
     
+    #@tf.function
+    #@tf.autograph.experimental.do_not_convert
     def filter_pos(x, y):
         # Get tornadic storms
         return tf.math.reduce_any(y > 0)
+    
+    def change_spec(x, y):
+        x = tf.cast(x, tf.float32, name='X')
+        y = tf.cast(y, tf.int16, name='Y')
+        return x, y
     
     #@tf.function
     def add_sample_weight(x, y):
         # Include a sample weight
         label = tf.cast(tf.math.reduce_any(y > 0), dtype=tf.float32)
-        #weight = args.class_weight[label]
         weight = (1. - label) * (args.class_weight[0]) + label * (1. - args.class_weight[0])
         return x, y, tf.reshape(weight, (1,))
-    #ds_weights = np.array(list(X_train.map(add_sample_weight).as_numpy_iterator()))
 
-    # Train set
-    ds_train = tf.data.Dataset.load(args.in_dir) #, specs)#.unbatch() #, num_parallel_calls=tf.data.AUTOTUNE)
+    # Dict with steps per epoch
+    train_val_steps = {}
+
+    # TRAIN SET
+    ds_train = tf.data.Dataset.load(args.in_dir) #, specs)
+    #ds_train = ds_train.map(change_spec, name='change_spec', num_parallel_calls=tf.data.AUTOTUNE)
     print("Train Dataset (load):", ds_train)
-    
-    ds_neg = ds_train.filter(filter_neg, name='nontor') #.repeat(2)
-    ds_pos = ds_train.filter(filter_pos, name='tor') #.repeat(2)
-    nneg = ds_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy() #ds.cardinality().numpy()
-    npos = ds_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy() 
-    print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+
+    ds_neg = ds_train.filter(filter_neg, name='nontor') #lambda x, y: tf.py_function(filter_neg, inp=[x, y], Tout=tf.bool, name='filter_neg_train'), name='nontor_train')
+    ds_pos = ds_train.filter(filter_pos, name='tor') #lambda x, y: tf.py_function(filter_pos, inp=[x, y], Tout=tf.bool, name='filter_pos_train'), name='tor_train') 
+
+    nneg = get_dataset_size(ds_neg) 
+    npos = get_dataset_size(ds_pos)
+    ntrain = nneg + npos
+    train_val_steps['steps_per_epoch'] = ntrain / args.batch_size // args.epochs #`steps_per_epoch * epochs`= batches
+    print(f"n neg {nneg} ({nneg / ntrain}) n pos {npos} ({npos / ntrain}) ")
 
     # Use inverse natural distribution ratio for the class_weight
     print(f"Class weights current {args.class_weight}")
     if args.class_weight == [-1]:
-        args.class_weight = [npos / (nneg + npos), nneg / (nneg + npos)]
-        #{0: npos / (nneg + npos), 1: nneg / (nneg + npos)}
+        args.class_weight = [npos / ntrain, nneg / ntrain]
         print(f"Class weights set to {args.class_weight}")
+
+    # Resample dataset if resampling weights are provided
+    if not args.resample is None and nneg > 0 and npos > 0: 
+        print("Producing sample tf Dataset", args.resample)
+        ds_list = [ds_neg, ds_pos] if sample_method in ['sample', 'take']  else [ds_train]
+        ds_train = resample_dataset(args, ds_list, weights=args.resample,
+                                    method=sample_method, 
+                                    init_dist=[nneg / ntrain, npos / ntrain], DB=DB)
+        print("Train Dataset (resample):", ds_train)
 
     # Apply the class weights to the samples as sample weights
     if not args.class_weight is None: 
-        ds_train = ds_train.map(add_sample_weight, name='weighted')
-        print("Train Dataset (map):", ds_train)
+        ds_train = ds_train.map(add_sample_weight, name='weighted') #, num_parallel_calls=tf.data.AUTOTUNE
+        print("Train Dataset (map::class_weight):", ds_train)
 
-    # TODO: (FIX) Resample the data is resampling weights are provided
-    print(" args.resample", not args.resample is None)
-    print(" (nneg * npos)", nneg > 0 and npos > 0)
-    if not args.resample is None and nneg > 0 and npos > 0: #nneg > 0 and npos > 0
-        # Sample weighting for Dataset element selection
-        #sweights = [.95, .05] #np.repeat(1 / len(nstormtypes), len(nstormtypes))
-        print("Producing sample tf Dataset", args.resample)
-        ds_train = tf.data.Dataset.sample_from_datasets([ds_neg, ds_pos],
-                                                        weights=args.resample,
-                                                        stop_on_empty_dataset=True)
-        #ds_train = ds_train.cache(filename=cache_file)
-
-    ds_train = ds_train.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_train = ds_train.prefetch(2) #tf.data.AUTOTUNE)
+    ds_train = ds_train.batch(args.batch_size)
+    ds_train = ds_train.prefetch(4) #tf.data.AUTOTUNE)
     print("Train Dataset:", ds_train)
 
-    # Val set
-    ds_val = tf.data.Dataset.load(args.in_dir_val) #, specs_val)
+    # VAL SET
+    ds_val = tf.data.Dataset.load(args.in_dir_val)
     print("Val Dataset:", ds_val)
-    ds_val_neg = ds_val.filter(filter_neg)
-    ds_val_pos = ds_val.filter(filter_pos)
-    nneg = ds_val_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
-    npos = ds_val_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
-    print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+    
+    ds_val_neg = ds_val.filter(filter_neg, name='nontor_val') 
+    ds_val_pos = ds_val.filter(filter_pos, name='tor_val')
+
+    nneg = get_dataset_size(ds_val_neg) 
+    npos = get_dataset_size(ds_val_pos) 
+    nval = nneg + npos
+    train_val_steps['val_steps'] = nval / args.batch_size // args.epochs
+    print(f"n neg {nneg} ({nneg / nval}) n pos {npos} ({npos / nval}) nval {nval}")
+    
+    # Resample 
+    if not args.resample is None and nneg > 0 and npos > 0:
+        ds_list = [ds_val_neg, ds_val_pos] if sample_method in ['sample', 'take']  else [ds_val]
+        ds_val = resample_dataset(args, ds_list, weights=args.resample,
+                                  method=sample_method)
+        print("Val Dataset (resample):", ds_val)
+
     ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = ds_val.prefetch(2)
+    ds_val = ds_val.prefetch(4)
     print("Val Dataset:", ds_val)
 
-    # Test set
+    # TEST SET
     ds_test = None
     if not args.in_dir_test is None:
         ds_test = tf.data.Dataset.load(args.in_dir_test)
         print("Test Dataset:", ds_test)
-        ds_test_neg = ds_test.filter(filter_neg)
-        ds_test_pos = ds_test.filter(filter_pos)
-        nneg = ds_test_neg.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
-        npos = ds_test_pos.reduce(0, lambda x, _: x + 1, name="num_elements").numpy()
+
+        ds_test_neg = ds_test.filter(filter_neg, name="nontor_test")
+        ds_test_pos = ds_test.filter(filter_pos, name="tor_test")
+
+        nneg = get_dataset_size(ds_test_neg)
+        npos = get_dataset_size(ds_test_pos) 
         print(f"n neg {nneg} ({nneg / (nneg + npos)}) n pos {npos} ({npos / (nneg + npos)}) ")
+
         ds_test = ds_test.batch(args.batch_size)
-        ds_test = ds_test.prefetch(2)
+        ds_test = ds_test.prefetch(4)
         print("Test Dataset:", ds_test)
 
-    if DB:
-        print("Training Dataset Specs:", specs)
-        print("Validation Dataset Specs:", specs_val)
+    return (ds_train, ds_val, ds_test, train_val_steps)
 
-    return (ds_train, ds_val, ds_test)
-
+"""
 def sample_data(args, n_labels, DB):
     '''
     NOT USED
@@ -957,6 +1072,7 @@ def sample_data(args, n_labels, DB):
         #print(len(list(ds_val.as_numpy_iterator())))
 
     return (ds_train, ds_val)
+"""
 
 def fvaf(y_true, y_pred):
     ''' TODO
@@ -1476,7 +1592,7 @@ def create_argsparser():
     
 
     # Tuner hyperparameter search arguments
-    parser.add_argument('--objective', type=str, default='val_loss', #required=True,
+    parser.add_argument('--objective', type=str, default='val_loss', #, required=True
                         help='Objective or loss functionor value to optimize, such as val_loss. See keras tuner for more information')
     parser.add_argument('--project_name_prefix', type=str, default='tornado_unet', #required=True,
                         help='Prefix to the project name for the tuner. Used as the prefix for the name of the sub-directory where the search results are stored. See keras tuner attribute project_name for more information')
@@ -1593,8 +1709,7 @@ def args2string(args):
     args_str = '' #f'{cdatetime}_'
     for arg, val in vars(args).items(): 
         if arg in ['in_dir', 'in_dir_val', 'in_dir_test', 'out_dir', 'out_dir_tuning',
-                   'wandb_tags', 'project_name_prefix', 'overwrite', 'dry_run', 
-                   'nogo', 'save']:
+                   'wandb_tags', 'overwrite', 'dry_run', 'nogo', 'save']:
             continue
         if isinstance(val, bool):
             args_str += f'{arg}={val:1d}_'
@@ -1629,7 +1744,7 @@ if __name__ == "__main__":
         print(argstr)
         print(args, "\n\n")
 
-    # Grab select GPU(s)
+    # (OLD WAY) Grab select GPU(s)
     #if args.gpu: 
     #    print("Attempting to grab GPU")
     #    py3nvml.grab_gpus(num_gpus=1, gpu_select=[0])
@@ -1646,6 +1761,7 @@ if __name__ == "__main__":
     #    '''
 
     ndevices = 0
+    devices = []
     if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
         # Fetch list of allocated logical GPUs; numbered 0, 1, …
         devices = tf.config.get_visible_devices('GPU')
@@ -1659,15 +1775,14 @@ if __name__ == "__main__":
             print("Memory growth set")
         except Exception as err:
             print(err)
-
-        devices_logical = tf.config.list_logical_devices('GPU')
-        print(f'Visible devices {ndevices} {devices}. \nLogical devices {len(devices_logical)} {devices_logical}\n')
     else:
         # No allocated GPUs: do not delete this case!
         try: tf.config.set_visible_devices([], 'GPU')
         except Exception as err: print(err)
 
-    print("GPUs Available: ", tf.config.list_physical_devices('GPU'))
+    devices_logical = tf.config.list_logical_devices('GPU')
+    print(f'Visible {ndevices} devices {devices}. \nLogical devices {len(devices_logical)} {devices_logical}\n')
+    print("GPUs (Phys. Devices) Available: ", tf.config.list_physical_devices('GPU'))
 
     #if args.cpus_per_task is not None:
     #    tf.config.threading.set_intra_op_parallelism_threads(args.cpus_per_task)
@@ -1681,21 +1796,45 @@ if __name__ == "__main__":
         print('NOGO.')
         exit()
 
-    tuner, hypermodel = create_tuner(args, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
-
-    ds_train, ds_val, ds_test = prep_data(args, n_labels=hypermodel.n_labels)
 
     PROJ_NAME_PREFIX = args.project_name_prefix
     PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
+    
+    #PROJ_DATE = cargs['cdatetime']
+    tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
+    wandb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_{cdatetime}_wandb')
 
+
+    tuner, hypermodel = create_tuner(args, wandb_path=wandb_path, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
+
+    ds_train, ds_val, ds_test, train_val_steps = prep_data(args, 
+                                                           n_labels=hypermodel.n_labels,
+                                                           sample_method='sample')
+    
     # If a tuner is specified, run the hyperparameter search
     if not args.tuner is None:
-        execute_search(args, tuner, ds_train, X_val=ds_val, callbacks=None, 
-                       cdatetime=cdatetime, DB=args.dry_run)
+        # Command line args to dict
+        args_dict = copy.deepcopy(vars(args))
+        tags = args_dict['wandb_tags']
+        for k in ['in_dir', 'in_dir_val', 'in_dir_test', 'class_weight', 'resample',
+                    'dry_run', 'nogo', 'overwrite', 'save', 'wandb_tags', 'out_dir', 
+                    'out_dir_tuning']: #]: #'project_name_prefix']:
+            args_dict.pop(k, None)
+
+        execute_search(args, tuner, ds_train, X_val=ds_val, callbacks=[], 
+                       train_val_steps=train_val_steps, cdatetime=cdatetime, 
+                       DB=args.dry_run)
 
         # Report results
         print('\n=====================================================')
         print('=====================================================')
+
+        # Init wandb summary run logging the figures
+        '''run = wandb.init(project='unet_hypermodel_test', config=args_dict,
+                         sync_tensorboard=True, dir=wandb_path, tags=tags)'''
+        run = wandb.init(project='unet_hypermodel_test0', config=args_dict, 
+                         dir=wandb_path, tags=tags)
+
         N_SUMMARY_TRIALS = args.number_of_summary_trials
         tuner.results_summary(N_SUMMARY_TRIALS)
 
@@ -1707,14 +1846,17 @@ if __name__ == "__main__":
         # Save best hyperparams
         df = pd.DataFrame(best_hps)
         df['args'] = [argstr] * N_SUMMARY_TRIALS
+        df['tuner_id'] = tuner.tuner_id 
+        df['tuner_directory'] = tuner.directory 
+        df['tuner_project_name'] = tuner.project_name 
         dirpath = os.path.join(args.out_dir, PROJ_NAME)
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+            print(f"Made dir {dirpath}")
         hp_fnpath = os.path.join(dirpath, f"{cdatetime}_hps.csv")
         #hp_fnpath = f"{args.out_dir}/{PROJ_NAME}/hps_{argstr}.csv"
         print(f"\nSaving top {N_SUMMARY_TRIALS:02d} hyperparameter")
         print(hp_fnpath)
-        # Display entire dataframe
-        pd.set_option('display.max_rows', None)
-        pd.set_option('display.max_columns', None)
         print(df)
         if args.save in [1, 2, 4]: #args.save > 0:
             print("Saving", hp_fnpath)
@@ -1733,17 +1875,26 @@ if __name__ == "__main__":
         es = EarlyStopping(monitor=args.objective, patience=args.patience,  
                             min_delta=args.min_delta, restore_best_weights=True)
         H = model.fit(ds_train, validation_data=ds_val, 
-                      batch_size=BATCH_SIZE, epochs=args.epochs, 
+                      #batch_size=BATCH_SIZE, 
+                      steps_per_epoch=train_val_steps['steps_per_epoch'],
+                      validation_steps=train_val_steps['val_steps'], 
+                      epochs=args.epochs, 
                       callbacks=[es]) #, verbose=1)
         fname = os.path.join(dirpath, f"{FN_PREFIX}_learning_plot.png")
-        plot_learning_loss(H, fname, save=(args.save in [2, 4])) #(args.save >= 2)
+        _fg = plot_learning_loss(H, fname, save=(args.save in [2, 4])) #(args.save >= 2)
         #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
+        wandb.log({"plot_learning": wandb.Image(_fg)}) #pip install plotly
 
         if args.save >= 2:
             diagram_fnpath = os.path.join(dirpath, f"{FN_PREFIX}_architecture.png")
             print("Saving", diagram_fnpath)
-            plot_model(model, to_file=diagram_fnpath, show_dtype=True,  
-                    show_shapes=True, expand_nested=False)
+            img_obj = plot_model(model, to_file=diagram_fnpath, show_dtype=True,
+                                 show_shapes=True, expand_nested=False)
+            from io import BytesIO
+            from PIL import Image
+            img_plt_model = Image.open(BytesIO(img_obj.data))
+            arr_plt_model = np.asarray(img_plt_model)
+            wandb.log({"plot_model": wandb.Image(arr_plt_model)})
 
         if args.save >= 3: 
             suffix = "_weights" if args.save_weights  else ""
@@ -1753,13 +1904,16 @@ if __name__ == "__main__":
 
         # Predict with trained model
         print("\nPREDICTION")
-        xtrain_preds = model.predict(ds_train)
-        xval_preds = model.predict(ds_val)
-        #xtest_recon = best_model.predict(X_test, batch_size=BATCH_SIZE)
+        print(" train card", get_dataset_size(ds_train))
+        xtrain_preds = model.predict(ds_train, steps=train_val_steps['steps_per_epoch']*BATCH_SIZE) #, batch_size=BATCH_SIZE) #
+        xval_preds = model.predict(ds_val, steps=train_val_steps['val_steps']*BATCH_SIZE)
+        #xtest_recon = best_model.predict(X_test)
         #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
         fname = os.path.join(dirpath, f"{FN_PREFIX}_preds_distr.png")
         if args.save in [2, 4]:
-            plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), fname, save=True) #args.save >= 2
+            _fg, _ = plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), 
+                                      fname, save=True) #save>=2
+            wandb.log({"plot_preds": wandb.Image(_fg)})
             plt.close()
 
         # Confusion Matrix
@@ -1768,9 +1922,9 @@ if __name__ == "__main__":
             return y
 
         if args.class_weight is None:
-            y_train = np.concatenate([y for x, y in ds_train]) #ds.map(get_y)
+            y_train = np.concatenate([y for x, y in ds_train.unbatch()]) #ds.map(get_y)
         else:
-            y_train = np.concatenate([y for x, y, w in ds_train])
+            y_train = np.concatenate([y for x, y, w in ds_train.unbatch()])
         y_val = np.concatenate([y for x, y in ds_val])
 
         threshs = np.linspace(0, 1, 51).tolist()
@@ -1790,6 +1944,7 @@ if __name__ == "__main__":
                                 p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[0]), save=False)        
             plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
                                 p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
+            wandb.log({"confusion_mtx": wandb.Image(fig)})
             plt.close(fig)
             del fig, axs
 
@@ -1799,6 +1954,7 @@ if __name__ == "__main__":
                             save=False, label='Train')
             plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
                             save=True, label='Val', c='orange') #args.save in [2, 4] #args.save >= 2
+            wandb.log({"plot_roc": wandb.Image(fig)})
             plt.close(fig)
             del fig, ax
 
@@ -1808,6 +1964,7 @@ if __name__ == "__main__":
                             save=False, label='Train')
             plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
                             save=True, label='Val', c='orange') #args.save in [2, 4] #args.save >= 2
+            wandb.log({"plot_prc": wandb.Image(fig)})
             plt.close(fig)
             del fig, ax
         
@@ -1818,6 +1975,7 @@ if __name__ == "__main__":
         if not ds_test is None:
             test_eval = model.evaluate(ds_test)
 
+        # Construct evalutation pd.DataFrame
         metrics = H.history.keys()
         df_index = ['train', 'val']
         evals = [ {k: v for k, v in zip(metrics, train_eval)} ]
@@ -1840,6 +1998,7 @@ if __name__ == "__main__":
                             threshs=csithreshs, label='Train', show_cb=False)
             plot_csi(y_val.ravel(), xval_preds.ravel(), fname, threshs=csithreshs, label='Val', 
                             color='orange', save=True, fig_ax=(fig, ax)) #args.save in [2, 4] #args.save >= 2
+            wandb.log({"plot_csi": wandb.Image(fig)})
             plt.close(fig)
             del fig, ax
 
@@ -1850,6 +2009,7 @@ if __name__ == "__main__":
             plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
                                         fig_ax=(fig, ax), save=True, #args.save in [2, 4] #args.save >= 2
                                         label='Val', c='orange', strategy='uniform')
+            wandb.log({"plot_reliabilty_curve": wandb.Image(fig)})
             plt.close(fig)
             del fig, ax
 
@@ -1865,6 +2025,9 @@ if __name__ == "__main__":
         '''
     # Load the latest model
     else:
+        PROJ_NAME_PREFIX = args.project_name_prefix
+        PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
+
         #TODO
         cp_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
         cp_path = os.path.join(cp_dir, PROJ_NAME)

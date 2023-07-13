@@ -6,9 +6,9 @@
 #SBATCH --time=8:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --ntasks=10  #-n 20
-#SBATCH --mem=32G
-#SBATCH --job-name=tuner__test_resample
+#SBATCH --ntasks=20  #-n 20
+#SBATCH --mem=48G
+#SBATCH --job-name=tuner__test_resample_classweights
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
@@ -21,7 +21,7 @@
 
 # Source Andy's env
 . /home/fagg/tf_setup.sh
-conda activate tf
+conda activate tf #_2023_01
 #conda env export --from-history > fagg_env.yml
 
 # Source conda
@@ -63,26 +63,34 @@ echo "SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST"
 #--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_int_nontor_tor/validation1_ZH_only.tf" \
 #--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_ZH_only.tf" \
 python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
---in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only_2013_2016.tf" \
---in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only_2017.tf" \
---in_dir_test="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only_2018.tf" \
+--in_dir="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf" \
+--in_dir_val="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only.tf" \
+--in_dir_test="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
+--project_name_prefix="tor_unet_sample90_10_classweightsNone" \
+--overwrite \
+--tuner_id="debug" \
 --epochs=10 \
---batch_size=1024 \
+--batch_size=2048 \
+--resample .9 .1 \
 --lrate=1e-3 \
---wandb_tags test resample \
+--patience=12 \
+--wandb_tags test sample classweights dslarge saveall \
 --number_of_summary_trials=3 \
 --gpu \
---save=0 \
---overwrite \
---tuner_id="debug_wandb" \
 --dry_run \
+--save=4 \
 hyper \
---max_epochs=5 \
---factor=2
+--max_epochs=12 \
+--factor=6 
 #--hyperband_iterations=2
 #--hps_index=1 \
+
+#--wandb_tags test resample repeat \
+
+#--resample .9 .1 \
+#--class_weight .2 .8 \
 
 #--resample .9 .1 \
 #--class_weight .1 .9 \
@@ -90,6 +98,7 @@ hyper \
 #--max_epochs=320 \
 #--factor=10
 
+#--project_name_prefix="" \
 #--overwrite \
 #--tuner_id="debug_newgridrad" \
 #--dry_run \
