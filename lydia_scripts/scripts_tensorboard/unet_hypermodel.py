@@ -87,6 +87,11 @@ from keras_unet_collection import models
 tf.debugging.set_log_device_placement(True)
 tf.config.run_functions_eagerly(True)
 #tf.data.experimental.enable_debug_mode()
+ppolicy = "mixed_float16"
+precision_policy_map = {"mixed_float16": tf.float16, 
+                        "mixed_float32": tf.float32}
+tf.keras.mixed_precision.set_global_policy(ppolicy)
+tf.keras.mixed_precision.global_policy()
 print(' ')
 
 
@@ -392,7 +397,7 @@ class HyperbandWAB(Hyperband):
                 print(f"CAUGHT:: {err}")
                 wandb_path = tuner_dir
 
-        run = wandb.init(project='unet_hypermodel_test0', config=config, 
+        run = wandb.init(project='unet_hypermodel_run0', config=config, 
                          #sync_tensorboard=True, 
                          dir=wandb_path, tags=self.tags) 
                          #resume='auto', entity='ai2es',  
@@ -637,7 +642,7 @@ def execute_search(args, tuner, X_train, X_val=None, callbacks=[],
     @param X_train: Tensorflow Dataset
     @param X_val: optional Tensorflow Dataset
     @params callbacks: overwrite the default callbacks. Default callbacks are 
-            EarlyStopping and Tensorboard. (TODO: [Maybe] ModelCheckpoint)
+            EarlyStopping.
     @param train_val_steps: dict with keys 'steps_per_epoch' and val_steps
     @param cdatetime: formatted datetime string appended to Tensorboard directory name
     @param DB: debug flag to print the resulting hyperparam search space
@@ -765,7 +770,7 @@ def resample_dataset(args, ds_list, weights, stop_on_empty_dataset=True,
 
     elif method == 'sample':
         for i, _ds in enumerate(ds_list):
-            ds_list[i] = _ds.repeat()
+            ds_list[i] = _ds#.repeat()
         
         ds = tf.data.Dataset.sample_from_datasets(ds_list, #[ds_neg, ds_pos],
                                                   weights=weights,
@@ -816,8 +821,6 @@ def resample_dataset(args, ds_list, weights, stop_on_empty_dataset=True,
             print(" take:: ds_np[0]", ds_np[:5])
             #zero, one = np.bincount(ds_np) / len(ds_np)  #n
             #print("rejection sample 3", zero, one, len(ds_np))
-
-    #ds = ds.cache(filename=cache_file)
     return ds
 
 def prep_data(args, n_labels=None, sample_method='sample', DB=1):
@@ -827,6 +830,13 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
     @param args: the command line args object. See create_argsparser() for
             details about the command line arguments
             Command line arguments relevant to this method:
+                    in_dir
+                    in_dir_val
+                    in_dir_test
+                    lscratch
+                    batch_size
+                    class_weight
+                    resample
 
     @param n_labels: number of class labels. If None, tune as a hyperparameter in 
                 that can either be 1 or 2.
@@ -862,7 +872,6 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
                          tf.TensorSpec(shape=y_shape_val, dtype=tf.float32, name='Y'))
 
     # tf.Dataset helper methods
-    #tf.py_function(
     #@tf.function
     #@tf.autograph.experimental.do_not_convert
     def filter_neg(x, y):
@@ -875,15 +884,18 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
         # Get tornadic storms
         return tf.math.reduce_any(y > 0)
     
+    def identity(x, y):
+        return x, y
+    
     def change_spec(x, y):
-        x = tf.cast(x, tf.float32, name='X')
+        x = tf.cast(x, tf.float16, name='X')
         y = tf.cast(y, tf.int16, name='Y')
         return x, y
     
     #@tf.function
     def add_sample_weight(x, y):
         # Include a sample weight
-        label = tf.cast(tf.math.reduce_any(y > 0), dtype=tf.float32)
+        label = tf.cast(tf.math.reduce_any(y > 0), dtype=tf.float16)
         weight = (1. - label) * (args.class_weight[0]) + label * (1. - args.class_weight[0])
         return x, y, tf.reshape(weight, (1,))
 
@@ -892,6 +904,8 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
 
     # TRAIN SET
     ds_train = tf.data.Dataset.load(args.in_dir) #, specs)
+    ds_train = ds_train.map(change_spec, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_train_og = ds_train.take(-1) #map(identity, num_parallel_calls=tf.data.AUTOTUNE)
     #ds_train = ds_train.map(change_spec, name='change_spec', num_parallel_calls=tf.data.AUTOTUNE)
     print("Train Dataset (load):", ds_train)
 
@@ -901,8 +915,28 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
     nneg = get_dataset_size(ds_neg) 
     npos = get_dataset_size(ds_pos)
     ntrain = nneg + npos
-    train_val_steps['steps_per_epoch'] = ntrain / args.batch_size // args.epochs #`steps_per_epoch * epochs`= batches
+    nsteps = np.max([25, ntrain / args.batch_size // args.epochs])
+    train_val_steps['steps_per_epoch'] = nsteps #`steps_per_epoch * epochs`= batches
     print(f"n neg {nneg} ({nneg / ntrain}) n pos {npos} ({npos / ntrain}) ")
+
+    if args.lscratch is not None:
+        cache_dir = os.path.join(args.lscratch, 'tornado_jtti')
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+            print(f"Making dir: {cache_dir}")
+        else:
+            print(f"Dir exists: {cache_dir}")
+        
+        cache_file = os.path.join(cache_dir, 'nontor')
+        ds_neg = ds_neg.take(-1).cache(filename=cache_file).repeat() #.take(-1).cache().repeat()
+        print(f'CACHE FILE NAME: {cache_file}')
+
+        cache_file = os.path.join(cache_dir, 'tor')
+        ds_pos = ds_pos.take(-1).cache(filename=cache_file).repeat() 
+        print(f'CACHE FILE NAME: {cache_file}')
+    else:
+        ds_neg = ds_neg.repeat()
+        ds_pos = ds_pos.repeat()
 
     # Use inverse natural distribution ratio for the class_weight
     print(f"Class weights current {args.class_weight}")
@@ -918,18 +952,27 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
                                     method=sample_method, 
                                     init_dist=[nneg / ntrain, npos / ntrain], DB=DB)
         print("Train Dataset (resample):", ds_train)
+    else:
+        ds_train = ds_train.repeat()
 
     # Apply the class weights to the samples as sample weights
     if not args.class_weight is None: 
-        ds_train = ds_train.map(add_sample_weight, name='weighted') #, num_parallel_calls=tf.data.AUTOTUNE
+        ds_train = ds_train.map(add_sample_weight, name='weighted', 
+                                num_parallel_calls=tf.data.AUTOTUNE)
+        ds_train_og = ds_train_og.map(add_sample_weight, name='weighted_og', 
+                                num_parallel_calls=tf.data.AUTOTUNE)
         print("Train Dataset (map::class_weight):", ds_train)
 
-    ds_train = ds_train.batch(args.batch_size)
-    ds_train = ds_train.prefetch(4) #tf.data.AUTOTUNE)
+    ds_train = ds_train.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_train_og = ds_train_og.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_train = ds_train.prefetch(6)
+    ds_train_og = ds_train_og.prefetch(6)
     print("Train Dataset:", ds_train)
 
     # VAL SET
     ds_val = tf.data.Dataset.load(args.in_dir_val)
+    ds_val = ds_val.map(change_spec, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val_og = ds_val.take(-1) #map(identity, num_parallel_calls=tf.data.AUTOTUNE)
     print("Val Dataset:", ds_val)
     
     ds_val_neg = ds_val.filter(filter_neg, name='nontor_val') 
@@ -938,7 +981,8 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
     nneg = get_dataset_size(ds_val_neg) 
     npos = get_dataset_size(ds_val_pos) 
     nval = nneg + npos
-    train_val_steps['val_steps'] = nval / args.batch_size // args.epochs
+    nsteps = np.max([25, nval / args.batch_size // args.epochs])
+    train_val_steps['val_steps'] = nsteps
     print(f"n neg {nneg} ({nneg / nval}) n pos {npos} ({npos / nval}) nval {nval}")
     
     # Resample 
@@ -947,9 +991,13 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
         ds_val = resample_dataset(args, ds_list, weights=args.resample,
                                   method=sample_method)
         print("Val Dataset (resample):", ds_val)
+    else:
+        ds_val = ds_val.repeat()
 
-    ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = ds_val.prefetch(4)
+    ds_val = ds_val.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val_og = ds_val_og.batch(args.batch_size, num_parallel_calls=tf.data.AUTOTUNE)
+    ds_val = ds_val.prefetch(6)
+    ds_val_og = ds_val_og.prefetch(6)
     print("Val Dataset:", ds_val)
 
     # TEST SET
@@ -969,110 +1017,7 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
         ds_test = ds_test.prefetch(4)
         print("Test Dataset:", ds_test)
 
-    return (ds_train, ds_val, ds_test, train_val_steps)
-
-"""
-def sample_data(args, n_labels, DB):
-    '''
-    NOT USED
-    '''
-    # Dataset size
-    #height = args.elevation
-    x_shape = args.x_shape #(None, 32, 32, 12) #(None, *args.x_shape)
-    x_shape_val = args.x_shape #(32, 32, 12)
-    
-    y_shape = args.y_shape #(None, 32, 32, 1) #(None, *args.y_shape)
-    y_shape_val = args.y_shape
-
-    #if loss == 'binary_focal_crossentropy':
-    if n_labels == 1:        
-        #y_shape = (None, *args.y_shape) #(None, 32, 32, 1)
-        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
-                     tf.TensorSpec(shape=y_shape, dtype=tf.int64, name='Y'))
-
-        #y_shape_val = args.y_shape #(32, 32, 1)
-        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
-                         tf.TensorSpec(shape=y_shape_val, dtype=tf.int64, name='Y'))
-
-        # Pick out the correct dataset paths
-        '''
-        if args.dataset == 'tor':
-            path = "int_tor"
-        elif args.dataset == 'nontor_tor':
-            path = "int_nontor_tor"
-        else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
-        '''
-    else:
-        # Define the dataset size
-        #y_shape = (None, 32, 32, 2)
-        specs = (tf.TensorSpec(shape=x_shape, dtype=tf.float64, name='X'), 
-                     tf.TensorSpec(shape=y_shape, dtype=tf.float32, name='Y'))
-
-        #y_shape_val = y_shape[1:] #(32, 32, 2)
-        specs_val = (tf.TensorSpec(shape=x_shape_val, dtype=tf.float64, name='X'), 
-                         tf.TensorSpec(shape=y_shape_val, dtype=tf.float32, name='Y'))
-
-    # Tensorflow datasets
-    # Pick out the correct dataset paths
-    #hparams[HP_DATA_PATCHES_TYPE]
-    '''
-    if args.dataset == 'tor':
-        path = "onehot_tor"
-    elif args.dataset == 'nontor_tor':
-        path = "onehot_nontor_tor"
-    else: raise ValueError(f"Arguments Error: Data set type must be either tor or nontor_tor but was {args.dataset}")
-
-    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_" + path + '/training_ZH_only.tf'
-    '/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/validation_' + path + '/validation1_ZH_only.tf'
-    '''
-
-    # tf.Dataset helper methods to group storm types into separate datasets
-    def filter_neg(x, y):
-        return tf.math.reduce_all(y <= 0)
-    def filter_pos(x, y):
-        return tf.math.reduce_any(y > 0)
-    
-    # Sample weighting for Dataset element selection
-    weights = [.9, .1] #np.repeat(1 / len(storm_datasets), len(storm_datasets))
-
-    ds_train = tf.data.Dataset.load(args.in_dir, specs)#.unbatch()
-    #xy_train = np.array(list(ds_train.as_numpy_iterator()))
-    #ds_train = ds_train.map(drop_dim, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_neg = ds_train.filter(filter_neg) #.repeat(2)
-    ds_pos = ds_train.filter(filter_pos) #.repeat(2)
-    nneg = len(list(ds_neg.as_numpy_iterator()))
-    npos = len(list(ds_pos.as_numpy_iterator()))
-    print("n neg", nneg, "n pos", npos)
-    if nneg > 0 and npos > 0:
-        ds_train = tf.data.Dataset.sample_from_datasets([ds_neg, ds_pos],
-                                             weights=weights,
-                                             stop_on_empty_dataset=True)
-    ds_train = ds_train.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_train = ds_train.prefetch(2) #tf.data.AUTOTUNE)
-
-    ds_val = tf.data.Dataset.load(args.in_dir_val, specs_val).batch(args.batch_size)
-    print(ds_val)
-    ds_val_neg = ds_val.filter(filter_neg) #.repeat()
-    ds_val_pos = ds_val.filter(filter_pos) #.repeat()
-    print(ds_val_neg)
-    print(ds_val_pos)
-    nneg_val = len(list(ds_val_neg.as_numpy_iterator()))
-    npos_val = len(list(ds_val_pos.as_numpy_iterator()))
-    print("val: n neg", nneg, "n pos", npos)
-    if nneg_val > 0 and npos_val > 0:
-        ds_val = tf.data.Dataset.sample_from_datasets([ds_val_neg, ds_val_pos],
-                                          weights=weights,
-                                             stop_on_empty_dataset=True)
-    #ds_val = ds_val.batch(args.batch_size) #, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_val = ds_val.prefetch(2) #tf.data.AUTOTUNE)
-    if DB:
-        print("Training Dataset Specs:", specs)
-        print("Validation Dataset Specs:", specs_val)
-        #print(len(list(ds_train.as_numpy_iterator())))
-        #print(len(list(ds_val.as_numpy_iterator())))
-
-    return (ds_train, ds_val)
-"""
+    return (ds_train, ds_val, ds_test, train_val_steps, ds_train_og, ds_val_og)
 
 def fvaf(y_true, y_pred):
     ''' TODO
@@ -1211,7 +1156,7 @@ def plot_learning_loss(history, fname, save=False, dpi=180):
     return plt.gcf()
 
 def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, 
-                     figsize=(10, 8), alpha=.5, save=False, dpi=180):
+                     figsize=(10, 8), alpha=.5, save=False, dpi=160):
     '''
     @return: tuple with the fig and axes objects
     '''
@@ -1285,7 +1230,8 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True,
 
     return fig, axs
 
-def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None, figsize=(5, 5), save=False, dpi=180):
+def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None, 
+                          figsize=(5, 5), save=False, dpi=160):
     '''
     Compute and plot the confusion matrix based on the cutoff p.
     Based on method from Tensorflow docs.
@@ -1336,7 +1282,8 @@ def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None, figsize=
 
     return fig, ax
 
-def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=180, **kwargs):
+def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, 
+             dpi=160, **kwargs):
     '''
     Plot the Reciever Operating Characteristic (ROC) Curve
     @param y: true output
@@ -1374,7 +1321,8 @@ def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=1
 
     return fig, ax
 
-def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=180, **kwargs):
+def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, 
+             dpi=160, **kwargs):
     '''
     Plot the Precision Recall Curve (PRC)
     @param y: true output
@@ -1412,7 +1360,7 @@ def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, dpi=1
     return fig, ax
 
 def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, strategy='quantile', 
-                          fig_ax=None, figsize=(10, 10), save=False, dpi=180, 
+                          fig_ax=None, figsize=(10, 10), save=False, dpi=160, 
                           **kwargs):
     '''
     Plot the reliability curve. Perfect model follows the y = x line. This curve
@@ -1506,8 +1454,8 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
     ax.set_ylabel('POD')
     return ax
 
-def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, 
-             color='dodgerblue', figsize=(10, 10), save=False, dpi=180, **csiargs):#, **plotargs):
+def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue', 
+             figsize=(10, 10), save=False, dpi=160, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
@@ -1585,6 +1533,10 @@ def create_argsparser():
                         help='Output directory for results, models, hyperparameters, etc.')
     parser.add_argument('--out_dir_tuning', type=str, #required=True,
                         help='(optional) Output directory for training and tuning checkpoints. Defaults to --out_dir if not specified')
+    parser.add_argument('--lscratch', type=str, default=None, #required=True,
+                        help='(optional) Path to lscratch for caching data. None by default, meaning do NOT use caching. If the empyt string is provided, the memory is used.')
+    parser.add_argument('--ntasks', type=int, default=None, #required=True,
+                        help='(optional) Number of threads, either $SLURM_NTASKS or $SLURM_CPUS_PER_TASK. None by default.')
     parser.add_argument('--hps_index', type=int, #required=True,
                         help='(optional) Index of top')
     #parser.add_argument('--hps_datetime', type=str, #required=True,
@@ -1796,20 +1748,25 @@ if __name__ == "__main__":
         print('NOGO.')
         exit()
 
+    ''' TODO
+    if args.cpus_per_task is not None:
+        tf.config.threading.set_intra_op_parallelism_threads(args.cpus_per_task)
+        tf.config.threading.set_inter_op_parallelism_threads(args.cpus_per_task)
+    '''
+
 
     PROJ_NAME_PREFIX = args.project_name_prefix
     PROJ_NAME = f'{PROJ_NAME_PREFIX}_{args.tuner}'
     
-    #PROJ_DATE = cargs['cdatetime']
     tuner_dir = args.out_dir_tuning if not args.out_dir_tuning is None  else args.out_dir
     wandb_path = os.path.join(tuner_dir, f'{PROJ_NAME}_{cdatetime}_wandb')
 
 
     tuner, hypermodel = create_tuner(args, wandb_path=wandb_path, DB=args.dry_run) #, strategy=tf.distribute.MirroredStrategy())
 
-    ds_train, ds_val, ds_test, train_val_steps = prep_data(args, 
-                                                           n_labels=hypermodel.n_labels,
-                                                           sample_method='sample')
+    # Load and prepare datasets
+    ds_train, ds_val, ds_test, train_val_steps, ds_train_og, ds_val_og = prep_data(
+                args, n_labels=hypermodel.n_labels, sample_method='sample')
     
     # If a tuner is specified, run the hyperparameter search
     if not args.tuner is None:
@@ -1829,11 +1786,10 @@ if __name__ == "__main__":
         print('\n=====================================================')
         print('=====================================================')
 
-        # Init wandb summary run logging the figures
-        '''run = wandb.init(project='unet_hypermodel_test', config=args_dict,
-                         sync_tensorboard=True, dir=wandb_path, tags=tags)'''
-        run = wandb.init(project='unet_hypermodel_test0', config=args_dict, 
+        # Init wandb summary run logging eval and figures
+        run = wandb.init(project='unet_hypermodel_run0', config=args_dict, 
                          dir=wandb_path, tags=tags)
+        del args_dict
 
         N_SUMMARY_TRIALS = args.number_of_summary_trials
         tuner.results_summary(N_SUMMARY_TRIALS)
@@ -1861,6 +1817,7 @@ if __name__ == "__main__":
         if args.save in [1, 2, 4]: #args.save > 0:
             print("Saving", hp_fnpath)
             df.to_csv(hp_fnpath)
+        del df
 
         # Train with best hyperparameters
         print("\n-------------------------")
@@ -1883,7 +1840,10 @@ if __name__ == "__main__":
         fname = os.path.join(dirpath, f"{FN_PREFIX}_learning_plot.png")
         _fg = plot_learning_loss(H, fname, save=(args.save in [2, 4])) #(args.save >= 2)
         #['loss', 'max_csi', 'auc_2', 'auc_3', 'binary_accuracy', 'val_loss', 'val_max_csi', 'val_auc_2', 'val_auc_3', 'val_binary_accuracy']
-        wandb.log({"plot_learning": wandb.Image(_fg)}) #pip install plotly
+        #wandb.log({"plot_learning": wandb.Image(_fg)}) #pip install plotly
+        wandb.log({"plot_learning": _fg}) #pip install plotly
+        plt.close()
+        del _fg
 
         if args.save >= 2:
             diagram_fnpath = os.path.join(dirpath, f"{FN_PREFIX}_architecture.png")
@@ -1904,17 +1864,22 @@ if __name__ == "__main__":
 
         # Predict with trained model
         print("\nPREDICTION")
-        print(" train card", get_dataset_size(ds_train))
-        xtrain_preds = model.predict(ds_train, steps=train_val_steps['steps_per_epoch']*BATCH_SIZE) #, batch_size=BATCH_SIZE) #
-        xval_preds = model.predict(ds_val, steps=train_val_steps['val_steps']*BATCH_SIZE)
+        #print(" train size", get_dataset_size(ds_train))
+        xtrain_preds = model.predict(ds_train_og, #steps=train_val_steps['steps_per_epoch'],#*BATCH_SIZE, 
+                                     verbose=1, workers=2, use_multiprocessing=True)
+        xval_preds = model.predict(ds_val_og, #steps=train_val_steps['val_steps'],
+                                   verbose=1, workers=2, use_multiprocessing=True)
         #xtest_recon = best_model.predict(X_test)
         #print("FVAF::", fvaf(xtrain_recon, ds_train), fvaf(xval_recon, ds_val), fvaf(xtest_recon, ds_test))
         fname = os.path.join(dirpath, f"{FN_PREFIX}_preds_distr.png")
         if args.save in [2, 4]:
-            _fg, _ = plot_predictions(xtrain_preds.ravel(), xval_preds.ravel(), 
+            sel0 = np.arange(0, xtrain_preds.size, 2)
+            sel1 = np.arange(0, xval_preds.size, 2)
+            _fg, _ = plot_predictions(xtrain_preds.ravel()[sel0], xval_preds.ravel()[sel1], 
                                       fname, save=True) #save>=2
-            wandb.log({"plot_preds": wandb.Image(_fg)})
+            wandb.log({"plot_preds": wandb.Image(_fg)}) #
             plt.close()
+            del _fg
 
         # Confusion Matrix
         def get_y(x, y):
@@ -1922,11 +1887,13 @@ if __name__ == "__main__":
             return y
 
         if args.class_weight is None:
-            y_train = np.concatenate([y for x, y in ds_train.unbatch()]) #ds.map(get_y)
+            y_train = np.concatenate([y for x, y in ds_train_og]) #ds.map(get_y)
         else:
-            y_train = np.concatenate([y for x, y, w in ds_train.unbatch()])
-        y_val = np.concatenate([y for x, y in ds_val])
+            y_train = np.concatenate([y for x, y, w in ds_train_og])
+        y_val = np.concatenate([y for x, y in ds_val_og])
 
+        print(f"ytrain shape: {y_train.shape} (true) {xtrain_preds.shape} (pred)")
+        print(f"yval shape: {y_val.shape} (true) {xval_preds.shape} (pred)")
         threshs = np.linspace(0, 1, 51).tolist()
         tps, fps, fns, tns = contingency_curves(y_val, xval_preds, threshs)
         csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
@@ -1940,10 +1907,12 @@ if __name__ == "__main__":
             axs = axs.ravel()
             #plt.subplots_adjust(wspace=.1)
             cthresh = np.arange(0.05, 1.05, 0.05), 
-            plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), fname, 
-                                p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[0]), save=False)        
-            plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(), fname, 
-                                p=cutoff_probab, thresh=cthresh, fig_ax=(fig, axs[1]), save=True) #args.save >= 2
+            plot_confusion_matrix(y_train.ravel(), xtrain_preds.ravel(), 
+                                  fname, p=cutoff_probab, thresh=cthresh, 
+                                  fig_ax=(fig, axs[0]), save=False)        
+            plot_confusion_matrix(y_val.ravel(), xval_preds.ravel(),  
+                                  fname, p=cutoff_probab, thresh=cthresh, 
+                                  fig_ax=(fig, axs[1]), save=True) #args.save >= 2
             wandb.log({"confusion_mtx": wandb.Image(fig)})
             plt.close(fig)
             del fig, axs
@@ -1954,7 +1923,7 @@ if __name__ == "__main__":
                             save=False, label='Train')
             plot_roc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
                             save=True, label='Val', c='orange') #args.save in [2, 4] #args.save >= 2
-            wandb.log({"plot_roc": wandb.Image(fig)})
+            wandb.log({"plot_roc": fig}) 
             plt.close(fig)
             del fig, ax
 
@@ -1964,16 +1933,16 @@ if __name__ == "__main__":
                             save=False, label='Train')
             plot_prc(y_val.ravel(), xval_preds.ravel(), fname, fig_ax=(fig, ax), 
                             save=True, label='Val', c='orange') #args.save in [2, 4] #args.save >= 2
-            wandb.log({"plot_prc": wandb.Image(fig)})
+            wandb.log({"plot_prc": fig})
             plt.close(fig)
             del fig, ax
         
         # Evaluate trained model
         print("\nEVALUATION")
-        train_eval = model.evaluate(ds_train)
-        val_eval = model.evaluate(ds_val)
+        train_eval = model.evaluate(ds_train_og, workers=2, use_multiprocessing=True)
+        val_eval = model.evaluate(ds_val_og, workers=2, use_multiprocessing=True)
         if not ds_test is None:
-            test_eval = model.evaluate(ds_test)
+            test_eval = model.evaluate(ds_test, workers=2, use_multiprocessing=True)
 
         # Construct evalutation pd.DataFrame
         metrics = H.history.keys()
@@ -1989,6 +1958,7 @@ if __name__ == "__main__":
         if args.save in [1, 2, 4]: #args.save > 0
             print("Saving", fname)
             df_eval.to_csv(fname)
+        del evals, df_eval
 
         if args.save in [2, 4]:
             # CSI Curve
@@ -1998,7 +1968,7 @@ if __name__ == "__main__":
                             threshs=csithreshs, label='Train', show_cb=False)
             plot_csi(y_val.ravel(), xval_preds.ravel(), fname, threshs=csithreshs, label='Val', 
                             color='orange', save=True, fig_ax=(fig, ax)) #args.save in [2, 4] #args.save >= 2
-            wandb.log({"plot_csi": wandb.Image(fig)})
+            wandb.log({"plot_csi": wandb.Image(fig)}) 
             plt.close(fig)
             del fig, ax
 
@@ -2009,7 +1979,7 @@ if __name__ == "__main__":
             plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
                                         fig_ax=(fig, ax), save=True, #args.save in [2, 4] #args.save >= 2
                                         label='Val', c='orange', strategy='uniform')
-            wandb.log({"plot_reliabilty_curve": wandb.Image(fig)})
+            wandb.log({"plot_reliabilty_curve": fig})
             plt.close(fig)
             del fig, ax
 

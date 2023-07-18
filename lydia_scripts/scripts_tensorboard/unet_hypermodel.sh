@@ -6,9 +6,9 @@
 #SBATCH --time=8:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --ntasks=20  #-n 20
-#SBATCH --mem=48G
-#SBATCH --job-name=tuner__test_resample_classweights
+#SBATCH --ntasks=24  #-n 20
+#SBATCH --mem=40G
+#SBATCH --job-name=ftuner__resample90_10_classweights80_20
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
@@ -45,7 +45,8 @@ conda activate tf #_2023_01
 
 python --version
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
-echo "SLURM_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK" # # threads job has bee allocated
+echo "SLURM_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK" # # threads job has been allocated
+echo "SLURM_NTASK=$SLURM_NTASK" 
 echo "SLURM_JOB_NUM_NODES=$SLURM_JOB_NUM_NODES" # count of nodes actually allocated
 echo "SLURM_CPUS_ON_NODE=$SLURM_CPUS_ON_NODE" # # CPUs allocated
 echo "SLURM_JOB_CPUS_PER_NODE=$SLURM_JOB_CPUS_PER_NODE" # # available CPUs to  the job on the allocated nodes. format: CPU_count[(xnumber_of_nodes)][,CPU_count [(xnumber_of_nodes)] ...].
@@ -68,29 +69,33 @@ python -u lydia_scripts/scripts_tensorboard/unet_hypermodel.py \
 --in_dir_test="/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf" \
 --out_dir="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning" \
 --out_dir_tuning="/scratch/momoshog/Tornado/tornado_jtti/tuning" \
---project_name_prefix="tor_unet_sample90_10_classweightsNone" \
+--lscratch $LSCRATCH \
+--project_name_prefix="tor_unet_sample90_10_classweights80_20" \
 --overwrite \
---tuner_id="debug" \
---epochs=10 \
---batch_size=2048 \
+--epochs=100 \
+--batch_size=1024 \
 --resample .9 .1 \
+--class_weight .8 .2 \
 --lrate=1e-3 \
 --patience=12 \
---wandb_tags test sample classweights dslarge saveall \
+--wandb_tags dslarge saveall \
 --number_of_summary_trials=3 \
 --gpu \
 --dry_run \
 --save=4 \
 hyper \
---max_epochs=12 \
---factor=6 
+--max_epochs=200 \
+--factor=10 
 #--hyperband_iterations=2
 #--hps_index=1 \
 
+
+
+#--tuner_id="debug" \
+#--epochs=10 \
+
 #--wandb_tags test resample repeat \
 
-#--resample .9 .1 \
-#--class_weight .2 .8 \
 
 #--resample .9 .1 \
 #--class_weight .1 .9 \
