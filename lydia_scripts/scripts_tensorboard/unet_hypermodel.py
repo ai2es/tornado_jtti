@@ -87,9 +87,12 @@ from keras_unet_collection import models
 tf.debugging.set_log_device_placement(True)
 tf.config.run_functions_eagerly(True)
 #tf.data.experimental.enable_debug_mode()
-ppolicy = "mixed_float16"
+ppolicy = "float32"
 precision_policy_map = {"mixed_float16": tf.float16, 
-                        "mixed_float32": tf.float32}
+                        "mixed_float32": tf.float32,
+                        "float32": tf.float32}
+tfdtype = precision_policy_map[ppolicy]
+print("Mixed precision", ppolicy, tfdtype)
 tf.keras.mixed_precision.set_global_policy(ppolicy)
 tf.keras.mixed_precision.global_policy()
 print(' ')
@@ -888,15 +891,16 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
         return x, y
     
     def change_spec(x, y):
-        x = tf.cast(x, tf.float16, name='X')
+        x = tf.cast(x, tfdtype, name='X') #tf.float16
         y = tf.cast(y, tf.int16, name='Y')
         return x, y
     
     #@tf.function
     def add_sample_weight(x, y):
         # Include a sample weight
-        label = tf.cast(tf.math.reduce_any(y > 0), dtype=tf.float16)
+        label = tf.cast(tf.math.reduce_any(y > 0), dtype=tfdtype) #tf.float16
         weight = (1. - label) * (args.class_weight[0]) + label * (1. - args.class_weight[0])
+        weight = tf.cast(weight, dtype=tfdtype) #tf.float16
         return x, y, tf.reshape(weight, (1,))
 
     # Dict with steps per epoch
@@ -1004,6 +1008,7 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
     ds_test = None
     if not args.in_dir_test is None:
         ds_test = tf.data.Dataset.load(args.in_dir_test)
+        ds_test = ds_test.map(change_spec, num_parallel_calls=tf.data.AUTOTUNE)
         print("Test Dataset:", ds_test)
 
         ds_test_neg = ds_test.filter(filter_neg, name="nontor_test")
