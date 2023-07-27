@@ -1,0 +1,1 @@
+../../training_metadata/3D_light/training_int_nontor_tor/training_metadata_ZH_only.nc

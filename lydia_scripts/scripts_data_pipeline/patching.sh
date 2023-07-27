@@ -1,21 +1,20 @@
 #!/bin/bash
 
-#SBATCH --partition=normal
+#SBATCH --partition=ai2es #normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
 #SBATCH --mem=10G
-#SBATCH --time=12:30:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=run__patching
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
-#SBATCH --array=2-213%20
-##SBATCH --array=1-262%20
-###Total days in 2013 = 119 ### 262 total files
-###############################################################
+#SBATCH --array=427-446%20
+##SBATCH --array=1-214,262%20
 
+###############################################################
 
 # Source conda env
 #source /home/lydiaks2/.bashrc
@@ -25,6 +24,7 @@ bash
 conda activate gewitter 
 #this_spc_date_string='20130520'
 
+echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
 python --version
 
 #python -u /home/lydiaks2/tornado_project/scripts_data_pipeline/patching.py \

@@ -331,7 +331,6 @@ def make_patches(args, radar, window):
     if ndims == 3:
         # Number of channels
         csize = args.patch_shape[2]
-    #else: raise ValueError(f"[ARGUMENTS] patch_shape number of dimensions should be 0, 1, 2, or 3 but was {ndims}")
     
     lat_range = range(0, lat_len, xsize - 4)
     lon_range = range(0, lon_len, ysize - 4)
