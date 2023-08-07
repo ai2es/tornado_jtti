@@ -16,7 +16,7 @@ python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
 
 import wandb
 from wandb.keras import WandbMetricsLogger, WandbCallback
-wandb.login()
+#wandb.login()
 
 import os, io, sys, random, shutil
 import pickle, copy
@@ -691,19 +691,18 @@ def execute_search(args, tuner, X_train, X_val=None, callbacks=[],
     # Finish the wandb run
     #run.finish()
 
-def get_rotation_indicies(args, nfolds, DB=0):
+def get_rotations_all(nfolds, DB=0):
     ''' TODO TEST
-    Get the fold indicies for each rotations.
-    @param args:
+    Get the fold indices for each rotations.
     @param nfolds: number of folds for the data
     @return: 3-tuple with the 2D numpy arrays of the train, val, and test sets.
             Each column is a fold index. Each row is a rotation.
     '''
-    # List of fodl indicies
-    folds = np.arange(nfolds).reshape(1,-1)
+    # List of fold indices
+    folds = np.arange(nfolds).reshape(1, -1)
 
-    # Matrix of rotations of the folds
-    folds_mesh = np.repeat(folds, folds, axis=0)
+    # Matrix of rotations of the folds where each row is a rotation
+    folds_mesh = np.repeat(folds, nfolds, axis=0)
 
     # Rotate folds
     offset = np.arange(nfolds).reshape(-1,1)
@@ -711,8 +710,32 @@ def get_rotation_indicies(args, nfolds, DB=0):
     folds_mesh = folds_mesh % nfolds # wrap fold indicies
 
     train_inds = folds_mesh[:, :-2]
-    val_inds = folds_mesh[:, -2]
-    test_inds = folds_mesh[:, -1]
+    val_inds = folds_mesh[:, -2].reshape(-1, 1)
+    test_inds = folds_mesh[:, -1].reshape(-1, 1)
+
+    if DB:
+        print("TRAIN SET\n", train_inds)
+        print("VAL SET\n", val_inds)
+        print("TEST SET\n", test_inds)
+    return train_inds, val_inds, test_inds
+
+def get_rotation(nfolds, r, DB=0):
+    ''' TODO TEST
+    Get the fold indices for a single rotation
+    @param nfolds: number of folds for the data
+    @param r: int for the rotation index. used as the offset
+    @return: 3-tuple with the 2D numpy arrays of the train, val, and test sets.
+            Each column is a fold index. Each row is a rotation.
+    '''
+    # List of fold indices
+    folds = np.arange(nfolds).reshape(1, -1)
+
+    # Rotate folds: shift index based on rotation and wrap fold indices
+    folds = (folds + r) % nfolds 
+
+    train_inds = folds[:, :-2]
+    val_inds = folds[:, -2]
+    test_inds = folds[:, -1]
 
     if DB:
         print("TRAIN SET\n", train_inds)
@@ -909,12 +932,11 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
     # TRAIN SET
     ds_train = tf.data.Dataset.load(args.in_dir) #, specs)
     ds_train = ds_train.map(change_spec, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_train_og = ds_train.take(-1) #map(identity, num_parallel_calls=tf.data.AUTOTUNE)
-    #ds_train = ds_train.map(change_spec, name='change_spec', num_parallel_calls=tf.data.AUTOTUNE)
+    ds_train_og = ds_train.take(-1) 
     print("Train Dataset (load):", ds_train)
 
-    ds_neg = ds_train.filter(filter_neg, name='nontor') #lambda x, y: tf.py_function(filter_neg, inp=[x, y], Tout=tf.bool, name='filter_neg_train'), name='nontor_train')
-    ds_pos = ds_train.filter(filter_pos, name='tor') #lambda x, y: tf.py_function(filter_pos, inp=[x, y], Tout=tf.bool, name='filter_pos_train'), name='tor_train') 
+    ds_neg = ds_train.filter(filter_neg, name='nontor') 
+    ds_pos = ds_train.filter(filter_pos, name='tor') 
 
     nneg = get_dataset_size(ds_neg) 
     npos = get_dataset_size(ds_pos)
@@ -939,6 +961,7 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
         ds_pos = ds_pos.take(-1).cache(filename=cache_file).repeat() 
         print(f'CACHE FILE NAME: {cache_file}')
     else:
+        print("No LSCRATCH, no caching")
         ds_neg = ds_neg.repeat()
         ds_pos = ds_pos.repeat()
 
@@ -1539,7 +1562,7 @@ def create_argsparser():
     parser.add_argument('--out_dir_tuning', type=str, #required=True,
                         help='(optional) Output directory for training and tuning checkpoints. Defaults to --out_dir if not specified')
     parser.add_argument('--lscratch', type=str, default=None, #required=True,
-                        help='(optional) Path to lscratch for caching data. None by default, meaning do NOT use caching. If the empyt string is provided, the memory is used.')
+                        help='(optional) Path to lscratch for caching data. None by default, meaning do NOT use caching. If the empty string is provided, the memory is used.')
     parser.add_argument('--ntasks', type=int, default=None, #required=True,
                         help='(optional) Number of threads, either $SLURM_NTASKS or $SLURM_CPUS_PER_TASK. None by default.')
     parser.add_argument('--hps_index', type=int, #required=True,
