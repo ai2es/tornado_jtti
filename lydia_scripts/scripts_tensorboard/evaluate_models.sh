@@ -8,10 +8,10 @@
 #SBATCH --cpus-per-task=20 #-c 24
 ##SBATCH --ntasks=24  #-n 20
 ##SBATCH --mem=40G
-#SBATCH --job-name=calib
+#SBATCH --job-name=ds
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
-#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.out
-#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j.err
+#SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j_out.txt
+#SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j_err.txt
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --verbose
@@ -27,6 +27,7 @@
 source ~/.bashrc
 bash 
 conda activate tf_experiments
+conda install -c conda-forge netcdf4 -y
 
 
 python --version
@@ -45,9 +46,11 @@ python lydia_scripts/scripts_tensorboard/evaluate_models.py \
 --in_dir=/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf \
 --in_dir_val=/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only.tf \
 --in_dir_test=/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf \
+--in_dir_labels=/ourdisk/hpc/ai2es/tornado/storm_mask_unet_V2 \
 --dir_preds=/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds \
 --lscratch $LSCRATCH \
 --epochs=100 \
+--method_reg=iso \
 --hp_path=/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tor_unet_sample50_50_classweightsNone_hyper/2023_07_20_20_55_39_hps.csv \
 --hp_idx=0 \
 -d

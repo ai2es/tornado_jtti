@@ -1183,13 +1183,19 @@ def plot_learning_loss(history, fname, save=False, dpi=180):
 
     return plt.gcf()
 
-def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, 
+def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, fig_ax=None, 
                      figsize=(10, 8), alpha=.5, save=False, dpi=160):
     '''
+    Plot histograms of the distribution of prediction values
     @return: tuple with the fig and axes objects
     '''
-    fig, axs = plt.subplots(2, 1, figsize=figsize)
-    axs = axs.ravel()
+    fig = None
+    axs = None
+    if fig_ax is None:
+        fig, axs = plt.subplots(2, 1, figsize=figsize)
+        axs = axs.ravel()
+    else:
+        fig, axs = fig_ax
 
     if use_seaborn:
         from seaborn import histplot
@@ -1248,6 +1254,64 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True,
         axs[3].set_ylabel('cumulative density')
         axs[3].set_xlim([0, .6])
         axs[3].legend(loc='center right')
+
+    plt.suptitle("Tornado Prediction Probabilities")
+
+    if save:
+        print("Saving prediction histograms")
+        print(fname)
+        plt.savefig(fname, dpi=dpi)
+
+    return fig, axs
+
+def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None, 
+                     figsize=(10, 8), alpha=.5, save=False, dpi=160):
+    '''
+    Fancy Plot histograms of the distribution of prediction values
+    @param Y: dict of arrays to plot. see the 'data' argument for 
+            seaborn.histplot()
+    @return: tuple with the fig and axes objects
+    '''
+    fig = None
+    axs = None
+    if fig_ax is None:
+        fig, axs = plt.subplots(2, 1, figsize=figsize)
+        axs = axs.ravel()
+    else:
+        fig, axs = fig_ax
+
+    from seaborn import histplot
+
+    # Distribution
+    histplot(data=Y, stat='probability', legend=True, 
+             ax=axs[0], alpha=alpha, common_norm=False)
+    axs[0].set_xlabel('') #Tornado Predicted Probability
+    axs[0].set_xlim([0, 1])
+    axs[0].legend(list(Y.keys()), loc='center right')
+
+    ## Zoom
+    ax2 = plt.axes([0.4, 0.05, .3, .3]) #left, bottom, width, height
+    histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
+             common_norm=False) #distplot
+    #ax2.set_title('zoom')
+    ax2.set_xlim([0, .05])
+
+    # Cumulative
+    histplot(data=Y, stat='probability', legend=True,
+             ax=axs[1], alpha=alpha, common_norm=False, 
+             cumulative=True, element="step", fill=False)
+    axs[1].set_xlabel('Tornado Predicted Probability')
+    axs[1].set_ylabel('Cumulative Probability')
+    axs[1].set_xlim([0, 1])
+    axs[1].legend(list(Y.keys()), loc='center right')
+
+    ## Zoom
+    ax2 = plt.axes([0.4, 0.05, .3, .3]) #left, bottom, width, height
+    histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
+             common_norm=False, cumulative=True, element="step", fill=False) #distplot
+    #ax2.set_title('zoom')
+    ax2.set_xlim([0, .05])
+    ax2.legend([])
 
     plt.suptitle("Tornado Prediction Probabilities")
 
@@ -1421,7 +1485,7 @@ def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, strategy='quantile',
     print(" reliability:: probs_preds quantile", np.quantile(prob_preds, [0, .5, 1]))
 
     ax.plot(prob, prob_preds, **kwargs)
-    ax.plot([0, 1], linestyle='--')
+    ax.plot([0, 1], linestyle='--', color='k')
     ax.set_xlabel("Observed Frequency")
     ax.set_ylabel("Predicted Probability")
     ax.grid(True)

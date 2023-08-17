@@ -45,8 +45,8 @@ from custom_metrics import MaxCriticalSuccessIndex
 from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
 sys.path.append("../keras-unet-collection")
 #from keras_unet_collection import models
-from keras_unet_collection.activations import *
-from scripts_tensorboard.unet_hypermodel import UNetHyperModel, prep_data, plot_reliabilty_curve
+from keras_unet_collection.activations import * #import GELU
+from scripts_tensorboard.unet_hypermodel import UNetHyperModel, prep_data, plot_reliabilty_curve, plot_predictions, plot_preds_hists
 from tensorflow.keras.callbacks import EarlyStopping 
 
 
@@ -146,7 +146,7 @@ def parse_args(args_list=None):
 """
 Manage and structure GridRad data
 """
-def load_gridrad(args):
+def get_gridrad_storm_filenames(args):
     '''
     Load storm mask and radar files
     '''
@@ -162,7 +162,8 @@ def load_gridrad(args):
 
 def pair_gridrad_to_storms(args, gridrad_filenames, labels_filenames, DB=False):
     '''
-    Match up the gridrad files with their corresponding storm labels files
+    Match up the gridrad files with their corresponding storm labels files based
+    on the datetimes
     :param gridrad_filenames: list of strings of  gridrad file path names
     :param labels_filenames: list of strings of storm label file path names
 
@@ -196,7 +197,7 @@ def pair_gridrad_to_storms(args, gridrad_filenames, labels_filenames, DB=False):
 
     return gridrad_stormlabel_files
 
-def prep_data_radars_storms(args, all_gridrad_stormlabel_files, patch=True):
+def create_dataset(args, all_gridrad_stormlabel_files, pair=False, patch=False):
     '''
     Make tf Datasets from the radar and storm files
 
@@ -211,26 +212,41 @@ def prep_data_radars_storms(args, all_gridrad_stormlabel_files, patch=True):
     ds: tf Dataset of radar-tor pairs
     '''
     gridrad_stormlabel_files = np.array(all_gridrad_stormlabel_files)
-    ds = tf.data.Dataset.from_tensor_slices(gridrad_stormlabel_files)
+    X = gridrad_stormlabel_files[:, 0]
+    Y = gridrad_stormlabel_files[:, 1]
+    ds = tf.data.Dataset.from_tensor_slices((X, Y))
+    print("make slice", ds)
 
+    # Loads the files
     ds = ds.map(prep_ntuple, num_parallel_calls=tf.data.AUTOTUNE)
-    ds_unpatched = ds.map(prep_pair, num_parallel_calls=tf.data.AUTOTUNE)
 
-    if patch:
-        pass
+    # Extract just the reflectivity and storm label pair. Removes all other fields
+    if pair:
+        ds = ds.map(prep_pair, num_parallel_calls=tf.data.AUTOTUNE)
+
+    #if patch:
+    #make_patches_ds(X, Y, S, T, istor, isclear, Lat, Lon, Alt, time, 
+    #                patch_shape=args.patch_shape, noverlap=(4,), clear_thres=30)
+    
+    #ds = ds.map(lambda X, Y, S, T, istor, isclear, Lat, Lon, Alt, time: make_patches_ds(X, Y, S, T, istor, isclear, Lat, Lon, Alt, time, patch_shape=args.patch_shape, noverlap=(0,)))
+    ds = ds.map(lambda XY: make_patches_ds(*XY, patch_shape=args.patch_shape, noverlap=(0,)), num_parallel_calls=tf.data.AUTOTUNE)
 
     ds = ds.batch(args.batch)
+    print(ds)
 
     return ds
 
-def prep_ntuple(gr_fnpath, sl_fname):
+def prep_ntuple(gr_fnpath, sl_fname, clear_thres=30):
     '''
-    Helper method to create tf Datasets from gridrad-stormlabel files pairs
+    Helper method to create tf Datasets from gridrad-stormlabel files pairs.
+    Loads the files.
 
     Parameters
     ----------
     gr_fnpath: string for gridrad file name path
     sl_fname: string for the correspond storm labels file name path
+    clear_thres: int threshold for clear air. Reflectivity below clear_thres
+            is considered clear air. Default 30
     
     Returns
     ----------
@@ -241,17 +257,23 @@ def prep_ntuple(gr_fnpath, sl_fname):
     istor: bool whether the storm has at least one tornadic pixel
     isclear: bool whether the storm 'clear air' (i.e. all pixels have 
             reflectivity below 30
+    Lon: array for longtitude
+    Lat: array for latittude
+    Alt: array for altitude
     '''
-    #print(f"Opening {gr_fnpath}")
-    #print(f"Opening {sl_fname}")
-    gridrad_ds = xr.load_dataset(gr_fnpath)
-    storm_mask_ds = xr.load_dataset(sl_fname)
+    if not os.path.exists(gr_fnpath):
+        print(f"Does not exist {gr_fnpath}")
+    if not os.path.exists(sl_fname):
+        print(f"Does not exist {sl_fname}")
+
+    gridrad_ds = xr.load_dataset(gr_fnpath) #, engine='netcdf4')
+    storm_mask_ds = xr.load_dataset(sl_fname) #, engine='netcdf4')
 
     Lat = gridrad_ds.Latitude.values
     Lon = gridrad_ds.Longitude.values
     Alt = gridrad_ds.Altitude.values
 
-    time = gridrad_ds.time.values
+    time = gridrad_ds.time.values[0]
 
     X = np.squeeze(gridrad_ds.ZH.values)
     X = np.transpose(X, (1, 2, 0)) # move altitude to be last dimension
@@ -266,13 +288,13 @@ def prep_ntuple(gr_fnpath, sl_fname):
     # Is tornadic (at least one tornadic pixel)
     istor = np.any(T > 0)
     # Is clear air (all pixels less than 30 dBZ)
-    isclear = np.all(X < 30)
+    isclear = np.all(X < clear_thres)
 
     #n_pixels_EF0_EF1 = ([], np.count_nonzero(storm_mask[xi:xi+size, yi:yi+size] == 1)),
     #n_pixels_EF2_EF5 = ([], np.count_nonzero(storm_mask[xi:xi+size, yi:yi+size] == 2)),
     #n_convective_pixels = ([], np.count_nonzero(radar.ZH.isel(Latitude=slice(xi, xi+size), Longitude=slice(yi, yi+size), time=0).fillna(0).values.swapaxes(0,2).swapaxes(1,0).max(axis=(2)) >= 30
 
-    return X, Y, S, T, istor, isclear, Lat, Lon, Alt
+    return X, Y, S, T, istor, isclear, Lat, Lon, Alt, time
 
 def prep_pair(X, Y, S, T, istor, isclear, Lat, Lon, Alt):
     '''
@@ -466,12 +488,8 @@ def make_patches(args, radar, window):
                                                          time=0, Altitude=0).values),
                             stitched_x=(["x"], range(xi, xj)),
                             stitched_y=(["x"], range(yi, yj)),
-                            n_convective_pixels = ([], np.count_nonzero(radar.ZH.isel(Latitude=xsel,
-                                                                                      Longitude=ysel,
-                                                                                      time=0).fillna(0).values.swapaxes(0,2).swapaxes(1,0).max(axis=(2)) >= 30)),
-                            n_uh_pixels = ([], np.count_nonzero(radar.UH.isel(Latitude=xsel, 
-                                                                              Longitude=ysel,
-                                                                              time=0).fillna(0).values > 0)),
+                            n_convective_pixels = ([], np.count_nonzero(radar.ZH.isel(Latitude=xsel, Longitude=ysel, time=0).fillna(0).values.swapaxes(0,2).swapaxes(1,0).max(axis=(2)) >= 30)),
+                            #n_uh_pixels = ([], np.count_nonzero(radar.UH.isel(Latitude=xsel,  Longitude=ysel, time=0).fillna(0).values > 0)),
                             lat=([], radar.Latitude.values[xi]),
                             lon=([], radar.Longitude.values[yi]),
                             time=([], radar.time.values[0]),
@@ -500,8 +518,100 @@ def make_patches(args, radar, window):
     
     return ds_patches
 
-def make_patches_ds(X, Y, patch_shape=(32,), noverlap=(4,)):
+def make_patches_ds(X, Y, S, T, istor, isclear, Lat, Lon, Alt, time, 
+                    patch_shape=(32,), noverlap=(4,), clear_thres=30):
     '''TODO
+    Break the data into all regular patches. 
+
+    Parameters
+    ----------
+    X: 
+    Y:
+    patch_shape: int or tuple. number of pixels overlaping between patches. if 
+            tuple, entry 0 is the number of overlapping pixels in the x dimension
+            and entry 1 is the number of overlapping pixels in the y dimension.
+            if an int use the same number for both directions
+    noverlap: tuple. number of pixels overlaping between patches. if 
+            tuple length is 2, entry 0 is the number of overlapping pixels in the x dimension
+            and entry 1 is the number of overlapping pixels in the y dimension.
+            if tuple length 1, use the same number for both dimensions
+
+    Return
+    ----------
+    ds_patches: 
+    '''
+    # List of patches
+    patches = []
+
+    xsize = patch_shape[0]  #lat
+    ysize = None            #lon
+    ndims = len(patch_shape)
+    if ndims == 1:
+        ysize = xsize
+    elif ndims >= 2:
+        ysize = patch_shape[1]
+    else: 
+        raise ValueError(f"in make_patches_ds, argument patch_shape number of dimensions should be 1 or 2 but was {ndims}")
+    
+    lat_len = X.shape[0]
+    lon_len = X.shape[1]
+
+    xoverlap = noverlap[0]
+    yoverlap = xoverlap
+    if len(noverlap) == 2:
+        yoverlap = noverlap[1]
+    lat_range = range(0, lat_len, xsize - xoverlap)
+    lon_range = range(0, lon_len, ysize - yoverlap)
+    
+    X_filld = np.nan_to_num(X, nan=0) #.fillna(0)
+    
+    #tf.keras.layers.RandomCrop
+
+    # Iterate over Latitude and Longitude for every size-th pixel. Performed every (xi, yi) = multiples of size, and will give us a normal array
+    for xi in lat_range:
+        for yi in lon_range:  
+        
+            # Account for case that the patch goes outside of the domain
+            # If part of patch is outside, move over, so the patch edge lines up with the domain edge
+            if xi >= lat_len - xsize:
+                xi = lat_len - xsize - 1
+            if yi >= lon_len - ysize:
+                yi = lon_len - ysize - 1
+
+            xj = xi + xsize #+ 1
+            yj = yi + ysize #+ 1
+            xsel = slice(xi, xj)
+            ysel = slice(yi, yj)
+
+            #_X = X[xsel, ysel, :]
+            #_X_filld = _X.nan_to_num(_X, nan=0) #.fillna(0)
+
+            #_Y = Y[xsel, ysel, :]
+
+            Xpatch = tf.image.crop_to_bounding_box(X_filld, xi, yi, xsize, ysize)
+            Ypatch = tf.image.crop_to_bounding_box(Y, xi, yi, xsize, ysize)
+            Spatch = tf.image.crop_to_bounding_box(S, xi, yi, xsize, ysize)
+            Tpatch = tf.image.crop_to_bounding_box(T, xi, yi, xsize, ysize)
+            print("X,Y shape", Xpatch.shape, Ypatch.shape)
+            #patch_filld = patch.nan_to_num(patch, nan=0) #.fillna(0)
+            nconvective_pixels = np.count_nonzero(Xpatch.max(axis=2) >= clear_thres)
+            # lat=([], Lat[xi]), #radar.Latitude.values[xi]
+            # lon=([], Lon[yi]), #radar.Longitude.values[yi]
+            # time=([], time)) #radar.time.values[0]
+
+            #X, Y, S, T, istor, isclear, Lat, Lon, Alt, time
+            patches.append((Xpatch, Ypatch, Spatch, Tpatch, istor, isclear, 
+                            Lat[xi], Lon[yi], Alt, time, xi, yi))
+
+    # Combine all patches into one dataset
+    ds_patches = xr.concat(patches, 'patch')
+    print("ds_patch dims", ds_patches.dims)
+    print("ds_patch coords", ds_patches.coords)
+    
+    return ds_patches
+
+def make_patches_ds_xr(X, Y, Lat, Lon, Alt, time, patch_shape=(32,), noverlap=(4,)):
+    ''' TODO
     Break the data into all regular patches. Create a Dataset of concatenated 
     along the patches
 
@@ -546,7 +656,7 @@ def make_patches_ds(X, Y, patch_shape=(32,), noverlap=(4,)):
     lat_range = range(0, lat_len, xsize - xoverlap)
     lon_range = range(0, lon_len, ysize - yoverlap)
     
-    naltitudes = X.shape[-1]
+    #tf.image.crop_to_bounding_box
 
     # Iterate over Latitude and Longitude for every size-th pixel. Performed every (xi, yi) = multiples of size, and will give us a normal array
     pi = 0 # patch index
@@ -566,29 +676,26 @@ def make_patches_ds(X, Y, patch_shape=(32,), noverlap=(4,)):
             ysel = slice(yi, yj)
 
             _X = X[xsel, ysel, :]
+            _X_filld = _X.fillna(0)
 
             # Create the patch
             data_vars = dict(
-                            ZH=(["x", "y", "z"], X),
+                            ZH=(["x", "y", "z"], _X),
                                 #radar.ZH.isel(Latitude=xsel, Longitude=ysel, 
                                 #time=0).values.swapaxes(0,2).swapaxes(1,0)), 
                             stitched_x=(["x"], range(xi, xj)),
                             stitched_y=(["x"], range(yi, yj)),
-                            n_convective_pixels = ([], np.count_nonzero(radar.ZH.isel(Latitude=xsel,
-                                                                                      Longitude=ysel,
-                                                                                      time=0).fillna(0).values.swapaxes(0,2).swapaxes(1,0).max(axis=(2)) >= 30)),
-                            n_uh_pixels = ([], np.count_nonzero(radar.UH.isel(Latitude=xsel, 
-                                                                              Longitude=ysel,
-                                                                              time=0).fillna(0).values > 0)),
-                            lat=([], radar.Latitude.values[xi]),
-                            lon=([], radar.Longitude.values[yi]),
-                            time=([], radar.time.values[0]))
+                            n_convective_pixels = ([], np.count_nonzero(_X_filld.max(axis=2) >= 30)),
+                                #radar.ZH.isel(Latitude=xsel, Longitude=ysel, time=0).fillna(0).values.swapaxes(0,2).swapaxes(1,0).max(axis=(2)) >= 30)),
+                            lat=([], Lat[xi]), #radar.Latitude.values[xi]
+                            lon=([], Lon[yi]), #radar.Longitude.values[yi]
+                            time=([], time)) #radar.time.values[0]
 
             to_add = xr.Dataset(data_vars=data_vars,
                                 coords=dict(patch=(['patch'], [np.int32(pi)]),
                                             x=(["x"], np.arange(xsize, dtype=np.int32)), 
                                             y=(["y"], np.arange(ysize, dtype=np.int32)), 
-                                            z=(["z"], np.arange(1, naltitudes + 1, dtype=np.int32))))
+                                            z=(["z"], Alt))) #np.arange(1, naltitudes + 1, dtype=np.int32)
 
             to_add = to_add.fillna(0)
 
@@ -600,14 +707,103 @@ def make_patches_ds(X, Y, patch_shape=(32,), noverlap=(4,)):
     
     return ds_patches
 
+def stitch_patches(X, Y, S, T, istor, isclear, Lat, Lon, Alt, time, noverlap=(4,)):
+    """ 
+    Reconstruct the grid by stitching the patches back together
+
+    @param args: command line args. see create_argsparser()
+            Relevant arguments
+                patch_shape: shape of the patches
+    @param wofs: WoFS data from a single time point in the gridrad grid
+    @param stats: xarray dataset with training mean and std of the reflectivity 
+            and other fields
+    @param gridrad_spacing: Gridrad files have grid spacings of 1/48th degrees lat/lon
+            1 / (gridrad_spacing) degrees
+    @param seconds_since: string seconds since date statement to use for creating
+            NETCDF4 datetime integers. string of the form since describing the 
+            time units. can be days, hours, minutes, etc. see netcdf4.date2num() 
+            documentation for more information
+    @param DB: int debug flag to print out additional debug information
+
+    @return: xarray Dataset of the stitched WoFS patches
+    """
+
+    # Compute total number of grid points in latitude and longitude
+    total_in_lat = X.shape[0] #int(wofs.stitched_x.max().values + 1)
+    total_in_lon = X.shape[1] #int(wofs.stitched_y.max().values + 1)
+
+    # Get minimum value of latitude and longitude
+    lat_min = wofs.lat.min().values
+    lon_min = wofs.lon.min().values
+
+    # The grid is regular in lat/lon, therefore reconstruct the lat/lon grid for the stitched data
+    lats = np.linspace(lat_min, lat_min+(total_in_lat-1) / gridrad_spacing, total_in_lat)
+    lons = np.linspace(lon_min, lon_min+(total_in_lon-1) / gridrad_spacing, total_in_lon)
+
+    # Define empty arrays that will hold the stitched data
+    tor_preds = np.zeros((total_in_lat, total_in_lon))
+    uh_array = np.zeros((total_in_lat, total_in_lon))
+    zh_low_level = np.zeros((total_in_lat, total_in_lon))
+    overlap_array = np.zeros((total_in_lat, total_in_lon))
+
+    xsize = X.shape[0]
+    ysize = X.shape[1]
+
+    # Loop through all the patches
+    zeros = np.ones((xsize, ysize))
+    npatches = wofs.patch.values.size
+    #for p in range(wofs.patch.values.shape[0]):
+    for p in range(npatches):
+        # Find locations of the corner of this patch in the stitched grid
+        min_x = int(wofs.isel(patch=p).stitched_x.min().values)
+        min_y = int(wofs.isel(patch=p).stitched_y.min().values)
+        max_x = int(wofs.isel(patch=p).stitched_x.max().values + 1)
+        max_y = int(wofs.isel(patch=p).stitched_y.max().values + 1)
+        
+        # Reconstruct stitched grid by taking the average from all the patches at each grid point
+        # At this step, adding the data from all patches
+        tor_preds[min_x:max_x, min_y:max_y] += wofs.isel(patch=p).predicted_tor.values      
+        uh_array[min_x:max_x, min_y:max_y] += wofs.isel(patch=p).UH.values
+        zh_low_level[min_x:max_x, min_y:max_y] += wofs.isel(patch=p, z=0).ZH.values * ZH_std + ZH_mu
+        overlap_array[min_x:max_x, min_y:max_y] += zeros
+    
+    # Compute average of each patch by dividing by the total number of patches that contained each pixel
+    tor_preds = tor_preds / overlap_array
+    uh_array = uh_array / overlap_array
+    zh = zh_low_level
+    zh_low_level = zh_low_level / overlap_array
+
+    # Obtain the time of the forecast
+    datetime_int = num2date(wofs.time.values[0], seconds_since) #
+    forecast_time = np.datetime64(datetime_int)
+
+    # Put stitched grid into Dataset 
+    wofs_stiched = xr.Dataset(data_vars=dict(UH=(["time", "lat", "lon"],
+                                                    uh_array.reshape(1, total_in_lat, total_in_lon)),
+                                            ZH_1km=(["time", "lat", "lon"], 
+                                                    zh_low_level.reshape(1, total_in_lat, total_in_lon)),
+                                            ZH=(["time", "lat", "lon"], 
+                                                    zh.reshape(1, total_in_lat, total_in_lon)),
+                                            predicted_tor=(["time", "lat", "lon"], 
+                                                    tor_preds.reshape(1, total_in_lat, total_in_lon))),
+                            coords=dict(time=[forecast_time], lon=lons, lat=lats),
+                            attrs=wofs.attrs
+                            )
+    wofs_stiched.ZH.attrs['units'] = 'dBZ'
+    wofs_stiched.ZH_1km.attrs['units'] = 'dBZ'
+    wofs_stiched.UH.attrs['units'] = 'm^2/s^2'
+
+    return wofs_stiched
+
+
 def fit_transform_predictions(args, ytrue, ypred, method='log', **kwargs):
-    ''' TODO TEST
+    ''' 
     Use isotonic or logistic regression to transform the predictions into a more
     forecaster friendly range
 
-    @param args:
-    @param ytrue: 
-    @param ypred: 
+    @param args: command line arguments. see create_argsparser()
+    @param ytrue: array of ground truth outputs
+    @param ypred: array of model predictions
     @param method: string indicating the regression approach to use. could also
             be Sci-Kit Learn Regresssion object.
             string options:
@@ -619,13 +815,14 @@ def fit_transform_predictions(args, ytrue, ypred, method='log', **kwargs):
     ---------
     reg: fit Sci-kit Learn regression model
     yhat:
-    mu_acc: mean accuracy
+    mu_acc: mean accuracy for logistic regression; coefficient of determination
+            for isotoni regression
     '''
     reg = None
     if method == 'log':
         reg = LogisticRegression(**kwargs).fit(ypred, ytrue)
     elif method == 'iso':
-        reg = IsotonicRegression(**kwargs).fit(ypred, ytrue)
+        reg = IsotonicRegression(y_min=0, y_max=1, **kwargs).fit(ypred.ravel(), ytrue.ravel())
         #yhat = isotonic_regression(ypred, y_min=0, y_max=1, increasing=True)
     elif isinstance(method, IsotonicRegression) or isinstance(method, LogisticRegression):
         reg = method.fit(ypred, ytrue)
@@ -679,8 +876,8 @@ def build_fit_hypermodel(args, train_data, val_data, train_val_steps,
     model = hmodel.build(hps) 
 
     if callbacks == []:
-        es = EarlyStopping(monitor='val_loss', patience=12,  
-                        min_delta=1e-5, restore_best_weights=True)
+        es = EarlyStopping(monitor='val_loss', patience=12,
+                           min_delta=1e-5, restore_best_weights=True)
         #es = EarlyStopping(monitor=args.objective, patience=args.patience,  
         #                    min_delta=args.min_delta, restore_best_weights=True)
         callbacks.append(es)
@@ -697,7 +894,6 @@ def build_fit_hypermodel(args, train_data, val_data, train_val_steps,
 if __name__ == "__main__":
     args = parse_args()
 
-
     # Grab GPUs if possible
     ndevices = 0
     devices = []
@@ -707,7 +903,6 @@ if __name__ == "__main__":
         ndevices = len(devices)
 
         # Set memory growth for each
-        #config.gpu_options.allow_growth = True
         try:
             for device in devices:
                 tf.config.experimental.set_memory_growth(device, True)
@@ -722,25 +917,28 @@ if __name__ == "__main__":
     print(f'Visible {ndevices} devices {devices}. \nLogical devices {len(devices_logical)} {devices_logical}\n')
     print("GPUs (Phys. Devices) Available: ", tf.config.list_physical_devices('GPU'))
 
-
+    """>>>
     # Load and prepare tf Datasets
-    #os.chmod(args.lscratch, mode=0o777)
     ds_train, ds_val, ds_test, train_val_steps, ds_train_og, ds_val_og = prep_data(
                 args, n_labels=args.n_labels, sample_method='sample')
 
+    '''
     # Construct model
     hps, model, H = build_fit_hypermodel(args, ds_train, ds_val, 
                                          train_val_steps) #, callbacks=[])
-    # Or load  the model
-    model = keras.models.load(args.loc_model)
-    
-    #ds_patches = make_patches(args, wofs_regridded, forecast_window)
-    #preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, DB=DB)
-    #predictions =  stitch_patches(args, wofs_gridrad, stats, 
-                                    #gridrad_spacing=gridrad_spacing, 
-                                    #seconds_since=seconds_since, DB=DB)
-    
+    '''
+    """
 
+    # Or load  the model
+    fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
+                'cutoff': 0.5, 'want_hard_discretization': False}
+    fss = make_fractions_skill_score(**fss_args)
+    model = keras.models.load_model(args.loc_model, 
+                                    custom_objects={'fractions_skill_score': fss, 
+                                        'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex,
+                                        'GELU': GELU})
+
+    """
     '''
     # Evaluate trained model
     print("\nEVALUATION")
@@ -748,7 +946,7 @@ if __name__ == "__main__":
     val_eval = model.evaluate(ds_val_og, workers=3, use_multiprocessing=True)
     if ds_test is not None:
         test_eval = model.evaluate(ds_test, workers=3, use_multiprocessing=True)
-        '''
+    '''
 
     # Predict with trained model
     print("\nPREDICTION")
@@ -769,35 +967,115 @@ if __name__ == "__main__":
     if ds_test is not None:
         y_test = np.concatenate([y for x, y in ds_test])
 
+    ntrain = y_train.shape[0]
+    nval = y_val.shape[0]
+    ntest = y_test.shape[0]
+
+    y_train_flat = y_train.reshape(-1, 1) #.reshape(ntrain, -1)
+    xtrain_preds_flat = xtrain_preds.reshape(-1, 1) #.reshape(ntrain, -1)
+
+    y_val_flat = y_val.reshape(-1, 1) #.reshape(nval, -1)
+    xval_preds_flat = xval_preds.reshape(-1, 1) #.reshape(nval, -1)
+
+    y_test_flat = y_test.reshape(-1, 1) #.reshape(ntest, -1)
+    xtest_preds_flat = xtest_preds.reshape(-1, 1) #.reshape(ntest, -1)
+
+    print("shape", y_train_flat.shape, xtrain_preds_flat.shape)
+
     reg_args = {}
-    calib, ycalib, mu_acc = fit_transform_predictions(args, y_train, xtrain_preds, 
-                                   method=args.method_reg, **reg_args)
+    calib, ycalib, mu_acc = fit_transform_predictions(args, y_train_flat, 
+                                                      xtrain_preds_flat, 
+                                                      method=args.method_reg, 
+                                                      **reg_args)
     # Save fit regression model
-    fname = os.path.join(args.dir_preds, 'calibraion_model_log.pkl')
-    #>>pickle.dump(calib, open(fname, "wb"))
+    fname = os.path.join(args.dir_preds, f'calibraion_model_{args.method_reg}.pkl')
+    #pickle.dump(calib, open(fname, "wb"))
+    with open(fname, 'wb') as fid:
+        pickle.dump(calib, fid)
+    #with open(fname, 'rb') as fid:
+        #calib = pickle.load(fid)
     print(f"Saving calibration model {fname}")
 
-    ycalib_val = calib.predict(xval_preds)
+    ycalib_val = calib.predict(xval_preds_flat)
+    ycalib_test = calib.predict(xtest_preds_flat)
+    <<<<<"""
 
-    fname = os.path.join(args.dir_preds, f"calibraion_model_log_reliability_train_val.png")
-    strat = 'uniform'
-    fig, ax = plot_reliabilty_curve(y_train.ravel(), ycalib.ravel(), fname, 
-                                    label='Train', strategy=strat, save=False)
-    plot_reliabilty_curve(y_val.ravel(), ycalib_val.ravel(), fname, 
-                          label='Val', c='orange', 
-                          strategy=strat, fig_ax=(fig, ax), save=False) #>>SAVE
-    print(f"Saving calibration figure {fname}")
+    # Reliabilty Curve
+    plot_calib = False
+    if plot_calib:
+        fname = os.path.join(args.dir_preds, f"calibration_model_reliability.png")
+        strat = 'uniform'
+        kwargs = {'lw': 4}
+        fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(), fname, 
+                                        label='Train', strategy=strat, **kwargs, 
+                                        save=False)
+        plot_reliabilty_curve(y_val.ravel(), xval_preds.ravel(), fname, 
+                            label='Val', c='orange', **kwargs, 
+                            strategy=strat, fig_ax=(fig, ax), save=False) 
+        plot_reliabilty_curve(y_test.ravel(), xtest_preds.ravel(), fname, 
+                            label='Test', c='green', **kwargs, 
+                            strategy=strat, fig_ax=(fig, ax), save=True) #>>SAVE
+        print(f"Saving calibration figure {fname}")
+        plt.close(fig)
+        del fig, ax
+
+        # Reliability Curve - Log Calibration
+        fname = os.path.join(args.dir_preds, f"calibration_model_reliability_{args.method_reg}.png")
+        kwargs = {'lw': 8}
+        fig, ax = plot_reliabilty_curve(y_train.ravel(), ycalib, fname, **kwargs,
+                                        label='Train', strategy=strat, save=False)
+        kwargs = {'lw': 4}
+        plot_reliabilty_curve(y_val.ravel(), ycalib_val, fname, **kwargs, 
+                            label='Val', c='orange', 
+                            strategy=strat, fig_ax=(fig, ax), save=False) 
+        kwargs = {'lw': 2}
+        plot_reliabilty_curve(y_test.ravel(), ycalib_test, fname, **kwargs, 
+                            label='Test', c='green', 
+                            strategy=strat, fig_ax=(fig, ax), save=True) #>>SAVE
+        print(f"Saving calibration figure {fname}")
     
+    # Prediction Distributions
+    plot_pred_hists = False
+    if plot_pred_hists:
+        Y = {'Train True': y_train.ravel()[:-1:20], 'Train Preds': xtrain_preds.ravel()[:-1:20],
+            'Train Calib': ycalib[:-1:20],
+            'Val True': y_val.ravel()[:-1:20], 'Val Preds': xval_preds.ravel()[:-1:20],
+            'Val Calib': ycalib_val[:-1:20],
+            'Test True': y_test.ravel()[:-1:20], 'Test Preds': xtest_preds.ravel()[:-1:20],
+            'Test Calib': ycalib_test[:-1:20]
+            }
+        fname = os.path.join(args.dir_preds, f"calibration_model_preds_hists_{args.method_reg}.png")
+        plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None, 
+                        figsize=(10, 8), alpha=.5, save=True, dpi=160)
+        #plot_predictions(y_train.ravel(), ycalib, fname, use_seaborn=True, 
+        #                 figsize=(10, 8), alpha=.5, save=False, dpi=160) #y_train.ravel(), xtrain_preds.ravel()
+        print(f"Saving preds hists {fname}")
 
 
-    '''
     # Load unpatched data
-    all_gridrad_files, all_storm_mask_files = load_gridrad(args)
-    # Match up radar data and storm labels
+    all_gridrad_files, all_storm_mask_files = get_gridrad_storm_filenames(args)
+
+    # Match up radar data and storm label files by datetime
     all_gridrad_stormlabel_files = pair_gridrad_to_storms(args, all_gridrad_files,
                                                           all_storm_mask_files)
-    gridrad_stormlabel_files = np.array(all_gridrad_stormlabel_files)
-    ds = tf.data.Dataset.from_tensor_slices(gridrad_stormlabel_files)
+    
+    # Create tf Datasest
+    ds = create_dataset(args, all_gridrad_stormlabel_files[:5], 
+                        pair=False, patch=False)
+    
     '''
+    ypreds_train = model.predict(ds, #steps=train_val_steps['steps_per_epoch'], 
+                                 verbose=1, workers=4, use_multiprocessing=True)
+    ypreds_val = model.predict(ds_val_og, #steps=train_val_steps['val_steps'],
+                               verbose=1, workers=4, use_multiprocessing=True)
+    if ds_test is not None:
+        ypreds_val = model.predict(ds_test, verbose=1, workers=4, 
+                                    use_multiprocessing=True)
+    '''
+        
+    # Without creating dataset
+    #ds_patches = make_patches(args, wofs_regridded, forecast_window)
+    #preds = predict(args, wofs_gridrad, train_stats, from_weights=from_weights, DB=DB)
+    #preds_stitch = stitch_patches(args, wofs_gridrad, stats, DB=DB)
 
-
+    print("DONE.")
