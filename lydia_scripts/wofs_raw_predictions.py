@@ -67,6 +67,10 @@ import metpy.calc
 import matplotlib.pyplot as plt
 plt.rcParams.update({"text.usetex": True})
 
+import pickle
+#from sklearn.isotonic import IsotonicRegression
+#from sklearn.linear_model import LogisticRegression
+
 import tensorflow as tf
 print("tensorflow version", tf.__version__)
 from tensorflow import keras
@@ -80,7 +84,7 @@ from custom_metrics import MaxCriticalSuccessIndex
 from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
 sys.path.append("../keras-unet-collection")
 #from keras_unet_collection import models
-from keras_unet_collection.activations import *
+from keras_unet_collection.activations import * #imports GELU
 from scripts_tensorboard.unet_hypermodel import UNetHyperModel
 
 print(" ")
@@ -136,7 +140,9 @@ def create_argsparser(args_list=None):
 
     # Model directories and files
     parser.add_argument('--loc_model', type=str, required=True,
-        help='Trained model directory or file path (i.e. file descriptor)')
+        help='Trained model directory or file path (i.e. file descriptor)') 
+    parser.add_argument('--loc_model_calib', type=str, 
+        help='Path to pickle file with a trained model for calibrating the predictions')
     parser.add_argument('--file_trainset_stats', type=str, required=True,
         help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
     # If loading model weights and using hyperparameters from_weights
@@ -239,7 +245,7 @@ def load_wofs_files(filepaths, filename_prefix, datetime_format, engine='netcdf4
         wofs_netcdf = Dataset(filepath)
 
     #return wofs
-    pass
+    #pass
 
 def create_wofs_time(year, month, day, hour, min, sec, 
                      seconds_since='seconds since 2001-01-01', DB=0):
@@ -303,7 +309,7 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     datetime_obj = wofs_datetime
     if not isinstance(datetime_obj, datetime):
         # Convert datetime string to datetime object
-        datetime_obj = datetime.strptime(wofs_datetime, datetime_fmt)
+        datetime_obj = datetime.strptime(wofs_datetime, datetime_fmt) #datetime_format
         if DB: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
 
     # Convert datetime object to np.datetime int
@@ -1000,6 +1006,14 @@ def predict(args, wofs, stats, from_weights=False, eval=False, DB=0, **fss_args)
     preds = model.predict(X)
     #if eval: results = model.evaluate(X, y_test, batch_size=128)
 
+    # Calibrate the model predictions
+    if args.loc_model_calib:
+        with open(args.loc_model_calib, 'rb') as fid:
+            calib = pickle.load(fid)
+            shape = preds.shape
+            preds = calib.predict(preds.reshape(-1, 1))
+            preds = preds.reshape(shape)
+
     return preds
 
 def combine_fields(args, wofs, preds, gridrad_heights=range(1, 13), DB=0):
@@ -1403,9 +1417,10 @@ def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
     pcmesh = ax.pcolormesh(data, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
     if not data_contours is None:
         # Contour levels
-        qlevels = [0, .1, .5, 1]
+        qlevels = [0, .1, .5, .9, 1]
         data_qtiles = np.nanquantile(data_contours, qlevels)
-        contour = ax.contour(data_contours, levels=qlevels[1:3]) #[.1, .5] #[0. 0.08 0.16 0.24 0.32 0.4  0.48 0.56 0.64]
+        contour = ax.contour(data_contours, levels=qlevels[1:3]) #, cmap="cividis") 
+        #[.1, .5] #[0. 0.08 0.16 0.24 0.32 0.4  0.48 0.56 0.64]
         print("contour levels", data_qtiles, contour.levels)
         proxy = [plt.Rectangle((0,0), 1, 1, fc=pc.get_edgecolor()[0]) for pc in contour.collections]
         ax.legend(proxy, 
