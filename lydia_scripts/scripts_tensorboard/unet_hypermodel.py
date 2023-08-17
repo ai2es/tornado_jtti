@@ -13,10 +13,11 @@ Windows tensorboard
 python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
 
 """
-
+#import os
+#os.system("conda run -p /home/momoshog/miniconda3/envs/tf_experiments")
 import wandb
 from wandb.keras import WandbMetricsLogger, WandbCallback
-wandb.login()
+#wandb.login()
 
 import os, io, sys, random, shutil
 import pickle, copy

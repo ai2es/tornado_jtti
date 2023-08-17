@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH -p normal
+#SBATCH -p debug
 #SBATCH --nodes=1
 #SBATCH -n 2
 #SBATCH --mem=28G
-#SBATCH --time=05:00:00
-#SBATCH --chdir=/ourdisk/hpc/ai2es/randychase/GewitterGefahr/gewittergefahr/scripts/
+#SBATCH --time=00:30:00
+#SBATCH --chdir=/ourdisk/hpc/ai2es/alexnozka/GewitterGefahr/gewittergefahr/scripts/
 #SBATCH --job-name="Step5_2013"
-#SBATCH --mail-user=randychase@ou.edu
+#SBATCH --mail-user=alexander.j.nozka-1@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --mail-type=END
-#SBATCH --output=/home/randychase/slurmouts/R-%x.%j.out
-#SBATCH --error=/home/randychase/slurmouts/R-%x.%j.err
+#SBATCH --output=/home/anozka/slurmouts/R-%x.%j.out
+#SBATCH --error=/home/anozka/slurmouts/R-%x.%j.err
 #SBATCH --array=32%1
 
 #need all yyyymmdd strings  

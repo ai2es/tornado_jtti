@@ -78,6 +78,8 @@ sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
 from scripts_data_pipeline.wofs_to_gridrad_idw import calculate_output_lats_lons
+import subprocess
+#subprocess.run('conda run -p /home/momoshog/miniconda3/envs/tf_experiments ../keras-unet-collection', shell=True)
 sys.path.append("../keras-unet-collection")
 #from keras_unet_collection import models
 from keras_unet_collection.activations import *

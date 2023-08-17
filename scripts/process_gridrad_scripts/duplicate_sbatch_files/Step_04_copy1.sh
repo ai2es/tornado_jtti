@@ -3,18 +3,18 @@
 #SBATCH --nodes=1
 #SBATCH -n 2
 #SBATCH --mem=28G
-#SBATCH --time=05:00:00
-#SBATCH --chdir=/ourdisk/hpc/ai2es/alexnozka/GewitterGefahr/gewittergefahr/scripts/
-#SBATCH --job-name="Step4_2013"
+#SBATCH --time=08:00:00
+#SBATCH --chdir=/ourdisk/hpc/ai2es/alexnozka/GewitterGefahr/gewittergefahr/scripts
+#SBATCH --job-name="S4C1_2014"
 #SBATCH --mail-user=alexander.j.nozka-1@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --mail-type=END
 #SBATCH --output=/ourdisk/hpc/ai2es/alexnozka/debug/R-%x.%j.out
 #SBATCH --error=/ourdisk/hpc/ai2es/alexnozka/debug/R-%x.%j.err
-#SBATCH --array=27,34,38,45,49,55,57,59,60,64,80%1
+#SBATCH --array=3,12,19,28,35,39,48,50,54,61,67,71,73,77,80%2
 
 #need all yyyymmdd strings  
-mapfile -t SPC_DATE_STRINGS < /ourdisk/hpc/ai2es/tornado/tornado_jtti/scripts/process_gridrad_scripts/orderofprocessing_files/orderofprocessing_spc_dates_2013.txt
+mapfile -t SPC_DATE_STRINGS < /ourdisk/hpc/ai2es/tornado/tornado_jtti/scripts/process_gridrad_scripts/orderofprocessing_files/orderofprocessing_spc_dates_2014.txt
 
 #grab the current one that is running from the array param above
 this_spc_date_string=${SPC_DATE_STRINGS[$SLURM_ARRAY_TASK_ID]}
