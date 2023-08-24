@@ -1004,7 +1004,6 @@ def predict(args, wofs, stats, from_weights=False, eval=False, DB=0, **fss_args)
         print(f"Performing predictions (wofs coords={wofs.coords}) ...")
     print(f"Performing predictions (input shape={X.shape}) ...")
     preds = model.predict(X)
-    #if eval: results = model.evaluate(X, y_test, batch_size=128)
 
     # Calibrate the model predictions
     if args.loc_model_calib:
@@ -1115,8 +1114,10 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     gridrad_lons = None
     if method == 0:
         _, gridrad_lats, gridrad_lons = calculate_output_lats_lons(wofs_orig, gridrad_spacing=gridrad_spacing)
+
+        _preds = predictions.predicted_tor.isel(time=0)
         p_interpolator = RectBivariateSpline(gridrad_lats[:-1], gridrad_lons[:-1],
-                                            predictions.predicted_tor.isel(time=0)) 
+                                             _preds) 
         # Evaluate each (x,y) coordinate
         predictions_idw = p_interpolator(wofs_lats, wofs_lons, grid=True)
 
@@ -1424,7 +1425,7 @@ def plot_pcolormesh(args, data, fname, title, cb_label=None, fig_ax=None,
         print("contour levels", data_qtiles, contour.levels)
         proxy = [plt.Rectangle((0,0), 1, 1, fc=pc.get_edgecolor()[0]) for pc in contour.collections]
         ax.legend(proxy, 
-                  [rf'$\geq{q:.04f}$ {l*100}th% ' for q, l in zip(data_qtiles[1:3], qlevels[1:3])], 
+                  [rf'$\geq${q:.2e} {l*100}th% ' if q < .01 else rf'$\geq${q:.02f} {l*100}th% ' for q, l in zip(data_qtiles[1:3], qlevels[1:3])], 
                   loc='upper left', bbox_to_anchor=(1.16, 1), title='Tor Probability') #, alignment='left'
         
     if tight: plt.tight_layout()
@@ -1651,6 +1652,8 @@ if __name__ == '__main__':
 
         # Predictions WOFS GRID
         pred_max = np.nanmax(preds_wofsgrid.ML_PREDICTED_TOR[0])
+        print(" preds plot quantiles [0, .25, .5, .75, 1]:", np.nanquantile(preds_wofsgrid.ML_PREDICTED_TOR[0],
+                                               [0, .25, .5, .75, 1]))
         fname = wofs_basefname + f'__predictions.png'
         plot_pcolormesh(args, preds_wofsgrid.ML_PREDICTED_TOR[0], fname, 
                         title='Predicted Tor (WoFS Grid)', cb_label='$p_{tor}$', 
