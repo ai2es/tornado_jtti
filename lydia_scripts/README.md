@@ -1,7 +1,10 @@
-Dataset Name: Tornado JTTI Code Lydia 
-Author: Randy J. Chase 
-Date Created: 01 Dec 2022
-Email: randychase 'at' ou.edu
+Dataset Name: Tornado JTTI Code Lydia  
+Author: Randy J. Chase  
+Date Created: 01 Dec 2022  
+Email: randychase 'at' ou.edu  
+
+UPDATED: 05 Oct 2023 by Monique Shotande (mo dot shotande `at` gmail)
+
 
 Description:
 
@@ -36,3 +39,14 @@ Required Software:
 Tensorflow & [keras_unet_collection](https://github.com/ai2es/keras-unet-collection)
 
 - In order train or run the trained models you will need tensorflow and the keras_unet_collection. Please note the linked github above because we have made some changes to the original repo, like being able to change the kernel size (i.e., the preceptive field)
+
+
+
+UPDATES REGARDING WOFS PREDICTIONS:   
+To generate WoFS predictions using an ML model with or without a calibration model, use `wofs_raw_predictions.py`.   
+Example use case with command line arguments is in `wofs_raw_predictions.sh`.   
+Additional WoFS fields are extracted along with the predictions and can be selected via the command line:   
+`U V W WSPD10MAX W_UP_MAX P PB PH PHB HGT`. (NOTE: `P PB PH PHB HGT` are REQUIRED for WoFS interpolation to the GridRad grid).   
+Current top model: /ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tor_unet_sample50_50_classweightsNone_hyper/2023_07_20_20_55_39_hp_model00.h5   
+Current calibration model (python pickle files): /ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/calibraion_model_iso_v00.pkl
+
