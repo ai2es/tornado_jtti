@@ -124,7 +124,7 @@ def save_training_dataset(training_patches, vertical_levels=[1,2,3,4,5,6,7,8,9,1
     print("Making y_train")
     # We want int labels
     if dataset_labels_type == 'int':
-        labels = np.where(training_array.labels.values > 0, 1, 0)
+        labels = np.where(training_array.labels.values > 0, 1, 0) #.astype(np.int32)
         y_train = labels.reshape(labels.shape + (1,))
         
     # We want onehot vector labels
@@ -244,7 +244,9 @@ def save_validation_dataset(validation_patches, natural, mean_train_ZH, std_trai
     return
 
 
-def create_dataset(args, all_patchfiles, dsettype='train', vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12], years=['2013'], tfweights=[0.9, 0.1]):
+def create_dataset(args, all_patchfiles, dsettype='train', 
+                   vertical_levels=[1,2,3,4,5,6,7,8,9,10,11,12], 
+                   years=['2013'], tfweights=[0.9, 0.1]):
     '''
     Create Tensorflow Datasets from the data. Save subsets of the data as either training, validation, or testing
     

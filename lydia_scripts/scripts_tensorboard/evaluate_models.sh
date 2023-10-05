@@ -1,14 +1,13 @@
 #!/bin/bash
 
 #SBATCH -p ai2es #gpu #debug_gpu #
-##SBATCH --nodelist=c731
-#SBATCH --time=00:30:00
+#SBATCH --time=04:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=20 #-c 24
 ##SBATCH --ntasks=24  #-n 20
 ##SBATCH --mem=40G
-#SBATCH --job-name=ds
+#SBATCH --job-name=calib
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j_out.txt
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j_err.txt
@@ -27,7 +26,7 @@
 source ~/.bashrc
 bash 
 conda activate tf_experiments
-conda install -c conda-forge netcdf4 -y
+#conda install -c conda-forge netcdf4 -y
 
 
 python --version

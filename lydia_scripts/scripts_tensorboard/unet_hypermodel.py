@@ -1287,10 +1287,10 @@ def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None,
              ax=axs[0], alpha=alpha, common_norm=False)
     axs[0].set_xlabel('') #Tornado Predicted Probability
     axs[0].set_xlim([0, 1])
-    axs[0].legend(list(Y.keys()), loc='center right')
+    axs[0].legend(list(Y.keys()), loc='center right', bbox_to_anchor=(1.16, 1))
 
     ## Zoom
-    ax2 = plt.axes([0.4, 0.05, .3, .3]) #left, bottom, width, height
+    ax2 = plt.axes([0.4, 0.0, .15, .15]) #left, bottom, width, height
     histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
              common_norm=False) #distplot
     #ax2.set_title('zoom')
@@ -1303,10 +1303,10 @@ def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None,
     axs[1].set_xlabel('Tornado Predicted Probability')
     axs[1].set_ylabel('Cumulative Probability')
     axs[1].set_xlim([0, 1])
-    axs[1].legend(list(Y.keys()), loc='center right')
+    axs[1].legend(list(Y.keys()), loc='center right', bbox_to_anchor=(1.16, 1))
 
     ## Zoom
-    ax2 = plt.axes([0.4, 0.05, .3, .3]) #left, bottom, width, height
+    ax2 = plt.axes([0.4, 0.05, .15, .15]) #left, bottom, width, height
     histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
              common_norm=False, cumulative=True, element="step", fill=False) #distplot
     #ax2.set_title('zoom')
@@ -1753,7 +1753,7 @@ def args2string(args):
     args_str = '' #f'{cdatetime}_'
     for arg, val in vars(args).items(): 
         if arg in ['in_dir', 'in_dir_val', 'in_dir_test', 'out_dir', 'out_dir_tuning',
-                   'wandb_tags', 'overwrite', 'dry_run', 'nogo', 'save']:
+                   'wandb_tags', 'overwrite', 'dry_run', 'nogo', 'save', 'lscratch']:
             continue
         if isinstance(val, bool):
             args_str += f'{arg}={val:1d}_'

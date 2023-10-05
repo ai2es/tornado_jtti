@@ -816,13 +816,18 @@ def fit_transform_predictions(args, ytrue, ypred, method='log', **kwargs):
     reg: fit Sci-kit Learn regression model
     yhat:
     mu_acc: mean accuracy for logistic regression; coefficient of determination
-            for isotoni regression
+            for isotonic regression
     '''
+    out_of_bounds = 'clip'
+    if 'out_of_bounds' in kwargs:
+        out_of_bounds = kwargs['out_of_bounds']
+        del kwargs['out_of_bounds']
+
     reg = None
     if method == 'log':
         reg = LogisticRegression(**kwargs).fit(ypred, ytrue)
     elif method == 'iso':
-        reg = IsotonicRegression(y_min=0, y_max=1, **kwargs).fit(ypred.ravel(), ytrue.ravel())
+        reg = IsotonicRegression(y_min=0, y_max=1, out_of_bounds=out_of_bounds, **kwargs).fit(ypred.ravel(), ytrue.ravel())
         #yhat = isotonic_regression(ypred, y_min=0, y_max=1, increasing=True)
     elif isinstance(method, IsotonicRegression) or isinstance(method, LogisticRegression):
         reg = method.fit(ypred, ytrue)
@@ -917,7 +922,7 @@ if __name__ == "__main__":
     print(f'Visible {ndevices} devices {devices}. \nLogical devices {len(devices_logical)} {devices_logical}\n')
     print("GPUs (Phys. Devices) Available: ", tf.config.list_physical_devices('GPU'))
 
-    """>>>
+
     # Load and prepare tf Datasets
     ds_train, ds_val, ds_test, train_val_steps, ds_train_og, ds_val_og = prep_data(
                 args, n_labels=args.n_labels, sample_method='sample')
@@ -927,9 +932,8 @@ if __name__ == "__main__":
     hps, model, H = build_fit_hypermodel(args, ds_train, ds_val, 
                                          train_val_steps) #, callbacks=[])
     '''
-    """
 
-    # Or load  the model
+    # Or load model
     fss_args = {'mask_size': 2, 'num_dimensions': 2, 'c':1.0, 
                 'cutoff': 0.5, 'want_hard_discretization': False}
     fss = make_fractions_skill_score(**fss_args)
@@ -938,7 +942,7 @@ if __name__ == "__main__":
                                         'MaxCriticalSuccessIndex': MaxCriticalSuccessIndex,
                                         'GELU': GELU})
 
-    """
+
     '''
     # Evaluate trained model
     print("\nEVALUATION")
@@ -958,7 +962,7 @@ if __name__ == "__main__":
         xtest_preds = model.predict(ds_test, verbose=1, workers=3, 
                                     use_multiprocessing=True)
 
-    # Calibrate Predictions
+    # Convert tf Dataset to numpy for input to calibration model
     if args.class_weight is None:
         y_train = np.concatenate([y for x, y in ds_train_og]) #ds.map(get_y)
     else:
@@ -971,6 +975,7 @@ if __name__ == "__main__":
     nval = y_val.shape[0]
     ntest = y_test.shape[0]
 
+    # Reshape predictions for input to calibration model
     y_train_flat = y_train.reshape(-1, 1) #.reshape(ntrain, -1)
     xtrain_preds_flat = xtrain_preds.reshape(-1, 1) #.reshape(ntrain, -1)
 
@@ -982,28 +987,28 @@ if __name__ == "__main__":
 
     print("shape", y_train_flat.shape, xtrain_preds_flat.shape)
 
+    # Calibrate predictions
     reg_args = {}
     calib, ycalib, mu_acc = fit_transform_predictions(args, y_train_flat, 
                                                       xtrain_preds_flat, 
                                                       method=args.method_reg, 
                                                       **reg_args)
     # Save fit regression model
-    fname = os.path.join(args.dir_preds, f'calibraion_model_{args.method_reg}.pkl')
-    #pickle.dump(calib, open(fname, "wb"))
-    with open(fname, 'wb') as fid:
-        pickle.dump(calib, fid)
-    #with open(fname, 'rb') as fid:
+    fname = os.path.join(args.dir_preds, f'calibraion_model_{args.method_reg}_v00.pkl')
+    #with open(fname, 'wb') as fid:
+    #    pickle.dump(calib, fid)
+    #READ:: #with open(fname, 'rb') as fid:
         #calib = pickle.load(fid)
     print(f"Saving calibration model {fname}")
 
     ycalib_val = calib.predict(xval_preds_flat)
     ycalib_test = calib.predict(xtest_preds_flat)
-    <<<<<"""
+
 
     # Reliabilty Curve
-    plot_calib = False
+    plot_calib = True
     if plot_calib:
-        fname = os.path.join(args.dir_preds, f"calibration_model_reliability.png")
+        fname = os.path.join(args.dir_preds, f"calibration_model_reliability_v00.png")
         strat = 'uniform'
         kwargs = {'lw': 4}
         fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(), fname, 
@@ -1020,7 +1025,7 @@ if __name__ == "__main__":
         del fig, ax
 
         # Reliability Curve - Log Calibration
-        fname = os.path.join(args.dir_preds, f"calibration_model_reliability_{args.method_reg}.png")
+        fname = os.path.join(args.dir_preds, f"calibration_model_reliability_{args.method_reg}_v00.png")
         kwargs = {'lw': 8}
         fig, ax = plot_reliabilty_curve(y_train.ravel(), ycalib, fname, **kwargs,
                                         label='Train', strategy=strat, save=False)
@@ -1035,7 +1040,7 @@ if __name__ == "__main__":
         print(f"Saving calibration figure {fname}")
     
     # Prediction Distributions
-    plot_pred_hists = False
+    plot_pred_hists = True
     if plot_pred_hists:
         Y = {'Train True': y_train.ravel()[:-1:20], 'Train Preds': xtrain_preds.ravel()[:-1:20],
             'Train Calib': ycalib[:-1:20],
@@ -1044,7 +1049,7 @@ if __name__ == "__main__":
             'Test True': y_test.ravel()[:-1:20], 'Test Preds': xtest_preds.ravel()[:-1:20],
             'Test Calib': ycalib_test[:-1:20]
             }
-        fname = os.path.join(args.dir_preds, f"calibration_model_preds_hists_{args.method_reg}.png")
+        fname = os.path.join(args.dir_preds, f"calibration_model_preds_hists_{args.method_reg}_v00.png")
         plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None, 
                         figsize=(10, 8), alpha=.5, save=True, dpi=160)
         #plot_predictions(y_train.ravel(), ycalib, fname, use_seaborn=True, 
@@ -1053,7 +1058,7 @@ if __name__ == "__main__":
 
 
     # Load unpatched data
-    all_gridrad_files, all_storm_mask_files = get_gridrad_storm_filenames(args)
+    '''>>>all_gridrad_files, all_storm_mask_files = get_gridrad_storm_filenames(args)
 
     # Match up radar data and storm label files by datetime
     all_gridrad_stormlabel_files = pair_gridrad_to_storms(args, all_gridrad_files,
@@ -1062,6 +1067,7 @@ if __name__ == "__main__":
     # Create tf Datasest
     ds = create_dataset(args, all_gridrad_stormlabel_files[:5], 
                         pair=False, patch=False)
+    '''
     
     '''
     ypreds_train = model.predict(ds, #steps=train_val_steps['steps_per_epoch'], 
