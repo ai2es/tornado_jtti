@@ -136,3 +136,16 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Nano backup files
+*~
+*.save
+
+# VSCode
+.vscode/
+
+# Logs
+*.txt
+
+# keras-unet-collection
+lydia_scripts/keras-unet-collection
