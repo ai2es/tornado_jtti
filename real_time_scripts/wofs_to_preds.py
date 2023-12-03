@@ -532,7 +532,10 @@ def to_gridrad(args, rel_path, wofs, wofs_netcdf, gridrad_spacing=48,
     # Calculate forecast window
     datetime_forecast_str = wofs.Times.data[0].decode('ascii') # decode from binary string to regular text string
     datetime_forecast = datetime.fromisoformat(datetime_forecast_str)
-    datetime_init = datetime.fromisoformat(wofs.START_DATE)
+    if wofs.START_DATE[10] == "-":
+        datetime_init = datetime.strptime(wofs.START_DATE[:-3], "%Y-%m-%d-%H_%M")
+    else:
+        datetime_init = datetime.fromisoformat(wofs.START_DATE)
     forecast_window = (datetime_forecast - datetime_init).seconds / 60
     if debug: print(f"Forecast window: {forecast_window} min\n")
 
