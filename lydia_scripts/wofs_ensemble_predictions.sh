@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -p ai2es 
-#SBATCH --time=5:00:00
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH -n 15
-#SBATCH --mem-per-cpu=5000
-#SBATCH --job-name=ens_i1900_d20190430
+#SBATCH --mem-per-cpu=10000
+#SBATCH --job-name=EN_UH80_i1900-2000_d20190430
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/

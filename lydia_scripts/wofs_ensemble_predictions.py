@@ -28,8 +28,11 @@ print("xr version", xr.__version__)
 
 import matplotlib.pyplot as plt 
 import matplotlib.image as mpimg
+import matplotlib as mpl
 plt.rcParams.update({"text.usetex": True})
 from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib import ticker
+
 
 from wofs_raw_predictions import plot_hist, plot_pcolormesh
 
@@ -72,6 +75,8 @@ def create_argsparser(args_list=None):
         help='Use flag to compute the ensemble min and max')
     parser.add_argument('--uh', action='store_true',
         help='Use flag to include UH')
+    parser.add_argument('--uh_thres', type=int, default=10,
+        help='Threshod UH (updraft helicity) to use for rendering paintball plots of ensemble UH')
 
     parser.add_argument('--out_dir', type=str, #required=True, 
         help='Directory to store the gif. By default, stored in loc_init directory')
@@ -160,8 +165,6 @@ def paintball_plot(datalist, thres, fig_ax=None, figsize=(8,8), **kwargs):
     else:
         fig, ax = fig_ax
 
-    print(datalist.shape) #print(datalist.ENS)
-
     ds_thres = datalist > thres #.to_numpy()
     ds_thres = ds_thres.astype(float)
 
@@ -174,26 +177,15 @@ def paintball_plot(datalist, thres, fig_ax=None, figsize=(8,8), **kwargs):
         # Get ensemble data
         _t = ds_thres[e] #datalist.to_numpy()
         img_mtx[_t == 1] = e + 1
-    im = ax.imshow(img_mtx, vmin=1, vmax=nensembles, #alpha=.1,
-                  cmap='tab20b') #, yincrease=True) #, shading='gouraud', **kwargs)
+    _cmap = mpl.colors.ListedColormap(plt.get_cmap('tab20').colors, 
+                                      name='from_list', N=nensembles)
+    im = ax.imshow(img_mtx, vmin=1, vmax=nensembles, alpha=.5, cmap=_cmap) #'tab20b'
+    #, yincrease=True) #, shading='gouraud', **kwargs)
+                  
     ax.set_aspect('equal', 'box')
     if 'title' in kwargs.keys():
         ax.set_title(kwargs['title'])
     ax.invert_yaxis()
-
-    '''concat_dim = 'ENS' #'Time'
-    meshplot = datalist.isel(ENS=1, Time=0).plot(ax=ax, add_colorbar=True) #, hue=concat_dim'''
-
-    '''for e in range(datalist.Time.size):
-        _dat = datalist.isel(Time=e) > thres
-        _dat = _dat.astype(np.int16)
-        print(_dat.shape, _dat) #.values
-        meshplot = _dat.plot(ax=ax, add_colorbar=False)'''
-        #mask0 = _dat == 0
-        #mask1 = _dat == 1
-        #_dat[mask0] = np.nan
-        #_dat[mask1] += e
-        #meshplot = ax.pcolormesh(_dat, **kwargs) #cmap=cmap, vmin=vmin, vmax=vmax)
     
     return fig, ax, im
 
@@ -261,7 +253,9 @@ def create_gif(data, data_contours, fnpath, data_uh=None, stat="", frame_labels=
     uh_min = 0 #np.nanmin(data_uh)
     uh_max = 40 #np.nanmax(data_uh)
 
-    uh_thres = 5
+    uh_thres = 10
+    if 'uh_thres' in kwargs.keys():
+        uh_thres = kwargs.pop('uh_thres')
 
     def draw_storm_frame(pi):
         '''
@@ -292,6 +286,8 @@ def create_gif(data, data_contours, fnpath, data_uh=None, stat="", frame_labels=
                 data_uh_tuple = deepcopy(data_uh)
                 data_uh_stat = data_uh_tuple[0]
                 data_uh_ens = data_uh_tuple[1]
+                ntimes = len(data_uh_ens)
+                nensembles = data_uh_ens[0].shape[0]
 
                 pbargs = {'title': f'ensembles Updraft Helicity: DT{dt_label}\n(thres {uh_thres})'} #'data_contours': None}
                 paintball_plot(data_uh_ens[pi], uh_thres, fig_ax=(fig, axs[3]), 
@@ -340,12 +336,23 @@ def create_gif(data, data_contours, fnpath, data_uh=None, stat="", frame_labels=
             data_uh_tuple = deepcopy(data_uh)
             data_uh_stat = data_uh_tuple[0]
             data_uh_ens = data_uh_tuple[1]
+            ntimes = len(data_uh_ens)
+            nensembles = data_uh_ens[0].shape[0]
 
-            pbargs = {'title': f'ensembles Updraft Helicity: DT{dt_label}\n(thres {uh_thres})'} 
+            pbargs = {'title': f'ensembles Updraft Helicity: DT{dt_label}\n(thres {uh_thres} N={nensembles})'} 
             _, _ax, _im = paintball_plot(data_uh_ens[0], uh_thres, fig_ax=(fig, axs[3]), 
                            **pbargs)
             cb = fig.colorbar(_im, ax=_ax)
             cb.set_label("Ensemble", rotation=270, labelpad=20)
+            d = (nensembles-1) / (2*nensembles)
+            cbticks = np.arange(1+d, nensembles-d, 2*d)
+            cb.set_ticks(cbticks) #np.linspace(1, nensembles, 2*nensembles+1)
+            cb.set_ticklabels(np.linspace(1, nensembles, nensembles, dtype=int))
+            #cb.ax.yaxis.get_ticklabels()
+            #cb.get_ticks()
+            #tick_locator = ticker.MaxNLocator(nbins=nensembles)
+            #cb.locator = tick_locator
+            #cb.update_ticks()
         else:
             # with helicity contours
             title = f'{stat} Updraft Helicity: DT{dt_label}'
@@ -391,9 +398,10 @@ if "__main__" == __name__:
                                  '--loc_files_list', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/2019/20190430/wofs_preds_files.csv',
                                  #'--loc_date', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/2023/20230602',
                                  #'--loc_files_list', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/2023/20230602/wofs_preds_files.csv',
-                                 '--inits', '1900', #'1930',
+                                 '--inits', '1900', '1930', '2000',
                                  '--for_ens',
                                  '--uh',
+                                 '--uh_thres', '80',
                                  '--out_dir', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/20190430',
                                  #'--out_dir', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2023/20230602',
                                  '--write', '1'])
@@ -470,7 +478,7 @@ if "__main__" == __name__:
         wofs_uh_ens_all = [] #filenamepath
         
         # Iterate over the forecast times for all ensembles
-        for i, ftime in enumerate(forecast_times.iloc): #ftime = '2023-06-02_19_30_00'
+        for i, ftime in enumerate(forecast_times): #ftime = '2023-06-02_19_30_00'
             print(f"\n*** [{i}] init={itime}  forecast={ftime}")
             wofs_files = select_files(df_files, itime, ftime, emember=None)
             print("WOFS FILES\n", wofs_files[['ensemble_member', 'filename_path']])
@@ -575,8 +583,9 @@ if "__main__" == __name__:
             uh_arg = None
             if args.uh is not None: 
                 data_uh = wofs_uh_all[stat]
-                suffix = '_uh_paint'
                 uh_arg = (data_uh, wofs_uh_ens_all)
+                anim_args['uh_thres'] = args.uh_thres
+                suffix = f'_uh_thres={args.uh_thres}'
 
             fnpath = os.path.join(dirpath, f'{itime}_cZH_preds_{stat}{suffix}.gif')
             print(f"{dat[0].shape} {dat_prob[0].shape} nframe={nframes}", fnpath)
