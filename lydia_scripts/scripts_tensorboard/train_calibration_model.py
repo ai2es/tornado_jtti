@@ -126,7 +126,7 @@ def create_argsparser():
                         help='Index indicating the row to use within the csv of the top hyperparameters')
     
     parser.add_argument('-w', '--write', type=int, default=0,
-                        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save calibration model (.pkl; python pickle file), set to 2 to only save the calibration and histogram figures, set to 3 to the model and all figures')
+                        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save calibration model (.pkl; python pickle file), set to 2 to only save the calibration and histogram figures, set to 3 to save the model and all figures')
     parser.add_argument('-d', '--dry_run', action='store_true',
                         help='For testing and debugging. Execute without running models or saving data and display output paths')
     

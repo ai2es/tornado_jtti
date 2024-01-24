@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=20 #-c 24
 ##SBATCH --ntasks=24  #-n 20
 ##SBATCH --mem=40G
-#SBATCH --job-name=calib9010_2080
+#SBATCH --job-name=calib
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti
 #SBATCH --output=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j_out.txt
 #SBATCH --error=/home/momoshog/Tornado/slurm_out/tornado_jtti/%x_%j_err.txt
@@ -38,8 +38,8 @@ echo "SBATCH_MEM_PER_CPU=$SBATCH_MEM_PER_CPU"
 echo "SBATCH_MEM_PER_GPU=$SBATCH_MEM_PER_GPU"
 echo "SBATCH_MEM_PER_NODE=$SBATCH_MEM_PER_NODE" # Same as --mem
 
-TUNER="tor_unet_sample90_10_classweights20_80_hyper"
-MODEL="2023_07_20_09_32_38_hp_model00"
+TUNER="tor_unet_sample50_50_classweights50_50_hyper"
+MODEL="2023_07_21_08_33_16_hp_model00"
 
 #@lydia_scripts/scripts_tensorboard/evaluate_models.txt \
 #python lydia_scripts/scripts_tensorboard/evaluate_models.py \
@@ -52,13 +52,13 @@ python lydia_scripts/scripts_tensorboard/train_calibration_model.py \
 --dir_preds=/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/$TUNER \
 --lscratch $LSCRATCH \
 --batch_size=1024 \
---class_weight .2 .8 \
+--class_weight .5 .5 \
 --epochs=100 \
 --fname_prefix="${MODEL}_" \
 --method_reg=iso \
 --hp_path=/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/$TUNER/$MODEL.csv \
 --hp_idx=0 \
--w 2 \
+-w 3 \
 -d
 
 
