@@ -111,7 +111,7 @@ def extract_datetime(strg, method='re', fmt_dt='%Y-%m-%d_%H_%M_%S',
     Extract datetime object and string from a longer string
     Parameters
     ----------
-    strg: string. any string with a date
+    strg: string. any string with a date (e.g. a file name path)
     method: string. either 'dt' to use date.strptime or 're' to use regular 
             expressions
     fmt_dt: string. python datetime object format or string with datetime format
@@ -122,30 +122,48 @@ def extract_datetime(strg, method='re', fmt_dt='%Y-%m-%d_%H_%M_%S',
 
     if method == 're':
         match = re.search(fmt_re, strg)
+        if match is None: return None, None
         dt_str = match.group() #dt_obj.strftime(fmt_dt)
         dt_obj = datetime.strptime(dt_str, fmt_dt) #.date()
-        
     else:
         dt_obj = datetime.strptime(strg, fmt_dt)
         dt_str = dt_obj.strftime(fmt_dt)
     return dt_str, dt_obj
 
-def select_files(df_files, itime, ftime, emember=None):
+def select_files(df_files, itime, ftime, emember=None, rdate=None):
     '''
     Get a list of files to use based in initialization time, forecast time and/or
     the ensemble member
     Parameters
     ----------
-    itime: string or int. initialization time for the forecasts
+    itime: string or int or None. initialization time for the forecasts. if None
+            get all files from all init times with the specified forecast time
+            or ensemble
     ftime: None or string. common forecast across all ensembles for the selected 
-            files. emember is ignored if ftime is not None
+            files. emember can be ignored if ftime is not None
     emember: None, int, or string. ensemble member for the selected files.
-            ftime is ignore if emember is not None
+            ftime can be ignore if emember is not None
+    rdate: str for the date of the wofs run
     '''
+    n = df_files.shape[0]
+    sel_itime = np.ones((n,), bool)
+    if isinstance(itime, (int, str)):
+        init_type = type(df_files['init_time'][0]) #df_files.dtypes['init_time']
+        # Cast to appropriate type. init times could be stored as int or str in the dataframe
+        sel_itime = df_files['init_time'] == init_type(itime)
+    elif itime is not None: 
+        raise ValueError(f'itime should be None, str or int. but was type {type(itime)}')
 
-    sel_itime = df_files['init_time'] == int(itime)
-    sel_ftime = df_files['forecast_time'] == ftime
-    sel_files = df_files.loc[sel_itime & sel_ftime]
+    sel_ftime = np.ones((n,), bool)
+    if ftime: sel_ftime = df_files['forecast_time'] == ftime
+
+    sel_emember = np.ones((n,), bool)
+    if emember: sel_emember = df_files['ensemble_member'] == emember
+
+    sel_rdate = np.ones((n,), bool)
+    if rdate: sel_rdate = df_files['run_date'] == rdate
+
+    sel_files = df_files.loc[sel_itime & sel_ftime & sel_emember & sel_rdate]
     return sel_files
 
 def load_files(fnpath_list):

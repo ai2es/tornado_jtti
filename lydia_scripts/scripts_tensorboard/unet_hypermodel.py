@@ -38,6 +38,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits import mplot3d
+import matplotlib.patheffects as path_effects
 import matplotlib
 font = {#'family' : 'normal',
         #'weight' : 'bold',
@@ -1066,7 +1067,7 @@ def fvaf(y_true, y_pred):
 def compute_sr(tps, fps):
     '''
     Compute the SR (success ration) from a scalars or lists of true positives
-    (TPs) and false negatives (FNs)
+    (TPs) and false positives (FPs)
     @param tps: scalar or numpy array of true positives
     @param fps: scalar or numpy array of false positives
     @return: scalar or numpy array for the SR
@@ -1547,12 +1548,15 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
     return ax
 
 def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue', 
-             figsize=(10, 10), save=False, dpi=160, **csiargs):#, **plotargs):
+             figsize=(10, 10), save=False, dpi=160, srs_pods_csis=None, 
+             return_scores=False, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
     CSI = 1. (this curve is highly senstive to event freq)
     @param threshs=np.linspace(0, 1, 21)
+    @param srs_pods_csis: 3-tuple withe the lists for the SRs, PODs, and CSIs
+    @param return_scores: bool. whether to also return the scores in a dict
     @param csiargs: keyword args for make_csi_axis()
     '''
     fig = None
@@ -1563,15 +1567,34 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
         fig, ax = fig_ax
 
     # For text outlines 
-    import matplotlib.patheffects as path_effects
     pe1 = [path_effects.withStroke(linewidth=1.5, foreground="k")]
     pe2 = [path_effects.withStroke(linewidth=1.5, foreground="w")]
 
     # Calculate performance diagram 
-    tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
-    srs = compute_sr(tps, fps) #np.asarray(tps / (tps + fps))
-    pods = compute_pod(tps, fns) #np.asarray(tps / (tps + fns))
-    csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
+    srs = []
+    pods = []
+    csis = []
+    if srs_pods_csis:
+        srs, pods, csis = srs_pods_csis
+    else:
+        tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
+        srs = compute_sr(tps, fps) #tps / (tps + fps)
+        pods = compute_pod(tps, fns) #tps / (tps + fns)
+        csis = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
+
+    # Get index where thresholds are above the max probability and POD/TP = 0
+    idx_stop = pods.shape[0]
+    '''
+    logic = np.logical_or(threshs > np.nanmax(y_preds), pods <= 0)
+    inds = np.where(logic)[0] #np.where(pods <= 0)[0] 
+    if inds.size > 0:
+        idx_stop = sorted(inds)[0]
+        print(idx_stop, threshs[idx_stop-1:idx_stop+1], csis[idx_stop-1:idx_stop+1], 
+              srs[idx_stop-1:idx_stop+1], pods[idx_stop-1:idx_stop+1])
+    else:
+        print(idx_stop-1, threshs[idx_stop-2:idx_stop], csis[idx_stop-2:idx_stop], 
+              srs[idx_stop-2:idx_stop], pods[idx_stop-2:idx_stop])
+    '''
 
     #Plot star of
     xi = np.argmax(csis)
@@ -1580,24 +1603,27 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     sr_of_maxcsi = srs[xi]
     pod_of_maxcsi = pods[xi]
 
-    ax = make_csi_axis(ax=ax, **csiargs)
-    ax.plot(srs, pods,'-s', color=color, markerfacecolor='w', label=label) #, lw=2, **plotargs)
-    ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
-    text = f'{max_csi:.02f}'
-    ax.text(sr_of_maxcsi-0.06, pod_of_maxcsi-0.02, text, path_effects=pe1, fontsize=16, color='white')
-    ax.legend(loc='upper right')
-    ax.set_aspect('equal')
-
-    #threshs = np.linspace(0, 1, 11)
-    #thresh = np.arange(0.05, 1.05, 0.05)
-
     nthreshs = threshs.size
-    for i, t in enumerate(threshs):
-        if np.isnan(srs[i]) or np.isnan(pods[i]): continue
-        if i % 3 and i != nthreshs - 1: continue # skip every other threshold except the last
+    _sel = np.linspace(0, nthreshs - 1, 3, dtype=int).tolist()
+
+    ax = make_csi_axis(ax=ax, **csiargs)
+    plt0 = ax.plot(srs, pods, color=color, lw=3, label=label) #, **plotargs) #srs[:idx_stop], pods[:idx_stop]
+    ax.plot(np.take(srs, _sel), np.take(pods, _sel), 's', color=color, markerfacecolor='w') 
+    plt1 = ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
+
+    # Annotate certain points with the corresponding threshold
+    for i, t in zip(_sel, threshs[_sel]): #enumerate(threshs): #[:idx_stop]
+        #if np.isnan(srs[i]) or np.isnan(pods[i]): continue
+        #if i % 4 and i != nthreshs - 1: continue # skip every other threshold except the last
         text = np.char.ljust(f'{t:.02f}', width=4, fillchar='0') #str(np.round(t, 2))
         ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=11, color='white')
         #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
+
+    text = f'{max_csi:.02f}'
+    ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, fontsize=18, color='white')
+    print(f"Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
+    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -.35)) #[plt0, plt1],  #ax.transData
+    ax.set_aspect('equal')
 
     #plt.tight_layout()
     if save:
@@ -1605,7 +1631,10 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
         print(fname)
         plt.savefig(fname, dpi=dpi)
 
-    return fig, ax
+    if return_scores:
+        return fig, ax, {'tps':tps, 'fps':fps, 'fns':fns, 'tns':tns, 'srs':srs, 
+                         'pods':pods, 'csis':csis, 'index_max_csi': xi}
+    else: return fig, ax
 
 def create_argsparser():
     '''
