@@ -66,8 +66,10 @@ def create_argsparser(args_list=None):
     
     parser.add_argument('--stat', type=str, default='median',
         help='Stat to use for encorporating the ensembles into the evaluations. median (default) | mean')
-    parser.add_argument('--dilate', action='store_true',
-        help='Whether results were dilated')
+    parser.add_argument('--dilate', action='store_true', help='Whether results were dilated')
+    parser.add_argument('--uh', action='store_true', help='Generate figures for UH')
+    parser.add_argument('--leadtimes', action='store_true', 
+                        help='Generate figures comparing lead times')
 
     parser.add_argument('--model_name', type=str, default='',
         help='(optional) Name of model predictions came from. Name is prepended to the output files')
@@ -109,13 +111,15 @@ if "__main__" == __name__:
     # TODO: median different models UH (dialated)
 
     args_list = ['', 
-                 '--files_wofs_eval_results', 
-                 '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample90_10_classweights20_80_hyper/2019_performance_results_mean_00_36slice.csv', 
-                 '--out_dir', '.', 
+                 '--files_wofs_eval_results', '',
+                 #'/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample90_10_classweights20_80_hyper/2019_performance_results_mean_00_36slice.csv', 
+                 '--out_dir', './wofs_evaluations/_test_wofs_eval', 
                  '--legend_txt', 'lgd_txt', 
                  '--ax_title', 'ax_title', 
                  '--stat', 'mean', 
                  '--dilate',
+                 #'--uh',
+                 #'--leadtimes',
                  #'--model_name', '',
                  '-w', '1', '--dry_run'] 
 
@@ -125,32 +129,52 @@ if "__main__" == __name__:
 
     dirs = ['/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample50_50_classweightsNone_hyper',
             '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample50_50_classweights50_50_hyper',
-            '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample50_50_classweights20_80_hyper']
-            #'/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample90_10_classweights20_80_hyper']
+            '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample50_50_classweights20_80_hyper',
+            '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample90_10_classweights20_80_hyper']
+    tuners = ['tor_unet_sample50_50_classweightsNone_hyper', 
+              'tor_unet_sample50_50_classweights50_50_hyper',
+              'tor_unet_sample50_50_classweights20_80_hyper',
+              'tor_unet_sample90_10_classweights20_80_hyper']
+    tuners = ['Sampling: 50/50 \nClass Weighting: None', 
+              'Sampling: 50/50 \nClass Weighting: 50/50',
+              'Sampling: 50/50 \nClass Weighting: 20/80',
+              'Sampling: 90/10 \nClass Weighting: 20/80']
+    leadtimes = ['0-20min', '20-60min', '60-90min', '90-180min']
+    legend_txts = tuners[1:]
 
+    prefix = ''
+    if args.dry_run:
+        prefix = '_test_'
 
     #'2019_performance_results_mean_00_36slice_dilated_uh.csv'
     #fn_lists = args.files_wofs_eval_results
     suffix = '_dilated' if args.dilate  else ''
-    fns = [f'2019_performance_results_{args.stat}_00_36slice{suffix}.csv',
-           f'2019_performance_results_{args.stat}_00_05slice{suffix}.csv', #min00_20 
-           f'2019_performance_results_{args.stat}_05_12slice{suffix}.csv', #min20_60 
-           f'2019_performance_results_{args.stat}_12_18slice{suffix}.csv', #min60_90 
-           f'2019_performance_results_{args.stat}_18_36slice{suffix}.csv'] #min90_180
+    suffix += '_uh' if args.uh  else ''
     
     fn_lists = [os.path.join(d, f'2019_performance_results_{args.stat}_00_36slice{suffix}.csv') for d in dirs[1:]] 
+    
+
+    if args.leadtimes:
+        fns = [f'2019_performance_results_{args.stat}_00_05slice{suffix}.csv', #min00_20 
+               f'2019_performance_results_{args.stat}_05_13slice{suffix}.csv', #min20_60 
+               f'2019_performance_results_{args.stat}_13_19slice{suffix}.csv', #min60_90 
+               f'2019_performance_results_{args.stat}_19_36slice{suffix}.csv', #min90_180
+               f'2019_performance_results_{args.stat}_00_36slice{suffix}.csv']
+        '''
+        fns = [f'2019_performance_results_{args.stat}_05_12slice{suffix}.csv', #min20_60 
+            f'2019_performance_results_{args.stat}_12_18slice{suffix}.csv', #min60_90 
+            f'2019_performance_results_{args.stat}_18_36slice{suffix}.csv'] #min90_180
+        '''
+        fn_lists = [os.path.join(dirs[0], f) for f in fns[:-1]] 
+        suffix += '_leadtimes'
+        legend_txts = leadtimes
 
 
-    prefix = ''
-    fn_suffix = ''
-    if args.dry_run:
-        prefix = '_test_'
-    #fn_suffix += '_dilated' #_uh_multiple
-
-    fname = os.path.join(args.out_dir, f'{prefix}2019_performance_diagram_multiple_{args.stat}{fn_suffix}.png')
+    fname = os.path.join(args.out_dir, f'{prefix}2019_performance_diagram_multiple_{args.stat}{suffix}.png')
     nfiles = len(fn_lists) #args.files_wofs_eval_results)
     figax = None
-    ccycle = plt.cm.tab10.colors #plt.cycler("color", plt.cm.tab10.colors)
+    #figax_uh = None
+    ccycle = plt.cm.tab10.colors
     for f, fn in enumerate(fn_lists):
         res = pd.read_csv(fn)
         tps = res['tps']
@@ -165,10 +189,14 @@ if "__main__" == __name__:
         csis = res['csis']'''
         thres = res['thres']
 
-        save = (f == nfiles - 1)
+        save = (f == nfiles - 1)#False #
+        csiargs = {'show_cb': save}
 
         figax = plot_csi([0, 1], [0, 1], fname, threshs=thres, 
-                         label=f'{args.legend_txt}_{f}', color=ccycle[f], 
+                         label=legend_txts[f], color=ccycle[f], #f'{args.legend_txt}_{f}'
                          save=save, srs_pods_csis=(srs, pods, csis), 
-                         return_scores=False, fig_ax=figax, figsize=(10, 10))
+                         return_scores=False, fig_ax=figax, figsize=(10, 10),
+                         pt_ann=False, **csiargs)
+
+        # TODO: fix legend
         #ax.legend(loc='lower center', bbox_to_anchor=(0.5, -.32)) #[plt0, plt1],  #ax.transData

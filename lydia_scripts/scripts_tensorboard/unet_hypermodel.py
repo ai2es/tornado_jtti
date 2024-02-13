@@ -1549,7 +1549,7 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
 
 def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue', 
              figsize=(10, 10), save=False, dpi=160, srs_pods_csis=None, 
-             return_scores=False, **csiargs):#, **plotargs):
+             return_scores=False, pt_ann=True, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
@@ -1557,6 +1557,7 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     @param threshs=np.linspace(0, 1, 21)
     @param srs_pods_csis: 3-tuple withe the lists for the SRs, PODs, and CSIs
     @param return_scores: bool. whether to also return the scores in a dict
+    @param pt_ann: bool whether to render threshold annotations
     @param csiargs: keyword args for make_csi_axis()
     '''
     fig = None
@@ -1612,24 +1613,25 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     plt1 = ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
 
     # Annotate certain points with the corresponding threshold
-    for i, t in zip(_sel, threshs[_sel]): #enumerate(threshs): #[:idx_stop]
-        #if np.isnan(srs[i]) or np.isnan(pods[i]): continue
-        #if i % 4 and i != nthreshs - 1: continue # skip every other threshold except the last
-        text = np.char.ljust(f'{t:.02f}', width=4, fillchar='0') #str(np.round(t, 2))
-        ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=11, color='white')
-        #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
+    if pt_ann:
+        for i, t in zip(_sel, threshs[_sel]): #enumerate(threshs): #[:idx_stop]
+            #if np.isnan(srs[i]) or np.isnan(pods[i]): continue
+            #if i % 4 and i != nthreshs - 1: continue # skip every other threshold except the last
+            text = np.char.ljust(f'{t:.02f}', width=4, fillchar='0') #str(np.round(t, 2))
+            ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=11, color='white')
+            #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
     text = f'{max_csi:.02f}'
     ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, fontsize=18, color='white')
     print(f"Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
-    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -.35)) #[plt0, plt1],  #ax.transData
+    ax.legend(loc='upper left', bbox_to_anchor=(1.25, 1)) #loc='lower center' (0.5, -.35)  #[plt0, plt1],  #ax.transData
     ax.set_aspect('equal')
 
     #plt.tight_layout()
     if save:
         print("Saving performance (CSI) plot")
         print(fname)
-        plt.savefig(fname, dpi=dpi)
+        plt.savefig(fname, dpi=dpi, bbox_inches='tight')
 
     if return_scores:
         return fig, ax, {'tps':tps, 'fps':fps, 'fns':fns, 'tns':tns, 'srs':srs, 

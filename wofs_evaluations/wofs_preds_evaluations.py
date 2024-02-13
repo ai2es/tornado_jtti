@@ -9,6 +9,12 @@ initialization time, and date.
 Mean and median UH and ML probabilities can be computed across the 
 ensembles. Results for UH can be optionally computed with the 
 argument flag, --uh_compute.
+
+min00-20 :  0,  5
+min20-60 :  5, 12
+min60-90 : 12, 18
+min90-180: 18, 36
+
 """
 
 import re, os, sys, errno, glob, argparse
@@ -94,7 +100,7 @@ def create_argsparser(args_list=None):
     parser.add_argument('--forecast_duration', type=int, nargs='+', default=[36],
                        help='List of at most 2 integers. The indices of the forecast range to evaluate on. For example, for the forecast range 0 to 20 min, the indices are 0 and 5. ')
 
-    
+
     parser.add_argument('--uh_compute', action='store_true',
         help='Whether to compute performance results for the UH')
     parser.add_argument('--uh_thres_list', type=float, nargs='+',
@@ -556,10 +562,11 @@ def _create_round_kernel(ksize):
     '''
     Y, X = np.ogrid[:ksize, :ksize]
     isodd = ksize % 2
-    r = ksize // 2 + isodd
+    r = (ksize - 1) / 2 #+ isodd
     dist_from_center = np.sqrt((X - r)**2 + (Y - r)**2)
-    footprint = dist_from_center <= r
+    footprint = dist_from_center <= (ksize - isodd) / 2 #r
     return footprint
+
 
 
 """
@@ -767,24 +774,24 @@ def plot_zh_n_probs(ZH, P, thres_prob=None, contours=None, figax=None,
 if "__main__" == __name__:
     args_list = ['', 
                  #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds', 
-                 '--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights20_80_hyper', 
+                 #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights20_80_hyper', 
                  #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights50_50_hyper', 
-                 #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample90_10_classweights20_80_hyper', 
+                 '--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample90_10_classweights20_80_hyper', 
                  '--loc_storm_report', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/tornado_reports/tornado_reports_2019_spring.csv', 
                  #'/ourdisk/hpc/ai2es/tornado/stormreports/processed/tornado_reports_2019.csv', 
-                 '--out_dir', '.', 
+                 '--out_dir', './wofs_evaluations/_test_wofs_eval', 
                  #'--out_dir', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/20190430/summary', 
                  '--year', '2019', 
                  '--date0', '2019-04-28', 
                  '--date1', '2019-06-03',
-                 '--forecast_duration', '0', '5',
+                 #'--forecast_duration', '0', '5',
                  '--thres_dist', '50', '--thres_time', '20', '--stat', 'mean', 
                  '--nthresholds', '51',  '--ml_probabs_dilation', '33', '--uh_compute',
                  '--model_name', 'tor_unet_sample50_50_classweights20_80_hyper',
                  '-w', '1', '--dry_run'] 
                  #, '--ml_probabs_norm',
                  #'--uh_thres_list', '0', '200'  #'363'
-    args = parse_args() #args_list)
+    args = parse_args(args_list)
 
     # "Round" dilation kernel mask
     footprint = _create_round_kernel(args.ml_probabs_dilation)
@@ -830,7 +837,6 @@ if "__main__" == __name__:
     # 1. select files by forecast time
     # 2. determine storm mask for the give time
     # 3. compare storm mask to ml preds and uh
-    # TODO: check 4 / 73 2019-04-30_19:25:00 (17, 5)
 
     all_ftimes = df_all_files['forecast_time'].values
     ftimes = np.unique(all_ftimes)
@@ -863,6 +869,8 @@ if "__main__" == __name__:
     prob_max = []
     uh_max = []
 
+    of_interest = []
+
     n_3hrs = 36 #64 
 
     nf = len(args.forecast_duration)
@@ -871,20 +879,17 @@ if "__main__" == __name__:
         fslice = slice(0, args.forecast_duration[0])
     elif nf == 2:
         fslice = slice(*args.forecast_duration)
-    #min00_20 = slice(0, 5) 
-    #min20_60 = slice(5, 12) 
-    #min60_90 = slice(12, 18) 
-    #min90_180 = slice(18, 36) 
 
     # Iterate of WoFS run dates
-    #rdates = df_all_files['run_date'].values
-    #rdates = np.unique(rdates)
     db_count = 0
-    for r, rdate in enumerate(rdates): 
+    for r, rdate in enumerate(rdates[8:9]): 
         rdate_files = df_all_files.loc[df_all_files['run_date'] == rdate]
         itimes = np.unique(rdate_files['init_time'].values)
         #itimes = df_all_files['init_time'].values
         itimes = np.unique(itimes)
+
+        xlats = None
+        xlons = None
 
         # Iterate over initialization times
         for i, itime in enumerate(itimes): #(['1900', '1930']):
@@ -908,8 +913,10 @@ if "__main__" == __name__:
                 dtime = num2date(wofs_preds.Time[0], 'seconds since 2001-01-01')
                 wofs_preds.drop_vars('Time')
 
-                print(f'[{r}, {rdate}] {f} / {n_3hrs}', itime, ftime, dtime)
-                if sel_files_by_ftime[ftime].shape[0] != 18: print(sel_files_by_ftime[ftime].shape)
+                print(f'[{r:2d}, {rdate}]({i:2d}) {f:2d} / {n_3hrs}', itime, ftime, dtime)
+                if sel_files_by_ftime[ftime].shape[0] != 18: 
+                    print("ENS LOW", sel_files_by_ftime[ftime].shape)
+                    of_interest.append(f'{rdate} | {itime} | {ftime} | {dtime}')
                 if args.dry_run:
                     print(sel_files_by_ftime[ftime].shape)
                     #print(sel_files_by_ftime[ftime])
@@ -932,10 +939,11 @@ if "__main__" == __name__:
                     # TODO (maybe): aggregate over all
             
                 # CREATE STORM MASK for the given forecast time, distance thres, and time thres
-                # TODO (Maybe unnecessary): extract lat/lon once per day instead
-                xlats = np.squeeze(wofs_preds['XLAT'].values)
-                xlons = np.squeeze(wofs_preds['XLONG'].values)
-                #dtime = dt_objs[ti]
+                # Extract lat/lon once per day or init time instead
+                if i == 0:
+                    xlats = np.squeeze(wofs_preds['XLAT'].values)
+                    xlons = np.squeeze(wofs_preds['XLONG'].values)
+
                 masks[ftime], sel_storms, kdtree = create_storm_mask(xlats, xlons, dtime, 
                                                                     lats_storm, lons_storm, 
                                                                     times_storms, 
@@ -973,9 +981,6 @@ if "__main__" == __name__:
                 results['fps'][f] += fps
                 results['fns'][f] += fns
                 results['tns'][f] += tns
-                #results['srs'][f] = compute_sr(tps, fps) #tps / (tps + fps)
-                #results['pods'][f] = compute_pod(tps, fns) #tps / (tps + fns)
-                #results['csis'][f] = compute_csi(tps, fns, fps) #tps / (tps + fns + fps)
 
                 # UH
                 if args.uh_compute:
@@ -997,9 +1002,6 @@ if "__main__" == __name__:
                     results_uh['fps'][f] += _res['fps']
                     results_uh['fns'][f] += _res['fns']
                     results_uh['tns'][f] += _res['tns']
-                    #results_uh['srs'][f] = _res['srs'] 
-                    #results_uh['pods'][f] = _res['pods']
-                    #results_uh['csis'][f] = _res['csis'] 
 
 
     if args.write:
@@ -1012,7 +1014,10 @@ if "__main__" == __name__:
         if args.ml_probabs_norm: 
             fn_suffix += '_normed'
             legend_txt += f'(normalized)'
-        prefix = '_test_' if args.dry_run  else ''
+        prefix = ''
+        if args.dry_run:
+            prefix += '_test_' 
+            args.year = rdate
         #if args.model_name != '': prefix += f'{args.model_name}_'
 
         figsize = (8, 8)
@@ -1026,7 +1031,7 @@ if "__main__" == __name__:
         pods_agg = compute_pod(tps, fns) 
         csis_agg = compute_csi(tps, fns, fps)
 
-        # TESTING: write for each model type and time interval
+        # Write for each model type and time interval
         fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_results_{args.stat}{fn_suffix}.csv') 
         if args.dry_run: print(f"Saving {fname}")
         pd.DataFrame({'thres': csithreshs, 'tps': tps, 'fps': fps, 'fns': fns, 
@@ -1065,5 +1070,7 @@ if "__main__" == __name__:
                             fname, threshs=uhthreshs, label=f'UH {legend_txt}', 
                             color='blue', save=True, srs_pods_csis=(srs_agg, pods_agg, csis_agg), 
                             return_scores=False, fig_ax=None, figsize=figsize)
+
+        print(of_interest)
 
     print('DONE.')
