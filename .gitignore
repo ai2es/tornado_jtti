@@ -149,3 +149,6 @@ cython_debug/
 
 # keras-unet-collection
 lydia_scripts/keras-unet-collection
+
+# test files
+*_test_*
