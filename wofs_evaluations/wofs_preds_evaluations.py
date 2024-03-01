@@ -1,7 +1,7 @@
 """
 author Monique Shotande
 
-Pixel-wsie Evaluation of WoFS predictions.
+Pixel-wise Evaluation of WoFS predictions.
 Generates a pandas dataframe of all the files for convenience
 when selecting all ensembles for specific forecast time, 
 initialization time, and date.
@@ -34,14 +34,15 @@ from sklearn.metrics import confusion_matrix
 
 #import netCDF4
 #print("netCDF4 version", netCDF4.__version__)
-from netCDF4 import Dataset, date2num, num2date
+from netCDF4 import num2date #, Dataset, date2num
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
 #from wofs_raw_predictions import load_wofs_file
 from wofs_ensemble_predictions import extract_datetime, select_files
 from scripts_tensorboard.unet_hypermodel import plot_reliabilty_curve, plot_csi
-from scripts_tensorboard.unet_hypermodel import compute_csi, compute_sr, compute_pod, contingency_curves
+from scripts_tensorboard.unet_hypermodel import compute_csi, compute_sr, compute_pod
+from scripts_tensorboard.unet_hypermodel import contingency_curves, plot_roc, plot_prc
 
 
 import matplotlib.pyplot as plt
@@ -100,11 +101,16 @@ def create_argsparser(args_list=None):
     parser.add_argument('--forecast_duration', type=int, nargs='+', default=[36],
                        help='List of at most 2 integers. The indices of the forecast range to evaluate on. For example, for the forecast range 0 to 20 min, the indices are 0 and 5. ')
 
-
     parser.add_argument('--uh_compute', action='store_true',
         help='Whether to compute performance results for the UH')
     parser.add_argument('--uh_thres_list', type=float, nargs='+',
         help='List of UH threshold values')
+
+    # TODO: skip forecast time vs skip day
+    parser.add_argument('--skip_clearday', action='store_true',
+        help='Whether to skip days where there are no tornadoes')
+    parser.add_argument('--skip_cleartime', action='store_true',
+        help='Whether to skip forecast times where there are no tornadoes')
     
     parser.add_argument('--gridsize', type=float, default=3,
         help='WoFS gridsize in kilometers. Default is 3')
@@ -451,12 +457,14 @@ def generate_init_times_files_list_all(dir_preds, date, save_path=None,
         df_all_inits = pd.concat([df_all_inits, df_], ignore_index=True, 
                                  verify_integrity=True)
 
-    df_all_inits.sort_values(['run_date', 'init_time', 'ensemble_member',
-                              'forecast_time', 'filename_path'], inplace=True)
+    df_all_inits.sort_values(['run_date', 'ensemble_member', 'forecast_time', 
+                              'init_time', 'filename_path'], inplace=True)
+    #0['run_date', 'init_time', 'ensemble_member', 'forecast_time', 'filename_path']
+    #x['run_date', 'forecast_time', 'init_time', 'ensemble_member', 'filename_path']
 
     # For instances where there are wrfout and wrfwof files, drop the first (i.e. the wrfout)
-    df_all_inits.drop_duplicates(subset=['run_date', 'init_time', 
-                                         'ensemble_member', 'forecast_time'], 
+    df_all_inits.drop_duplicates(subset=['run_date', 'ensemble_member', 
+                                         'forecast_time', 'init_time'], 
                                          inplace=True, keep='last', ignore_index=True)
 
     return df_all_inits
@@ -498,14 +506,27 @@ def create_storm_mask(lats, lons, dtime, lats_storms, lons_storms, times_storms,
     mask_reports_by_time: 1D np array shape same as the list of storm reports
     tree: spatial kdtree object
     '''
-    # Determine storm reports within the specified time range
-    delta_time = timedelta(minutes=thres_time)
-    time_range = [dtime - delta_time, dtime + delta_time]
-    
-    mask_reports_by_time = np.logical_and(times_storms >= time_range[0], times_storms <= time_range[1])
-    if times_storms_end is not None:
-        mask_end_time = np.logical_and(times_storms_end >= time_range[0], times_storms_end <= time_range[1])
-        mask_reports_by_time = np.logical_or(mask_reports_by_time, mask_end_time)
+    mask_reports_by_time = np.ones(times_storms.shape, bool)
+
+    if dtime is not None:
+        # Determine storm reports within the specified time range
+        delta_time = timedelta(minutes=thres_time)
+
+        # Time range around storm report
+        times_storms_start = times_storms - delta_time
+        times_storms_end = times_storms + delta_time
+        # Time range around forecast time
+        time_forecast_start = dtime - delta_time
+        time_forecast_ends = dtime + delta_time
+        
+        # Check time range of storm report overlaps with time range of forecast
+        mask_reports_by_start_time = np.logical_and(times_storms_start <= time_forecast_start, times_storms_end >= time_forecast_start)
+        mask_reports_by_end_time = np.logical_and(times_storms_start <= time_forecast_ends, times_storms_end >= time_forecast_ends)
+        mask_reports_by_time = np.logical_or(mask_reports_by_start_time, mask_reports_by_end_time)
+        #mask_reports_by_time = np.logical_and(times_storms >= time_range[0], times_storms <= time_range[1])
+        if times_storms_end is not None:
+            mask_end_time = np.logical_and(times_storms_end >= time_forecast_start, times_storms_end <= time_forecast_ends)
+            mask_reports_by_time = np.logical_or(mask_reports_by_time, mask_end_time)
 
     # Compute the distance in terms of the number of grid cells
     thres_ngrids = np.max([thres_dist / gridsize, eps]) 
@@ -539,7 +560,7 @@ def create_storm_mask(lats, lons, dtime, lats_storms, lons_storms, times_storms,
     
     # Identify the nearest neighbors
     if not use_ball:
-        # For each storm point, find k(=4) closest grid points
+        # For each storm point, find k closest grid points
         distances, neighbor_inds = tree.query(storm_points, k=4, workers=kdworkers)
     else:
         # Find all points within radius
@@ -583,6 +604,10 @@ def compute_performance(y, y_pred, threshs, compute_sr_pod_csi=False, DB=False):
     -----------
     results: dict with tps, fps, fns, tns, pods, srs, csis
     '''
+    npos = np.count_nonzero(y)
+    if npos == 0: 
+        print(f"compute_performance():: No positives. npos={npos}")
+
     shape = threshs.shape
     
     tps = np.zeros(shape)
@@ -610,8 +635,8 @@ def compute_performance(y, y_pred, threshs, compute_sr_pod_csi=False, DB=False):
         #if DB: print(tps[i], fps[i], fns[i], tns[i] )
 
         if t > y_max and DB:
-            print(f'[{i}] ymax: {y_max}, thres: {t}')
-            print(f'\t tn: {tns[i]}  fp: {fps[i]}  fn: {fns[i]}  tp:{tps[i]}')
+            print(f'compute_performance():: [{i}] ymax: {y_max}, thres: {t}')
+            print(f'compute_performance():: \t tn: {tns[i]}  fp: {fps[i]}  fn: {fns[i]}  tp:{tps[i]}')
             #continue
         
 
@@ -628,13 +653,106 @@ def compute_performance(y, y_pred, threshs, compute_sr_pod_csi=False, DB=False):
 
     return results
 
+def compute_metrics(y, y_pred, threshs=None, metrics=None, not_metrics=False, DB=False):
+    ''' 
+    Compute performance metrics
+
+    Parameters
+    -----------
+    y: ground truth labels
+    y_pred: predictions
+    metrics: list of strings of metrics to compute, or not compute if not_metrics
+            is true. set to None to compute all metrics
+            options: pod (same as tpr and recall), sr (same as precision), csi, 
+                     fpr, freq_bias, 
+                     pss = TPR - FPR 
+                     fvaf = 1 - MSE / VAR 
+                          = 1 - (sum[(y_true - y_pred)**2]) / (sum[(y_true - y_mean)**2])
+                     mse
+    not_metrics: bool set true to NOT compute the specified metrics
+
+    Return
+    ---------
+    scores: dict with selected score results
+    '''
+    all_metrics = ['pod', 'sr', 'csi', 'fpr', 'freq_bias', 'pss', 'fvaf', 'mse']
+    metrics.replace(['tpr', 'recall'], 'pod')
+    metrics.replace('sr', 'precision')
+    metrics = np.unique(metrics)
+    # Verify valid metrics specified
+    if not set(metrics).issubset(all_metrics): #set(a) <= set(b)
+        pass
+
+    results = compute_performance(y, y_pred, threshs, DB=DB)
+    tps = results['tps']
+    fps = results['fps']
+    fns = results['fns']
+    tns = results['tns']
+
+    scores = {}
+    if metrics is None or ('pod' in metrics and not not_metrics): #same as tpr and recall
+        scores['pods'] = compute_pod(tps, fns) #tps / (tps + fns)
+
+    if metrics is None or ('sr' in metrics and not not_metrics): #same as precision
+        scores['srs'] = compute_sr(tps, fps) #tps / (tps + fps)
+
+    if metrics is None or ('csi' in metrics and not not_metrics): #tps / (tps + fns + fps)
+        scores['csi'] = compute_csi(tps, fns, fps) 
+
+    if metrics is None or ('fpr' in metrics and not not_metrics): 
+        scores['fpr'] = fps / (fps + tns)
+
+    if metrics is None or ('freq_bias' in metrics and not not_metrics):
+        scores['freq_bias'] = (tps + fps) / (tps + fns) #POD/SR = (tps+fps)/(tps+fns)
+
+    if metrics is None or ('pss' in metrics and not not_metrics): #tpr - fpr
+        scores['pss'] = compute_pod(tps, fns) - fps / (fps + tns)
+
+    if metrics is None or ('f1' in metrics and not not_metrics): 
+        scores['f1'] = 2 * tps / (2 * tps + fps + fns)
+
+    # TODO
+    if metrics is None or ('fvaf' in metrics and not not_metrics): 
+        scores['fvaf'] = 1. - np.mean((y - y_pred)**2) / np.var(y)
+
+    return scores
 
 """
 Plotting
 """
+import cartopy.feature as cfeature
+def _add_cartopy(figaxs=None, ax_projection=None, border_ls='--', lake_alpha=.5,
+                 figsize=(15,5), dpi=200):
+    '''
+    Add cartography to existing plot
+    ax_projection: see fig.add_axes(projection=)
+    figaxs: tuple with (fig, axs)
+    border_ls: borders linestyle
+    lake_alpha: alpha value for lakes
+    '''
+    fig = None
+    ax = None
+    if figaxs is None:
+        fig = plt.figure(figsize=figsize, dpi=dpi)
+        ax = fig.add_axes([1, 1, 1, 1], projection=ax_projection)
+    else:
+        fig, ax = figaxs
+
+    if not isinstance(ax, (list, tuple, np.ndarray)):
+        ax = [ax]
+    for _a in ax:
+        _a.set_facecolor(cfeature.COLORS['water'])
+        _a.add_feature(cfeature.LAND)
+        _a.add_feature(cfeature.COASTLINE)
+        _a.add_feature(cfeature.BORDERS, linestyle=border_ls)
+        _a.add_feature(cfeature.LAKES, alpha=lake_alpha)
+        _a.add_feature(cfeature.STATES)
+    return fig, ax
+
 def plot_storms(mask, lons_storm, lats_storm, thres_dist=None, thres_time=None,
                 figax=None, figsize=(10, 5), xlims=None, ylims=None, 
-                invert_yaxis=False, bcmap=mpl.colors.ListedColormap(['w', 'k'])):
+                invert_yaxis=False, bcmap=mpl.colors.ListedColormap(['w', 'k']), 
+                add_cartopy=False):
     '''
     Plot storm report mask
     Parameters
@@ -784,14 +902,17 @@ if "__main__" == __name__:
                  '--year', '2019', 
                  '--date0', '2019-04-28', 
                  '--date1', '2019-06-03',
-                 #'--forecast_duration', '0', '5',
+                 '--forecast_duration', '0', '6',
                  '--thres_dist', '50', '--thres_time', '20', '--stat', 'mean', 
-                 '--nthresholds', '51',  '--ml_probabs_dilation', '33', '--uh_compute',
+                 '--nthresholds', '51', '--ml_probabs_dilation', '33', '--uh_compute',
+                 #'--skip_clearday',
+                 #'--skip_cleartime',
                  '--model_name', 'tor_unet_sample50_50_classweights20_80_hyper',
                  '-w', '1', '--dry_run'] 
                  #, '--ml_probabs_norm',
                  #'--uh_thres_list', '0', '200'  #'363'
     args = parse_args(args_list)
+    print(args)
 
     # "Round" dilation kernel mask
     footprint = _create_round_kernel(args.ml_probabs_dilation)
@@ -805,6 +926,10 @@ if "__main__" == __name__:
                                                             args.date0, args.date1)
     lats_storm = df_storm_report['Lat'].values 
     lons_storm = df_storm_report['Lon'].values
+
+    # Set reports to index by DateTime for convenience
+    #storm_reports = df_storm_report.copy()
+    #storm_reports = storm_reports.set_index('DateTime')
 
 
     # TODO: pull IEM polygons
@@ -851,21 +976,25 @@ if "__main__" == __name__:
 
     nthreshs = args.nthresholds
     csithreshs = np.linspace(0, 1, nthreshs)
-    uhthreshs = np.array([0, .01, .02, .025, .05, .1, .2, .25, .5, 1, 5, 10, 20, 25, 40, 50, 80, 100]) #, 200, 300])
+    uhthreshs = np.array([0, .01, .02, .025, .05, .1, .2, .25, .5, 
+                          1, 5, 10, 20, 25, 40, 50, 80, 100]) #, 200, 300])
     nthreshs_uh = uhthreshs.size
 
     NANs = np.zeros((n_ftimes, nthreshs)) #np.full((n_ftimes, nthreshs), np.nan) 
     results = {'tps': NANs.copy(), 'fps': NANs.copy(), #np.full((n_ftimes, nthreshs), np.nan)
-               'fns': NANs.copy(), 'tns': NANs.copy()} 
+               'fns': NANs.copy(), 'tns': NANs.copy(),
+               'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()} 
                #'srs': NANs.copy(), 'pods': NANs.copy(), 'csis': NANs.copy()}
     
     NANs = np.zeros((n_ftimes, nthreshs_uh)) #np.full((n_ftimes, nthreshs_uh), np.nan) 
     results_uh = {'tps': NANs.copy(), 'fps': NANs.copy(), 
-                  'fns': NANs.copy(), 'tns': NANs.copy()}
+                  'fns': NANs.copy(), 'tns': NANs.copy(),
+                  'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()}
                   #'srs': NANs.copy(), 'pods': NANs.copy(), 'csis': NANs.copy()}
     
     kdtree = None
 
+    prob_distr = np.zeros((0,))
     prob_max = []
     uh_max = []
 
@@ -881,25 +1010,51 @@ if "__main__" == __name__:
         fslice = slice(*args.forecast_duration)
 
     # Iterate of WoFS run dates
-    db_count = 0
-    for r, rdate in enumerate(rdates[8:9]): 
+    for r, rdate in enumerate(rdates): #[3:4] #20190502
         rdate_files = df_all_files.loc[df_all_files['run_date'] == rdate]
         itimes = np.unique(rdate_files['init_time'].values)
-        #itimes = df_all_files['init_time'].values
         itimes = np.unique(itimes)
 
-        xlats = None
-        xlons = None
+        t0 = rdate_files['forecast_time'].min()
+        t0 = datetime.strptime(t0, '%Y-%m-%d_%H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+        t1 = rdate_files['forecast_time'].max()
+        t1 = datetime.strptime(t1, '%Y-%m-%d_%H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+        storms_for_rdate = df_storm_report[t0:t1]
+        _latstorm = storms_for_rdate['Lat'].values
+        _lonstorm = storms_for_rdate['Lon'].values
+        _times = np.array([d.to_pydatetime() for d in pd.to_datetime(storms_for_rdate.index.values)])
+        print(storms_for_rdate)
+
+        nstorms = storms_for_rdate.shape[0]
+        if nstorms == 0:
+            print(f"No storms on {rdate}. nstorms={nstorms}")
+            if args.skip_clearday: continue
+
+        # Check coords
+        _fn = rdate_files['filename_path'].values[0]
+        wofs_preds = xr.load_dataset(_fn)
+        xlats = np.squeeze(wofs_preds['XLAT'].values)
+        xlons = np.squeeze(wofs_preds['XLONG'].values)
+        #dateindex = datetime.strptime(rdate, '%Y%m%d').strftime('%Y-%m-%d')
+
+        _mask, _, _ = create_storm_mask(xlats, xlons, None, 
+                                        _latstorm, _lonstorm, 
+                                        _times, args.gridsize,
+                                        thres_dist=1, 
+                                        thres_time=args.thres_time)
+        nstorms = np.count_nonzero(_mask)
+        if nstorms == 0: 
+            print(f"No storms on {rdate} in WoFS spatial domain. nstorms={nstorms}. skip={args.skip_clearday}")
+            if args.skip_clearday: continue
 
         # Iterate over initialization times
         for i, itime in enumerate(itimes): #(['1900', '1930']):
             init_files = rdate_files.loc[rdate_files['init_time'] == itime]
-            #init_files = df_all_files.loc[df_all_files['init_time'] == itime]
             forecast_times = np.unique(init_files['forecast_time'].values)
             if args.dry_run: print(forecast_times[fslice])
 
             # Iterate over first 3 hours of forecast times
-            for f, ftime in enumerate(forecast_times[fslice]): #:n_3hrs
+            for f, ftime in enumerate(forecast_times[fslice]): 
                 sel_files_by_ftime[ftime] = select_files(df_all_files, itime, 
                                                          ftime, emember=None,
                                                          rdate=rdate)
@@ -919,7 +1074,6 @@ if "__main__" == __name__:
                     of_interest.append(f'{rdate} | {itime} | {ftime} | {dtime}')
                 if args.dry_run:
                     print(sel_files_by_ftime[ftime].shape)
-                    #print(sel_files_by_ftime[ftime])
                     print(sel_files_by_ftime[ftime]['filename_path'].values)
 
                 # COMPUTE MEAN/MEDIAN
@@ -940,9 +1094,9 @@ if "__main__" == __name__:
             
                 # CREATE STORM MASK for the given forecast time, distance thres, and time thres
                 # Extract lat/lon once per day or init time instead
-                if i == 0:
-                    xlats = np.squeeze(wofs_preds['XLAT'].values)
-                    xlons = np.squeeze(wofs_preds['XLONG'].values)
+                #if i == 0:
+                xlats = np.squeeze(wofs_preds['XLAT'].values)
+                xlons = np.squeeze(wofs_preds['XLONG'].values)
 
                 masks[ftime], sel_storms, kdtree = create_storm_mask(xlats, xlons, dtime, 
                                                                     lats_storm, lons_storm, 
@@ -951,12 +1105,20 @@ if "__main__" == __name__:
                                                                     thres_dist=args.thres_dist, 
                                                                     thres_time=args.thres_time, 
                                                                     kdworkers=-1)#, times_storms_end=times_storms_end)
+                npos = np.count_nonzero(masks[ftime])
+                if npos == 0: 
+                    #{rdate} | {itime}
+                    print(f"No tornados at {itime} {ftime} or within the WoFS Domain. npos={npos}")
+                    if args.skip_cleartime: continue
 
                 # COMPUTE PERFORMANCE
                 #if np.all(~masks[ftime])
                 shape = wofs_prob[ftime].shape
 
                 y_storm = masks[ftime] #"ground truth"
+                _npos = np.count_nonzero(y_storm)
+                _nneg = np.count_nonzero(~y_storm)
+                print(f"pos: {_npos}  neg: {_nneg}; total: {_npos + _nneg}")
                 if args.dry_run: 
                     classes, counts = np.unique(y_storm, return_counts=True)
                     print("Storm Counts", classes, ":", counts)
@@ -976,11 +1138,16 @@ if "__main__" == __name__:
 
                 # Calculate performance ML
                 tps, fps, fns, tns = contingency_curves(y_storm.ravel(), y_preds.ravel(), csithreshs.tolist())
-                db_count += 1
                 results['tps'][f] += tps
                 results['fps'][f] += fps
                 results['fns'][f] += fns
                 results['tns'][f] += tns
+                results['npos'][f] += _npos
+                results['nneg'][f] += _nneg
+
+                q = np.random.rand(1)
+                if q > .9:
+                    prob_distr = np.append(prob_distr, y_preds.ravel())
 
                 # UH
                 if args.uh_compute:
@@ -1002,6 +1169,8 @@ if "__main__" == __name__:
                     results_uh['fps'][f] += _res['fps']
                     results_uh['fns'][f] += _res['fns']
                     results_uh['tns'][f] += _res['tns']
+                    results_uh['npos'][f] += _npos
+                    results_uh['nneg'][f] += _nneg
 
 
     if args.write:
@@ -1014,13 +1183,19 @@ if "__main__" == __name__:
         if args.ml_probabs_norm: 
             fn_suffix += '_normed'
             legend_txt += f'(normalized)'
+        if args.skip_cleartime or args.skip_clearday:
+            fn_suffix += '_skip'
         prefix = ''
         if args.dry_run:
             prefix += '_test_' 
             args.year = rdate
-        #if args.model_name != '': prefix += f'{args.model_name}_'
+        if args.model_name != '': prefix += f'{args.model_name}_'
 
-        figsize = (8, 8)
+        figsize = (15, 10)
+        fig, axs = plt.subplots(2, 3, figsize=figsize)
+        axs = axs.ravel()
+        title = rf'Radius {args.thres_dist}km Time $\pm$ {args.thres_time}min'
+        fig.suptitle(title)
 
         tps = np.nansum(results['tps'], axis=0)
         fps = np.nansum(results['fps'], axis=0)
@@ -1031,22 +1206,78 @@ if "__main__" == __name__:
         pods_agg = compute_pod(tps, fns) 
         csis_agg = compute_csi(tps, fns, fps)
 
+        #far = 1 - srs_agg
+        fpr = fps / (fps + tns)
+        f1 = 2 * tps / (2 * tps + fps + fns)
+        acc = (tps + tns) / (tps + fps + fns + tns)
+
+        npos = np.nansum(results['npos'])
+        nneg = np.nansum(results['nneg'])
+        pos_rate = npos / (npos + nneg)
+        print(f"npos: {npos}  nneg: {nneg}; total: {npos + nneg}")
+        print(f"acc: {acc}")
+
         # Write for each model type and time interval
         fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_results_{args.stat}{fn_suffix}.csv') 
         if args.dry_run: print(f"Saving {fname}")
         pd.DataFrame({'thres': csithreshs, 'tps': tps, 'fps': fps, 'fns': fns, 
-                      'tns': tns, 'srs': srs_agg, 'pods': pods_agg, 'csis': csis_agg}).to_csv(fname, header=True)
+                      'tns': tns, 'srs': srs_agg, 'pods': pods_agg, 'csis': csis_agg,
+                      'fpr': fpr, 'f1': f1}).to_csv(fname, header=True)
 
-        fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_diagram_{args.stat}{fn_suffix}.png')
-        figax = plot_csi(masks[ftime].ravel(), prob_max.ravel(), #wofs_prob[ftime].ravel(), 
-                         fname, threshs=csithreshs, label=f'ML Probabilities {legend_txt}', color='blue', 
-                         save=True, srs_pods_csis=(srs_agg, pods_agg, csis_agg),
-                         return_scores=False, fig_ax=None, figsize=figsize)
-        title = rf'dist $<$ {args.thres_dist}km, time $<$ {args.thres_time}'
-        #plt.title(title)
 
-        #fig, ax = plot_reliabilty_curve(y_train.ravel(), xtrain_preds.ravel(),  
-        #                                fname, save=False, strategy='uniform')
+        
+        fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_diagrams_{args.stat}{fn_suffix}.png')
+
+        # CSI Performance Diagram
+        #fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_diagram_{args.stat}{fn_suffix}.png')
+        _figax = plot_csi(masks[ftime].ravel(), prob_max.ravel(), #wofs_prob[ftime].ravel(), 
+                         fname, threshs=csithreshs, 
+                         label=f'ML Probabilities {legend_txt}', color='blue', 
+                         save=False, srs_pods_csis=(srs_agg, pods_agg, csis_agg),
+                         return_scores=False, fig_ax=(fig, axs[2]), figsize=figsize)
+        #cb = fig.colorbar(axs[2].collections[-1], ax=axs[2])
+        #cb = axs[2].collections[0].colorbar
+
+        # ROC Curve
+        #fname = os.path.join(args.out_dir, f'{prefix}{args.year}_roc_{args.stat}{fn_suffix}.png')
+        _figax = plot_roc(masks[ftime].ravel(), prob_max.ravel(), fname, 
+                           tpr_fpr=(pods_agg, fpr), fig_ax=(fig, axs[0]), 
+                           figsize=figsize, save=False)
+
+        # PRC
+        #fname = os.path.join(args.out_dir, f'{prefix}{args.year}_prc_{args.stat}{fn_suffix}.png')
+        _figax = plot_prc(masks[ftime].ravel(), prob_max.ravel(), fname, 
+                           pre_rec_posrate=(srs_agg, pods_agg, pos_rate), draw_ann=2,
+                           fig_ax=(fig, axs[1]), figsize=figsize, save=False)
+        
+        axs[3].plot(fpr, acc)
+        axs[3].set(xlabel='FPR', ylabel='Accuracy')
+        axs[3].set(xlim=[0, 1], ylim=[0, 1])
+        axs[3].grid()
+        
+        axs[5].hist(prob_distr, bins=51, density=True)
+        axs[5].set(title='ML Probability Distribution', xlabel='ML Probability')
+        axs[5].set_xlim([0, .5])
+
+        plt.subplots_adjust(wspace=.05, hspace=.25)
+        '''
+        # Extract positions of square and above axes
+        p1 = axs[1].get_position()
+        p3 = axs[3].get_position()
+        # make square axes with left position taken from above axes, and set position
+        p1 = [p3.x0, p1.y0, p1.width, p1.height]
+        axs[1].set_position(p1) 
+        '''
+
+        print("Saving plots")
+        print(fname)
+        #fig.tight_layout(pad=1.5)
+        plt.savefig(fname, dpi=160, bbox_inches='tight')
+
+        # TODO: Calibration Diagram
+        '''fname = os.path.join(args.out_dir, f'{prefix}{args.year}_calibration_curve_{args.stat}{fn_suffix}.png')
+        fig, ax = plot_reliabilty_curve(masks[ftime].ravel(), prob_max.ravel(),  
+                                        fname, save=True, strategy='uniform')'''
         
         # UH
         if args.uh_compute:
