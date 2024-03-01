@@ -1050,7 +1050,7 @@ def prep_data(args, n_labels=None, sample_method='sample', DB=1):
 
 def fvaf(y_true, y_pred):
     ''' TODO
-    Fraction of variance accounted for (FVAF) ranges (−inf, 1]. 
+    Fraction of variance accounted for (FVAF) ranges (-inf, 1]. 
     1 FVAF represents a total reconstruction. 
     0 represents a reconstruction that's as good as using the average of the 
     signal as predictor
@@ -1265,7 +1265,7 @@ def plot_predictions(y_preds, y_preds_val, fname, use_seaborn=True, fig_ax=None,
 
     return fig, axs
 
-def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None, 
+def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None, zoom_ax=False,
                      figsize=(10, 8), alpha=.5, save=False, dpi=160):
     '''
     Fancy Plot histograms of the distribution of prediction values
@@ -1291,11 +1291,12 @@ def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None,
     axs[0].legend(list(Y.keys()), loc='center right', bbox_to_anchor=(1.16, 1))
 
     ## Zoom
-    ax2 = plt.axes([0.4, 0.0, .15, .15]) #left, bottom, width, height
-    histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
-             common_norm=False) #distplot
-    #ax2.set_title('zoom')
-    ax2.set_xlim([0, .05])
+    if zoom_ax:
+        ax2 = plt.axes([0.4, 0.0, .15, .15]) #left, bottom, width, height
+        histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
+                common_norm=False) #distplot
+        #ax2.set_title('zoom')
+        ax2.set_xlim([0, .05])
 
     # Cumulative
     histplot(data=Y, stat='probability', legend=True,
@@ -1307,12 +1308,13 @@ def plot_preds_hists(Y, fname, use_seaborn=True, fig_ax=None,
     axs[1].legend(list(Y.keys()), loc='center right', bbox_to_anchor=(1.16, 1))
 
     ## Zoom
-    ax2 = plt.axes([0.4, 0.05, .15, .15]) #left, bottom, width, height
-    histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
-             common_norm=False, cumulative=True, element="step", fill=False) #distplot
-    #ax2.set_title('zoom')
-    ax2.set_xlim([0, .05])
-    ax2.legend([])
+    if zoom_ax:
+        ax2 = plt.axes([0.4, 0.05, .15, .15]) #left, bottom, width, height
+        histplot(Y, ax=ax2, stat='probability', legend=True, alpha=alpha, 
+                common_norm=False, cumulative=True, element="step", fill=False) #distplot
+        #ax2.set_title('zoom')
+        ax2.set_xlim([0, .05])
+        ax2.legend([])
 
     plt.suptitle("Tornado Prediction Probabilities")
 
@@ -1375,13 +1377,15 @@ def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None,
 
     return fig, ax
 
-def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, 
-             dpi=160, **kwargs):
+def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10), 
+             save=False, dpi=160, **kwargs):
     '''
     Plot the Reciever Operating Characteristic (ROC) Curve
     @param y: true output
     @param y_preds: predicted output
     @param fname: file name to save the figure as
+    @param tpr_fpr: tuple containing lists for the true positives rate, at index 
+            0, and the false positive rate, at index 1. (tpr, fpr)
     @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param figsize: tuple with the width and height of the figure
     @param save: bool flag whether to save the figure
@@ -1396,10 +1400,15 @@ def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False,
     else:
         fig, ax = fig_ax
 
-    fpr, tpr, _ = roc_curve(y, y_preds)
+    tpr = None
+    fpr = None
+    if tpr_fpr:
+        tpr, fpr = tpr_fpr
+    else: 
+        fpr, tpr, _ = roc_curve(y, y_preds)
 
     ax.plot(fpr, tpr, linewidth=2, **kwargs)
-    ax.plot([0, 1], [0, 1], '--')
+    ax.plot([0, 1], [0, 1], '--', label='No skill')
     #ax.plot(100*fp, 100*tp, label=name, linewidth=2, **kwargs)
     ax.set(xlabel='FPR', ylabel='TPR')
     ax.set(xlim=[0, 1], ylim=[0, 1])
@@ -1414,17 +1423,22 @@ def plot_roc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False,
 
     return fig, ax
 
-def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False, 
-             dpi=160, **kwargs):
+def plot_prc(y, y_preds, fname, pre_rec_posrate=None, fig_ax=None, figsize=(10, 10), 
+             save=False, dpi=160, draw_ann=1, **kwargs):
     '''
     Plot the Precision Recall Curve (PRC)
     @param y: true output
     @param y_preds: predicted output
     @param fname: file name to save the figure as
+    @param pre_rec_posrate: 3-tuple containing lists for the precision, at index 
+            0, the recall, at index 1, and the positive chance rate. 
+            eg (precision, recall, pos_rate)
     @param fig_ax: (optional) tuple with existing figure and axes objects to use
     @param figsize: tuple with the width and height of the figure
     @param save: bool flag whether to save the figure
     @param dpi: integer resolution of the saved figure in dots per inch
+    @param draw_ann: int indicating annotations to draw. 0: draw none, 1: draw
+            diag, 2: draw f1 curves, 3: draw both
     @param **kwargs: additional keyword arguments from Axes.plot()
     @return: tuple with the fig and axes objects
     '''
@@ -1435,13 +1449,33 @@ def plot_prc(y, y_preds, fname, fig_ax=None, figsize=(10, 10), save=False,
     else:
         fig, ax = fig_ax
 
-    precision, recall, _ = precision_recall_curve(y, y_preds)
+    precision = []
+    recall = []
+    pos_chance_rate = 1
+    if pre_rec_posrate:
+        precision, recall, pos_chance_rate = pre_rec_posrate
+    else:
+        precision, recall, _ = precision_recall_curve(y, y_preds)
+        pos_chance_rate = np.count_nonzero(y) / y.size
+
 
     ax.plot(precision, recall, linewidth=2, **kwargs)
-    ax.plot([0, 1], [1, 0], '--')
+    ax.hlines(pos_chance_rate, 0, 1, linestyles='--', #color='r', 
+              label=f'Chance ({pos_chance_rate:.02f})')
+    if draw_ann in [1, 3]: ax.plot([0, 1], [1, 0], '--')
+
+    # F1-score curves
+    if draw_ann >= 2:
+        f_scores = np.linspace(0.2, 0.8, num=4)
+        x = np.linspace(0.01, 1)
+        for f_score in f_scores:
+            y = f_score * x / (2 * x - f_score)
+            ax.plot(x[y >= 0], y[y >= 0], color="gray", alpha=0.8)
+            ax.annotate(f"f1 = {f_score:0.1f}", xy=(0.85, y[45] + 0.02), fontsize=6)
+
     ax.set(xlabel='Precision', ylabel='Recall')
-    #ax.set(xlim=[0, 1], ylim=[0, 1])
-    ax.grid(True)
+    ax.set(xlim=[0, 1], ylim=[0, 1])
+    ax.grid(True, color='k', alpha=.1, linewidth=2)
     ax.legend()
     ax.set_aspect('equal')
 

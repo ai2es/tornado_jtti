@@ -130,7 +130,8 @@ def extract_datetime(strg, method='re', fmt_dt='%Y-%m-%d_%H_%M_%S',
         dt_str = dt_obj.strftime(fmt_dt)
     return dt_str, dt_obj
 
-def select_files(df_files, itime, ftime, emember=None, rdate=None):
+def select_files(df_files, itime, ftime, emember=None, rdate=None, 
+                 return_mask=False):
     '''
     Get a list of files to use based in initialization time, forecast time and/or
     the ensemble member
@@ -163,8 +164,10 @@ def select_files(df_files, itime, ftime, emember=None, rdate=None):
     sel_rdate = np.ones((n,), bool)
     if rdate: sel_rdate = df_files['run_date'] == rdate
 
-    sel_files = df_files.loc[sel_itime & sel_ftime & sel_emember & sel_rdate]
-    return sel_files
+    sel_mask = sel_itime & sel_ftime & sel_emember & sel_rdate
+    sel_files = df_files.loc[sel_mask]
+    if return_mask: return sel_files, sel_mask
+    else: return sel_files
 
 def load_files(fnpath_list):
     '''
