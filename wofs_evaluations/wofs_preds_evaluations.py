@@ -27,7 +27,7 @@ import numpy as np
 print("np version", np.__version__)
 import pandas as pd
 print("pd version", pd.__version__)
-from scipy import spatial
+from scipy import spatial, stats
 from scipy.ndimage import grey_dilation
 from sklearn.preprocessing import normalize, MinMaxScaler
 from sklearn.metrics import confusion_matrix
@@ -106,7 +106,7 @@ def create_argsparser(args_list=None):
     parser.add_argument('--uh_thres_list', type=float, nargs='+',
         help='List of UH threshold values')
 
-    # TODO: skip forecast time vs skip day
+    # Skip forecast time vs skip day
     parser.add_argument('--skip_clearday', action='store_true',
         help='Whether to skip days where there are no tornadoes')
     parser.add_argument('--skip_cleartime', action='store_true',
@@ -479,7 +479,7 @@ def create_storm_mask(lats, lons, dtime, lats_storms, lons_storms, times_storms,
                       kdworkers=-1, times_storms_end=None):
     ''' 
     Uses kD tree to perform nearest neighbor search to determine wofs grid cells
-    the storm reports reside
+    the storm reports reside. 
 
     Parameters
     -----------
@@ -491,7 +491,10 @@ def create_storm_mask(lats, lons, dtime, lats_storms, lons_storms, times_storms,
     times_storms: list of times for the storm reports start times
     gridsize: length in kilometers of the grids
     thres_dist: int in kilometers
-    thres_time: int or float in minutes
+    thres_time: int or float in minutes. time before and after storm, and time 
+            before and after the forecast time (dtime) to consider as an overlap.
+            storm_time +/- thres_time
+            forecast_time +/- thres_time
     eps: epsilon
     use_ball: 
     sort_time: bool. If true, sort the storm reports by time
@@ -887,6 +890,47 @@ def plot_zh_n_probs(ZH, P, thres_prob=None, contours=None, figax=None,
     
     return f_, a_
 
+def det_curve(y, y_pred, fpr_fnr=None, figax=None, figsize=(8, 8)):
+    '''
+    Detection error tradeoff (DET) curve
+    https://scikit-learn.org/stable/auto_examples/model_selection/plot_det.html#sphx-glr-auto-examples-model-selection-plot-det-py
+    https://github.com/scikit-learn/scikit-learn/blob/5c4aa5d0d/sklearn/metrics/_ranking.py#L273
+    '''
+    fpr, fnr = fpr_fnr
+    fpr_plt = stats.norm.ppf(fpr)
+    fnr_plt = stats.norm.ppf(fnr)
+
+    #line_kwargs = {} if name is None else {"label": name}
+    #line_kwargs.update(**kwargs)
+    #fpr, fnr, thresholds = det_curve(y_true, y_scores)
+
+    fig = None
+    ax = None
+    if figax is None:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = figax
+
+    ax.plot(fpr_plt, fnr_plt, lw=3)
+    ax.set(xlabel='FPR', ylabel='FNR')
+    ax.set_aspect('equal')
+    ax.grid()
+    #_a.legend()
+
+    ticks = [0.001, 0.01, 0.05, 0.20, 0.5, 0.80, 0.95, 0.99, 0.999]
+    tick_locations = stats.norm.ppf(ticks)
+    tick_labels = [
+        "{:.0%}".format(s) if (100 * s).is_integer() else "{:.1%}".format(s)
+        for s in ticks
+    ]
+    ax.set_xticks(tick_locations)
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlim(-3, 3)
+    ax.set_yticks(tick_locations)
+    ax.set_yticklabels(tick_labels)
+    ax.set_ylim(-3, 3)
+
+    return fig, ax
 
 
 if "__main__" == __name__:
@@ -902,16 +946,17 @@ if "__main__" == __name__:
                  '--year', '2019', 
                  '--date0', '2019-04-28', 
                  '--date1', '2019-06-03',
-                 '--forecast_duration', '0', '6',
+                 '--forecast_duration', '0', '5',
                  '--thres_dist', '50', '--thres_time', '20', '--stat', 'mean', 
-                 '--nthresholds', '51', '--ml_probabs_dilation', '33', '--uh_compute',
-                 #'--skip_clearday',
+                 '--nthresholds', '51', '--ml_probabs_dilation', '33', 
+                 #'--uh_compute',
+                 '--skip_clearday',
                  #'--skip_cleartime',
                  '--model_name', 'tor_unet_sample50_50_classweights20_80_hyper',
                  '-w', '1', '--dry_run'] 
                  #, '--ml_probabs_norm',
                  #'--uh_thres_list', '0', '200'  #'363'
-    args = parse_args(args_list)
+    args = parse_args() #args_list)
     print(args)
 
     # "Round" dilation kernel mask
@@ -968,11 +1013,14 @@ if "__main__" == __name__:
     n_ftimes = ftimes.size
     print("# File Times", n_ftimes)
 
-    sel_files_by_ftime = {}
-    masks = {}
     wofs_cZH = {}
-    wofs_prob = {}
-    wofs_uh = {}
+    #wofs_prob = {}
+    #wofs_uh = {}
+    y_preds = None
+    y_uh = None
+
+    sel_files_by_ftime = None
+    y_storm = None
 
     nthreshs = args.nthresholds
     csithreshs = np.linspace(0, 1, nthreshs)
@@ -992,16 +1040,27 @@ if "__main__" == __name__:
                   'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()}
                   #'srs': NANs.copy(), 'pods': NANs.copy(), 'csis': NANs.copy()}
     
+    fmt_dt_pd = '%Y-%m-%d %H:%M:%S'
+    storm_timedelta = pd.Timedelta(hours=1) #timedelta(hours=1) #
+
     kdtree = None
 
+    # For hist and reliability plots
+    # Observed distribution
+    obs_distr = np.zeros((0,))
+    # UH distribution
+    uh_distr = np.zeros((0,))
+    # ML probab distribution
     prob_distr = np.zeros((0,))
-    prob_max = []
-    uh_max = []
+    q_thres = .7
+
+    #prob_max = []
+    #uh_max = []
 
     of_interest = []
 
-    n_3hrs = 36 #64 
-
+    # For selecting windows of forecast times
+    n_3hrs = 37 #64 
     nf = len(args.forecast_duration)
     fslice = slice(0, n_3hrs)
     if nf == 1:
@@ -1015,10 +1074,11 @@ if "__main__" == __name__:
         itimes = np.unique(rdate_files['init_time'].values)
         itimes = np.unique(itimes)
 
+        # Isoloate storms in day forecast window
         t0 = rdate_files['forecast_time'].min()
-        t0 = datetime.strptime(t0, '%Y-%m-%d_%H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+        t0 = datetime.strptime(t0, fmt_dt).strftime(fmt_dt_pd)
         t1 = rdate_files['forecast_time'].max()
-        t1 = datetime.strptime(t1, '%Y-%m-%d_%H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+        t1 = datetime.strptime(t1, fmt_dt).strftime(fmt_dt_pd)
         storms_for_rdate = df_storm_report[t0:t1]
         _latstorm = storms_for_rdate['Lat'].values
         _lonstorm = storms_for_rdate['Lon'].values
@@ -1030,38 +1090,49 @@ if "__main__" == __name__:
             print(f"No storms on {rdate}. nstorms={nstorms}")
             if args.skip_clearday: continue
 
-        # Check coords
+        # Check storm coords overlap with WoFS domain
         _fn = rdate_files['filename_path'].values[0]
         wofs_preds = xr.load_dataset(_fn)
         xlats = np.squeeze(wofs_preds['XLAT'].values)
         xlons = np.squeeze(wofs_preds['XLONG'].values)
         #dateindex = datetime.strptime(rdate, '%Y%m%d').strftime('%Y-%m-%d')
 
-        _mask, _, _ = create_storm_mask(xlats, xlons, None, 
+        y_storm, _, _ = create_storm_mask(xlats, xlons, None, 
                                         _latstorm, _lonstorm, 
                                         _times, args.gridsize,
                                         thres_dist=1, 
                                         thres_time=args.thres_time)
-        nstorms = np.count_nonzero(_mask)
+        nstorms = np.count_nonzero(y_storm)
         if nstorms == 0: 
             print(f"No storms on {rdate} in WoFS spatial domain. nstorms={nstorms}. skip={args.skip_clearday}")
             if args.skip_clearday: continue
 
         # Iterate over initialization times
-        for i, itime in enumerate(itimes): #(['1900', '1930']):
+        for i, itime in enumerate(itimes): 
             init_files = rdate_files.loc[rdate_files['init_time'] == itime]
-            forecast_times = np.unique(init_files['forecast_time'].values)
+            #forecast_times = init_files['forecast_time'].unique()
+            #if args.dry_run: print(forecast_times[fslice])
+
+            # Select forecast times 1hr before the first storm of the day
+            #   and 1hr after the last storm of the day
+            t0 = pd.to_datetime(storms_for_rdate.index[0]) - storm_timedelta
+            t1 = pd.to_datetime(storms_for_rdate.index[-1]) + storm_timedelta
+            sel_after_t0 = pd.to_datetime(init_files['forecast_time'], format=fmt_dt) >= t0
+            sel_before_t1 = pd.to_datetime(init_files['forecast_time'], format=fmt_dt) <= t1
+            forecast_times = init_files['forecast_time'].loc[sel_after_t0 & sel_before_t1].unique()
+            if nf != 2: 
+                nt = max(0, min(n_3hrs, forecast_times.size))
+                fslice = slice(0, nt)
             if args.dry_run: print(forecast_times[fslice])
 
             # Iterate over first 3 hours of forecast times
             for f, ftime in enumerate(forecast_times[fslice]): 
-                sel_files_by_ftime[ftime] = select_files(df_all_files, itime, 
-                                                         ftime, emember=None,
-                                                         rdate=rdate)
-
+                sel_files_by_ftime = select_files(df_all_files, itime, ftime, 
+                                                  emember=None, rdate=rdate)
+                #sel_files_by_ftime[ftime]
                 # Load all ensembles for the forecast time
                 concat_dim = 'ENS'
-                _sel_fnpaths = sel_files_by_ftime[ftime]['filename_path'].values
+                _sel_fnpaths = sel_files_by_ftime['filename_path'].values
                 wofs_preds = xr.open_mfdataset(_sel_fnpaths, concat_dim=concat_dim,
                                                combine='nested', coords='minimal',
                                                decode_times=False)
@@ -1069,28 +1140,32 @@ if "__main__" == __name__:
                 wofs_preds.drop_vars('Time')
 
                 print(f'[{r:2d}, {rdate}]({i:2d}) {f:2d} / {n_3hrs}', itime, ftime, dtime)
-                if sel_files_by_ftime[ftime].shape[0] != 18: 
-                    print("ENS LOW", sel_files_by_ftime[ftime].shape)
+                if sel_files_by_ftime.shape[0] != 18: 
+                    print("ENS LOW", sel_files_by_ftime.shape)
                     of_interest.append(f'{rdate} | {itime} | {ftime} | {dtime}')
                 if args.dry_run:
-                    print(sel_files_by_ftime[ftime].shape)
-                    print(sel_files_by_ftime[ftime]['filename_path'].values)
+                    print(sel_files_by_ftime.shape)
+                    print(sel_files_by_ftime['filename_path'].values)
 
                 # COMPUTE MEAN/MEDIAN
                 if args.stat == 'mean':
                     # Use [0] to remove the singleton dimension. analogous to using np.squeeze
-                    wofs_prob[ftime] = wofs_preds['ML_PREDICTED_TOR'].mean(dim=concat_dim).values[0]
+                    y_preds = wofs_preds['ML_PREDICTED_TOR'].mean(dim=concat_dim).values[0]
                     if args.uh_compute:
                         wofs_cZH[ftime] = wofs_preds['COMPOSITE_REFL_10CM'].mean(dim=concat_dim).values[0]
-                        wofs_uh[ftime] = wofs_preds['UP_HELI_MAX'].mean(dim=concat_dim).values[0]
+                        y_uh = wofs_preds['UP_HELI_MAX'].mean(dim=concat_dim).values[0]
+
                 elif args.stat == 'median':
-                    wofs_prob[ftime] = wofs_preds['ML_PREDICTED_TOR'].median(dim=concat_dim).values[0]
+                    y_preds = wofs_preds['ML_PREDICTED_TOR'].median(dim=concat_dim).values[0]
                     if args.uh_compute:
                         wofs_cZH[ftime] = wofs_preds['COMPOSITE_REFL_10CM'].median(dim=concat_dim).values[0]
-                        wofs_uh[ftime] = wofs_preds['UP_HELI_MAX'].median(dim=concat_dim).values[0]
+                        y_uh = wofs_preds['UP_HELI_MAX'].median(dim=concat_dim).values[0]
+                        
                 elif args.stat == 'agg':
                     pass
                     # TODO (maybe): aggregate over all
+                
+                shape = y_preds.shape
             
                 # CREATE STORM MASK for the given forecast time, distance thres, and time thres
                 # Extract lat/lon once per day or init time instead
@@ -1098,24 +1173,21 @@ if "__main__" == __name__:
                 xlats = np.squeeze(wofs_preds['XLAT'].values)
                 xlons = np.squeeze(wofs_preds['XLONG'].values)
 
-                masks[ftime], sel_storms, kdtree = create_storm_mask(xlats, xlons, dtime, 
-                                                                    lats_storm, lons_storm, 
-                                                                    times_storms, 
-                                                                    args.gridsize, 
-                                                                    thres_dist=args.thres_dist, 
-                                                                    thres_time=args.thres_time, 
-                                                                    kdworkers=-1)#, times_storms_end=times_storms_end)
-                npos = np.count_nonzero(masks[ftime])
+                y_storm, sel_storms, kdtree = create_storm_mask(xlats, xlons, dtime, 
+                                                              lats_storm, lons_storm, 
+                                                              times_storms, 
+                                                              args.gridsize, 
+                                                              thres_dist=args.thres_dist, 
+                                                              thres_time=args.thres_time, 
+                                                              kdworkers=-1)
+                
+                npos = np.count_nonzero(y_storm)
                 if npos == 0: 
-                    #{rdate} | {itime}
                     print(f"No tornados at {itime} {ftime} or within the WoFS Domain. npos={npos}")
                     if args.skip_cleartime: continue
 
                 # COMPUTE PERFORMANCE
-                #if np.all(~masks[ftime])
-                shape = wofs_prob[ftime].shape
-
-                y_storm = masks[ftime] #"ground truth"
+                #y_storm = masks #"ground truth"
                 _npos = np.count_nonzero(y_storm)
                 _nneg = np.count_nonzero(~y_storm)
                 print(f"pos: {_npos}  neg: {_nneg}; total: {_npos + _nneg}")
@@ -1123,18 +1195,19 @@ if "__main__" == __name__:
                     classes, counts = np.unique(y_storm, return_counts=True)
                     print("Storm Counts", classes, ":", counts)
 
-                y_preds = wofs_prob[ftime] 
+                #y_preds = wofs_prob[ftime] 
 
                 # Dilate
                 if args.ml_probabs_dilation > 0:
                     ksize = args.ml_probabs_dilation
-                    y_preds = grey_dilation(wofs_prob[ftime], footprint=footprint) #, size=(ksize, ksize)
+                    y_preds = grey_dilation(y_preds, footprint=footprint) 
                 if args.ml_probabs_norm:
-                    y_preds = normalize(y_preds.reshape(-1, 1), norm='max', axis=0).reshape(shape)
+                    y_preds = normalize(y_preds.reshape(-1, 1), norm='max', 
+                                        axis=0).reshape(shape)
 
                 # Max probability over time
-                if f == 0: prob_max = y_preds
-                else: prob_max = np.nanmax(np.stack([y_preds, prob_max], axis=0), axis=0)
+                #if f == 0: prob_max = y_preds
+                #else: prob_max = np.nanmax(np.stack([y_preds, prob_max], axis=0), axis=0)
 
                 # Calculate performance ML
                 tps, fps, fns, tns = contingency_curves(y_storm.ravel(), y_preds.ravel(), csithreshs.tolist())
@@ -1146,23 +1219,26 @@ if "__main__" == __name__:
                 results['nneg'][f] += _nneg
 
                 q = np.random.rand(1)
-                if q > .9:
+                if q > q_thres:
+                    obs_distr = np.append(obs_distr, y_storm.ravel())
                     prob_distr = np.append(prob_distr, y_preds.ravel())
 
                 # UH
                 if args.uh_compute:
-                    y_uh = wofs_uh[ftime]
+                    #y_uh = wofs_uh[ftime]
 
                     # Dilate
                     if args.ml_probabs_dilation > 0:
                         ksize = args.ml_probabs_dilation
-                        y_uh = grey_dilation(wofs_uh[ftime], footprint=footprint) #, size=(ksize, ksize)
+                        y_uh = grey_dilation(y_uh, footprint=footprint) 
                     if args.ml_probabs_norm:
                         y_uh = normalize(y_uh.reshape(-1, 1), norm='max', axis=0).reshape(shape)
 
                     # Max UH over time
-                    if f == 0: uh_max = y_uh
-                    else: uh_max = np.nanmax(np.stack([y_uh, uh_max], axis=0), axis=0)
+                    #if f == 0: uh_max = y_uh
+                    #else: uh_max = np.nanmax(np.stack([y_uh, uh_max], axis=0), axis=0)
+                    if q > q_thres:
+                        uh_distr = np.append(uh_distr, y_uh.ravel())
 
                     _res = compute_performance(y_storm, y_uh, uhthreshs)
                     results_uh['tps'][f] += _res['tps']
@@ -1174,7 +1250,8 @@ if "__main__" == __name__:
 
 
     if args.write:
-        fn_suffix = f'_{fslice.start:02d}_{fslice.stop:02d}slice'
+        # Construct file name prefix and suffix
+        fn_suffix = '_00_36slice' if nf == 1 else  f'_{fslice.start:02d}_{fslice.stop:02d}slice'
         legend_txt = ''
         if args.ml_probabs_dilation: 
             fn_suffix += '_dilated'
@@ -1191,8 +1268,9 @@ if "__main__" == __name__:
             args.year = rdate
         if args.model_name != '': prefix += f'{args.model_name}_'
 
-        figsize = (15, 10)
-        fig, axs = plt.subplots(2, 3, figsize=figsize)
+        # Set up figure
+        figsize = (15, 15)
+        fig, axs = plt.subplots(3, 2, figsize=figsize)
         axs = axs.ravel()
         title = rf'Radius {args.thres_dist}km Time $\pm$ {args.thres_time}min'
         fig.suptitle(title)
@@ -1208,6 +1286,7 @@ if "__main__" == __name__:
 
         #far = 1 - srs_agg
         fpr = fps / (fps + tns)
+        fnr = fns / (fns + tps)
         f1 = 2 * tps / (2 * tps + fps + fns)
         acc = (tps + tns) / (tps + fps + fns + tns)
 
@@ -1222,44 +1301,56 @@ if "__main__" == __name__:
         if args.dry_run: print(f"Saving {fname}")
         pd.DataFrame({'thres': csithreshs, 'tps': tps, 'fps': fps, 'fns': fns, 
                       'tns': tns, 'srs': srs_agg, 'pods': pods_agg, 'csis': csis_agg,
-                      'fpr': fpr, 'f1': f1}).to_csv(fname, header=True)
+                      'fpr': fpr, 'fnr': fnr, 'acc': acc, 'f1': f1}).to_csv(fname, header=True)
 
 
         
         fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_diagrams_{args.stat}{fn_suffix}.png')
 
         # CSI Performance Diagram
-        #fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_diagram_{args.stat}{fn_suffix}.png')
-        _figax = plot_csi(masks[ftime].ravel(), prob_max.ravel(), #wofs_prob[ftime].ravel(), 
+        _figax = plot_csi(obs_distr, prob_distr, #masks[ftime].ravel(), prob_max.ravel() #wofs_prob[ftime].ravel(), 
                          fname, threshs=csithreshs, 
                          label=f'ML Probabilities {legend_txt}', color='blue', 
-                         save=False, srs_pods_csis=(srs_agg, pods_agg, csis_agg),
-                         return_scores=False, fig_ax=(fig, axs[2]), figsize=figsize)
-        #cb = fig.colorbar(axs[2].collections[-1], ax=axs[2])
-        #cb = axs[2].collections[0].colorbar
+                         save=False, srs_pods_csis=(srs_agg, pods_agg, csis_agg, pos_rate),
+                         return_scores=False, fig_ax=(fig, axs[1]))
+        #cb = fig.colorbar(axs[1].collections[-1], ax=axs[1])
+        #cb = axs[1].collections[0].colorbar
 
         # ROC Curve
-        #fname = os.path.join(args.out_dir, f'{prefix}{args.year}_roc_{args.stat}{fn_suffix}.png')
-        _figax = plot_roc(masks[ftime].ravel(), prob_max.ravel(), fname, 
+        _figax = plot_roc(obs_distr, prob_distr, fname, 
                            tpr_fpr=(pods_agg, fpr), fig_ax=(fig, axs[0]), 
-                           figsize=figsize, save=False)
+                           save=False) #figsize=figsize, 
 
-        # PRC
-        #fname = os.path.join(args.out_dir, f'{prefix}{args.year}_prc_{args.stat}{fn_suffix}.png')
-        _figax = plot_prc(masks[ftime].ravel(), prob_max.ravel(), fname, 
-                           pre_rec_posrate=(srs_agg, pods_agg, pos_rate), draw_ann=2,
-                           fig_ax=(fig, axs[1]), figsize=figsize, save=False)
+        '''# PRC
+        _figax = plot_prc(obs_distr, prob_distr, fname, 
+                           pre_rec_posrate=(srs_agg, pods_agg, pos_rate), 
+                           draw_ann=2, fig_ax=(fig, axs[2]), save=False)
+        '''
+
+        # DET Curve
+        _figax = det_curve(obs_distr, prob_distr, fpr_fnr=(fpr, fnr), 
+                           figax=(fig, axs[2]))
+
+        # Calibration Diagram
+        fig, ax = plot_reliabilty_curve(obs_distr, prob_distr, fname, save=False, 
+                                        fig_ax=(fig, axs[3]), strategy='uniform')
         
-        axs[3].plot(fpr, acc)
-        axs[3].set(xlabel='FPR', ylabel='Accuracy')
-        axs[3].set(xlim=[0, 1], ylim=[0, 1])
-        axs[3].grid()
+        axs[4].plot(fpr, acc)
+        axs[4].set(xlabel='FPR', ylabel='Accuracy')
+        axs[4].set(xlim=[0, 1], ylim=[0, 1])
+        axs[4].set_aspect('equal')
+        axs[4].grid()
         
-        axs[5].hist(prob_distr, bins=51, density=True)
+        from seaborn import histplot
+        #Y = {'Train': y_preds, 'Val': y_preds_val}
+        histplot(data=prob_distr, stat='probability', kde=True, #legend=True, 
+                 log_scale=(False, True), alpha=.8, ax=axs[5]) #, common_norm=False)
+        #axs[5].hist(prob_distr, bins=51, density=False)
         axs[5].set(title='ML Probability Distribution', xlabel='ML Probability')
-        axs[5].set_xlim([0, .5])
+        axs[5].set_ylabel('Log Probability')
+        #axs[5].set_yscale('log')
+        axs[5].set_xlim([0, 1])
 
-        plt.subplots_adjust(wspace=.05, hspace=.25)
         '''
         # Extract positions of square and above axes
         p1 = axs[1].get_position()
@@ -1272,12 +1363,8 @@ if "__main__" == __name__:
         print("Saving plots")
         print(fname)
         #fig.tight_layout(pad=1.5)
+        plt.subplots_adjust(wspace=.18, hspace=.35)
         plt.savefig(fname, dpi=160, bbox_inches='tight')
-
-        # TODO: Calibration Diagram
-        '''fname = os.path.join(args.out_dir, f'{prefix}{args.year}_calibration_curve_{args.stat}{fn_suffix}.png')
-        fig, ax = plot_reliabilty_curve(masks[ftime].ravel(), prob_max.ravel(),  
-                                        fname, save=True, strategy='uniform')'''
         
         # UH
         if args.uh_compute:
@@ -1290,17 +1377,24 @@ if "__main__" == __name__:
             pods_agg = np.nan_to_num(compute_pod(tps, fns))
             csis_agg = np.nan_to_num(compute_csi(tps, fns, fps))
 
+            fpr = fps / (fps + tns)
+            fnr = fns / (fns + tps)
+            f1 = 2 * tps / (2 * tps + fps + fns)
+            acc = (tps + tns) / (tps + fps + fns + tns)
+
             fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_results_{args.stat}{fn_suffix}_uh.csv') 
             if args.dry_run: print(f"Saving {fname}")
             pd.DataFrame({'thres': uhthreshs, 'tps': tps, 'fps': fps, 'fns': fns, 
-                          'tns': tns, 'srs': srs_agg, 'pods': pods_agg, 'csis': csis_agg}).to_csv(fname, header=True)
+                          'tns': tns, 'srs': srs_agg, 'pods': pods_agg, 'csis': csis_agg,
+                          'fpr': fpr, 'fnr': fnr, 'acc': acc, 'f1': f1}).to_csv(fname, header=True)
 
-            print("**", np.nanquantile(uh_max, [0, 1]))
+            print("uh max quantiles", np.nanquantile(uh_distr, [0, 1]))
             fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_diagram_{args.stat}{fn_suffix}_uh.png')
-            figax = plot_csi(masks[ftime].ravel(), uh_max.ravel(), #wofs_uh[ftime].ravel()
+            figax = plot_csi(obs_distr, uh_distr, 
                             fname, threshs=uhthreshs, label=f'UH {legend_txt}', 
-                            color='blue', save=True, srs_pods_csis=(srs_agg, pods_agg, csis_agg), 
-                            return_scores=False, fig_ax=None, figsize=figsize)
+                            color='blue', save=True, 
+                            srs_pods_csis=(srs_agg, pods_agg, csis_agg, pos_rate), 
+                            return_scores=False, fig_ax=None, figsize=(10, 6), tight=False)
 
         print(of_interest)
 

@@ -49,7 +49,7 @@ matplotlib.rc('font', **font)
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 
-from sklearn.metrics import confusion_matrix, roc_curve, precision_recall_curve
+from sklearn.metrics import confusion_matrix, roc_curve, precision_recall_curve, auc
 from sklearn.calibration import calibration_curve
 
 import tensorflow as tf
@@ -1378,7 +1378,8 @@ def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None,
     return fig, ax
 
 def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10), 
-             save=False, dpi=160, **kwargs):
+             save=False, dpi=160, DB=False, plot_ann=False, return_scores=True, 
+             **kwargs):
     '''
     Plot the Reciever Operating Characteristic (ROC) Curve
     @param y: true output
@@ -1390,6 +1391,10 @@ def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10),
     @param figsize: tuple with the width and height of the figure
     @param save: bool flag whether to save the figure
     @param dpi: integer resolution of the saved figure in dots per inch
+    @param plot_ann: bool or int. include plot annotations
+            1: show no skill line
+            2: show AUC and max CSI value
+            3: show all
     @param **kwargs: additional keyword arguments from Axes.plot()
     @return: tuple with the fig and axes objects
     '''
@@ -1407,13 +1412,29 @@ def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10),
     else: 
         fpr, tpr, _ = roc_curve(y, y_preds)
 
-    ax.plot(fpr, tpr, linewidth=2, **kwargs)
-    ax.plot([0, 1], [0, 1], '--', label='No skill')
-    #ax.plot(100*fp, 100*tp, label=name, linewidth=2, **kwargs)
+    # AUC
+    _auc = auc(fpr, tpr)
+    if DB: print("AUC", _auc)
+
+    ax.plot(fpr, tpr, linewidth=3, **kwargs)
+    if plot_ann in [1, 3]: ax.plot([0, 1], [0, 1], '--', label='No skill')
+
+    # Max PSS = TPR - FPR
+    pss = tpr - fpr
+    imax = np.nanargmax(pss)
+    fmax = fpr[imax]
+    tmax = tpr[imax]
+
+    plt1 = ax.plot(fmax, tmax, '*', c='r', ms=15, label='Max PSS')
+    if plot_ann in [2, 3]:
+        text = f'{pss[imax]:.02f}'
+        ax.text(fmax-0.12, tmax-0.05, text, fontsize=18, color='k')
+        ax.annotate(f"AUC = {_auc:0.2f}", xy=(.55, .05), fontsize=18, color='k')
+
     ax.set(xlabel='FPR', ylabel='TPR')
     ax.set(xlim=[0, 1], ylim=[0, 1])
     ax.grid(True)
-    ax.legend()
+    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.01))
     ax.set_aspect('equal')
 
     if save:
@@ -1421,10 +1442,12 @@ def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10),
         print(fname)
         plt.savefig(fname, dpi=dpi)
 
+    if return_scores:
+        return fig, ax, {'tpr': tpr, 'fpr': fpr, 'pss': pss, 'auc': _auc}
     return fig, ax
 
-def plot_prc(y, y_preds, fname, pre_rec_posrate=None, fig_ax=None, figsize=(10, 10), 
-             save=False, dpi=160, draw_ann=1, **kwargs):
+def plot_prc(y, y_preds, fname, pre_rec_posrate=None, fig_ax=None, 
+             figsize=(10, 10), save=False, dpi=160, draw_ann=1, DB=False, **kwargs):
     '''
     Plot the Precision Recall Curve (PRC)
     @param y: true output
@@ -1458,9 +1481,13 @@ def plot_prc(y, y_preds, fname, pre_rec_posrate=None, fig_ax=None, figsize=(10, 
         precision, recall, _ = precision_recall_curve(y, y_preds)
         pos_chance_rate = np.count_nonzero(y) / y.size
 
+    # Max F1 score
+    f1 = 2 * precision * recall / (precision + recall)
+    imax = np.nanargmax(f1)
+    pmax = precision[imax]
+    rmax = recall[imax]
 
-    ax.plot(precision, recall, linewidth=2, **kwargs)
-    ax.hlines(pos_chance_rate, 0, 1, linestyles='--', #color='r', 
+    ax.hlines(pos_chance_rate, 0, 1, linewidth=3, linestyles='--', #color='r', 
               label=f'Chance ({pos_chance_rate:.02f})')
     if draw_ann in [1, 3]: ax.plot([0, 1], [1, 0], '--')
 
@@ -1471,12 +1498,25 @@ def plot_prc(y, y_preds, fname, pre_rec_posrate=None, fig_ax=None, figsize=(10, 
         for f_score in f_scores:
             y = f_score * x / (2 * x - f_score)
             ax.plot(x[y >= 0], y[y >= 0], color="gray", alpha=0.8)
-            ax.annotate(f"f1 = {f_score:0.1f}", xy=(0.85, y[45] + 0.02), fontsize=6)
+            ax.annotate(f"F1 = {f_score:0.1f}", xy=(0.85, y[45] + 0.02), fontsize=6)
+
+    ax.plot(precision, recall, linewidth=3, **kwargs)
+    plt1 = ax.plot(pmax, rmax, '*', c='r', ms=15, label='Max F1')
+    text = f'{f1[imax]:.02f}'
+    ax.text(pmax-0.12, rmax-0.05, text, fontsize=18, color='k')
+
+    keep = np.where(~np.isnan(precision))
+    _prec = precision[keep]
+    _reca = recall[keep]
+    _inds = np.argsort(_prec)
+    _auc = auc(_prec[_inds], _reca[_inds])
+    ax.annotate(f"AUC = {_auc:0.2f}", xy=(.55, .9), fontsize=18, color='k') #, transform=ax.transData) #fig.transFigure) #
+    if DB: print("AUC", _auc)
 
     ax.set(xlabel='Precision', ylabel='Recall')
     ax.set(xlim=[0, 1], ylim=[0, 1])
     ax.grid(True, color='k', alpha=.1, linewidth=2)
-    ax.legend()
+    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.01)) 
     ax.set_aspect('equal')
 
     if save:
@@ -1523,9 +1563,9 @@ def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, strategy='quantile',
     ax.plot([0, 1], linestyle='--', color='k')
     ax.set_xlabel("Observed Frequency")
     ax.set_ylabel("Predicted Probability")
+    ax.set_aspect('equal')
     ax.grid(True)
     ax.legend()
-    ax.set_aspect('equal')
     #plt.tight_layout()
 
     if save:
@@ -1566,7 +1606,11 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
         X, Y = np.meshgrid(sr_array, pod_array)
         csi_vals = csi_from_sr_and_pod(X, Y)
         pm = ax.contourf(X, Y, csi_vals, levels=np.arange(0,1.1,0.1), cmap=csi_cmap)
-        if show_cb: plt.colorbar(pm, ax=ax, label='CSI')
+        if show_cb: plt.colorbar(pm, ax=ax, label='CSI') #, shrink=1)
+        #from mpl_toolkits.axes_grid1 import make_axes_locatable;divider = make_axes_locatable(ax1); cax1 = divider.append_axes("right", size="5%", pad=0.05)
+        #https://www.geeksforgeeks.org/set-matplotlib-colorbar-size-to-match-graph/
+        #https://en.moonbooks.org/Articles/How-to-match-the-colorbar-size-with-the-figure-size-in-matpltolib-/
+        #https://stackoverflow.com/questions/18195758/set-matplotlib-colorbar-size-to-match-graph
     
     if show_fb:
         fb = frequency_bias_from_sr_and_pod(X, Y)
@@ -1583,13 +1627,14 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
 
 def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue', 
              figsize=(10, 10), save=False, dpi=160, srs_pods_csis=None, 
-             return_scores=False, pt_ann=True, **csiargs):#, **plotargs):
+             return_scores=False, pt_ann=True, tight=False, draw_ann=0, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
     The top right corner shows increasingly better predictions, and where 
     CSI = 1. (this curve is highly senstive to event freq)
     @param threshs=np.linspace(0, 1, 21)
-    @param srs_pods_csis: 3-tuple withe the lists for the SRs, PODs, and CSIs
+    @param srs_pods_csis_prate: 4-tuple withe the lists for the SRs, PODs, CSIs, 
+            positive chance rate (prate)
     @param return_scores: bool. whether to also return the scores in a dict
     @param pt_ann: bool whether to render threshold annotations
     @param csiargs: keyword args for make_csi_axis()
@@ -1606,11 +1651,16 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     pe2 = [path_effects.withStroke(linewidth=1.5, foreground="w")]
 
     # Calculate performance diagram 
+    tps = []
+    fps = []
+    fns = []
+    tns = [] 
     srs = []
     pods = []
     csis = []
+    prate = None
     if srs_pods_csis:
-        srs, pods, csis = srs_pods_csis
+        srs, pods, csis, prate = srs_pods_csis
     else:
         tps, fps, fns, tns = contingency_curves(y, y_preds, threshs.tolist())
         srs = compute_sr(tps, fps) #tps / (tps + fps)
@@ -1631,7 +1681,7 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
               srs[idx_stop-2:idx_stop], pods[idx_stop-2:idx_stop])
     '''
 
-    #Plot star of
+    # Max CSI
     xi = np.argmax(csis)
     max_csi = csis[xi]
     thres_of_maxcsi = threshs[xi]
@@ -1646,6 +1696,13 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     ax.plot(np.take(srs, _sel), np.take(pods, _sel), 's', color=color, markerfacecolor='w') 
     plt1 = ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
 
+    # Max F1 score (precision=SR; recall=POD)
+    f1 = 2 * srs * pods / (srs + pods)
+    imax = np.nanargmax(f1)
+    pmax = srs[imax]
+    rmax = pods[imax]
+    #plt1 = ax.plot(pmax, rmax, '*', c='purple', ms=10, label='Max F1')
+
     # Annotate certain points with the corresponding threshold
     if pt_ann:
         for i, t in zip(_sel, threshs[_sel]): #enumerate(threshs): #[:idx_stop]
@@ -1655,13 +1712,36 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
             ax.text(srs[i]+0.02, pods[i]+0.02, text, path_effects=pe1, fontsize=11, color='white')
             #ax.text(srs[i]+0.02, pods[i]+0.02, text, fontsize=9, color='white')
 
-    text = f'{max_csi:.02f}'
-    ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, fontsize=18, color='white')
-    print(f"Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
-    ax.legend(loc='upper left', bbox_to_anchor=(1.25, 1)) #loc='lower center' (0.5, -.35)  #[plt0, plt1],  #ax.transData
+    # Draw the chance line
+    if draw_ann in [1, 3] and prate is not None: 
+        ax.hlines(prate, 0, 1, linestyles='--', #color='r', 
+              label=f'Chance ({prate:.02f})')
+
+    # Area under the curve
+    keep = np.where(~np.isnan(srs))
+    _prec = srs[keep]
+    _reca = pods[keep]
+    _inds = np.argsort(_prec)
+    _auc = auc(_prec[_inds], _reca[_inds])
+
+    if draw_ann in [2, 3]:
+        ax.annotate(f"AUC = {_auc:0.2f}", xy=(.48, .9), fontsize=18, color='k')
+
+        text = f'Max CSI = {max_csi:.02f}'
+        ax.text(.48, .8, text, fontsize=18, color='k')
+        #ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, fontsize=18, color='white')
+        
+        text = f'Max F1 = {f1[imax]:.02f}'
+        ax.text(.48, .7, text, fontsize=18, color='k') # path_effects=pe1,
+
+        print(f"Max F1: {f1[imax]:.02f}. Pre={pmax:.03f}. Rec={rmax:.03f}")
+        print(f"Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
+        print("AUC", _auc)
+
+    ax.legend(loc='upper left', bbox_to_anchor=(1.26, 1.01)) #loc='lower center' (0.5, -.35)  #[plt0, plt1],  #ax.transData
     ax.set_aspect('equal')
 
-    #plt.tight_layout()
+    if tight: plt.tight_layout()
     if save:
         print("Saving performance (CSI) plot")
         print(fname)
@@ -1669,7 +1749,8 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
 
     if return_scores:
         return fig, ax, {'tps':tps, 'fps':fps, 'fns':fns, 'tns':tns, 'srs':srs, 
-                         'pods':pods, 'csis':csis, 'index_max_csi': xi}
+                         'pods':pods, 'csis':csis, 'index_max_csi':xi, 
+                         'f1s':f1, 'index_max_f1':imax, 'auc':_auc}
     else: return fig, ax
 
 def create_argsparser():

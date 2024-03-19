@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH -p normal  
-#SBATCH --time=48:00:00
+#SBATCH -p longjobs #  normal  #
+#SBATCH --time=72:00:00
 #SBATCH --nodes=1
 #SBATCH -n 1
 #SBATCH --mem-per-cpu=20GB
-#SBATCH --job-name=5555_dn_uh_3h_skp
+#SBATCH --job-name=55Nn_dn_uh_3h_skp
 #SBATCH --mail-user=monique.shotande@ou.edu
 #SBATCH --mail-type=FAIL,INVALID_DEPEND,REQUEUE,STAGE_OUT  #ALL
 #SBATCH --chdir=/home/momoshog/Tornado/tornado_jtti/
@@ -21,12 +21,12 @@ conda activate tf_experiments #tf_tornado #
 
 python --version
 
-#TUNER="tor_unet_sample50_50_classweightsNone_hyper"
-#DIR_PREDS="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds"
+TUNER="tor_unet_sample50_50_classweightsNone_hyper"
+DIR_PREDS="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds"
 #TUNER="tor_unet_sample50_50_classweights20_80_hyper"
-TUNER="tor_unet_sample50_50_classweights50_50_hyper"
+#TUNER="tor_unet_sample50_50_classweights50_50_hyper"
 #TUNER="tor_unet_sample90_10_classweights20_80_hyper"
-DIR_PREDS="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/$TUNER"
+#DIR_PREDS="/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/$TUNER"
 
 YEAR='2019'
 
