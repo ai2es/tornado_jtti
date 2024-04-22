@@ -44,22 +44,94 @@ Tensorflow & [keras_unet_collection](https://github.com/ai2es/keras-unet-collect
 
 # UPDATES 
 ## General Workflow
-1. pre-process GridRad data for training, validation, and testing (directory: `scripts_data_pipeline`)
-    a. generate patches
-    b. ...
-2. generate mean and standard deviation of the training data (directory: `scripts_data_pipeline`)
-3. run hyperparameter search (scripts: `scripts_tensorboard/unet_hypermodel.py` and `scripts_tensorboard/unet_hypermodel.sh`)
-4. create calibration model from GridRad training set predictions (scripts: `scripts_tensorboard/train_calibration_model.py` and `scripts_tensorboard/...sh`)
-5. generate WoFS data predictions (script: `wofs_raw_predictions.py`, `wofs_raw_predictions.sh` [for single wofs file], and `wofs_raw_predictions_array_ens.sh` [for multiple wofs files])
-    a. interpolate to GridRad domain
-    b. normalize using GridRad training set mean and standard deviation
-    c. use model to generate predictions
-    d. recalibrate predictions using calibration model
-    e. interpolate predictions to WoFS domain
-6. evaluate WoFS performance (directory: `tornado_jtti/wofs_evaluations`)
+1. pre-process GridRad data for training, validation, and testing (directory: `scripts_data_pipeline`)   
+    a. convert Ryan's storm objects and tracks into arrays and labels for the U-Nets   
+    b. generate patches   
+    c. convert to tf.Datasets   
+    d. generate mean and standard deviation of the training data   
+2. run hyperparameter search (scripts: `scripts_tensorboard/unet_hypermodel.py` and `scripts_tensorboard/unet_hypermodel.sh`)
+3. create calibration model from GridRad training set predictions (scripts: `scripts_tensorboard/train_calibration_model.py` and `scripts_tensorboard/evaluate_models.sh`)
+4. generate WoFS data predictions (script: `wofs_raw_predictions.py`, `wofs_raw_predictions.sh` [for single wofs file], and `wofs_raw_predictions_array_ens.sh` [for multiple wofs files])   
+    a. interpolate to GridRad domain   
+    b. normalize using GridRad training set mean and standard deviation   
+    c. use model to generate predictions   
+    d. recalibrate predictions using calibration model   
+    e. interpolate predictions to WoFS domain   
+5. evaluate WoFS performance (directory: `tornado_jtti/wofs_evaluations`)
+
+
+## Pre-processing GridRad Data
+Dependency: [GewitterGefahr](https://github.com/thunderhoser/GewitterGefahr) by Dr. Ryan Lagerquist   
+1) Download repo
+2) `cd` to top level GewitterGefahr directory
+3) Create conda env   
+    In the environment.yml:   
+    a) change `python` from `3.8` to `3.9`   
+    b) change `numpy` from `=1.18.*` to just `numpy`.   
+    Then execute `conda env create -f environment.yml`   
+    There is an issue with the pandas.errors module. So it was easiest to just 
+    upgrade all the modules to resolve the conflicts.
+4) Activate the environment `conda activate gewitter`
+5) Install gewittergefahr with `pip install .`
+6) You can verify the GewitterGefahr install by running the pytests `pytest`. 
+    All tests should pass, but you will see warnings
+
+### PART A
+Using scripts by Ryan and modified by Randy in `tornado_jtti/scripts/process_gridrad_scripts`. 
+Steps 1 through 6 are the relevant steps. In particular,    
+* <ins>Step 1</ins>: /ourdisk/hpc/ai2es/tornado/gridrad_gridded_V2/    
+            (old /ourdisk/hpc/ai2es/tornado/gridrad_gridded/)   
+* <ins>Step 4</ins>: /ourdisk/hpc/ai2es/tornado/final_tracking_V2/   
+            (old /ourdisk/hpc/ai2es/tornado/final_tracking/)   
+* <ins>Step 6</ins>: /ourdisk/hpc/ai2es/tornado/linked_V2/   
+            (old /ourdisk/hpc/ai2es/tornado/linked/)   
+
+These steps produce the relevant data required for PART B of the pre-processing 
+that is performed by Lydia's scripts under `tornado_jtti/lydia_scripts/scripts_data_pipeline`.
+
+### PART B
+    1) Convert the storm objects and tracks into arrays and labels
+       unet_linking.py
+       unet_linking.sh
+       input:
+            linked_tornado_dir=/ourdisk/hpc/ai2es/tornado/linked_V2/
+            tracking_dir=/ourdisk/hpc/ai2es/tornado/final_tracking_V2/
+            radar_dir=/ourdisk/hpc/ai2es/tornado/gridrad_gridded_V2/
+       output:
+            out_labeled_storm_dir=/ourdisk/hpc/ai2es/tornado/labels_unet_V2/   
+            (old /ourdisk/hpc/ai2es/tornado/labels_unet/)  
+            out_storm_mask_dir=/ourdisk/hpc/ai2es/tornado/storm_mask_unet_V2/   
+            (old /ourdisk/hpc/ai2es/tornado/storm_mask_unet/)
+
+    2) patching.py
+       patching.sh
+       input:
+            spc_date_index=$SLURM_ARRAY_TASK_ID
+            radar_dir=/ourdisk/hpc/ai2es/tornado/gridrad_gridded_V2/
+            storm_mask_dir=/ourdisk/hpc/ai2es/tornado/storm_mask_unet_V2/
+       output:
+            patch_dir=/ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D/ 
+            (old /ourdisk/hpc/ai2es/tornado/learning_patches/xarray/3D/)
+
+    3) save_light_model_patches.py
+       save_light_model_patches.sh
+       input:
+            /ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D/size_32/forecast_window_5/
+       output:
+            /ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D_light/size_32/forecast_window_5/
+
+    4) Create tf.Dataset files for the the data
+       save_tensorflow_datasets_ZH_only.py
+       save_tensorflow_datasets_ZH_only.sh
+       input:
+            /ourdisk/hpc/ai2es/tornado/learning_patches_V2/xarray/3D_light/size_32/forecast_window_5/
+            (metadata) /ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/training_int_nontor_tor/training_metadata_ZH_only.nc
+       output:
+            /ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/
+
 
 ## Running Hyperparameter Search
-Run hyperparameter search using GridRad training and validation data sets. 
+Run hyperparameter search using GridRad training and validation tf.Datasets. 
 Various Keras Tuners are available for use. I (Monique) used Hyperband   
 
 Executing code:   
@@ -68,7 +140,7 @@ Executing code:
 * Test Script: `scripts_tensorboard/unet_hypermodel_test.py`   
 * Batch Script: `scripts_tensorboard/unet_hypermodel.sh`   
 
-For details on command line arguments, execute `unet_hypermodel.py -h`.   
+For details on command line arguments, execute `unet_hypermodel.py --h`.   
 
 Input GridRad data locations:   
 These data sets are created using the scripts in the `scripts_data_pipeline` directory. 
@@ -77,20 +149,20 @@ These data sets are created using the scripts in the `scripts_data_pipeline` dir
 * (test set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf`
 
 Hyperparameter search results location:   
-Models, training and validation performance figures and results csv files are saved.
+Models, training and validation performance figures and results csv files are saved:
 * `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning`
 
 
 ## Create Calibration Model
 Train calibration models for a U-Net using the GridRad predictions from the 
-training set. Calibration models are learning using isotonic or linear regression.
+training set. Calibration models are learned using isotonic or linear regression.
 
 Executing code:   
 * Directory: `scripts_tensorboard`   
 * Python Scripts: `scripts_tensorboard/train_calibration_model.py`  
 * Batch Scripts: `scripts_tensorboard/evaluate_models.sh`
 
-For details on command line arguments, execute `train_calibration_model.py -h`. 
+For details on command line arguments, execute `train_calibration_model.py --h`. 
 
 Input GridRad data locations:
 * (Training set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf`
@@ -114,7 +186,7 @@ Executing code:
     - (for single WoFS prediction file) `lydia_scripts/wofs_raw_predictions.sh` 
     - (for multiple WoFS prediction files) `lydia_scripts/wofs_raw_predictions_array_ens.sh` 
 
-For details on command line arguments, execute `wofs_raw_predictions.py -h`.  
+For details on command line arguments, execute `wofs_raw_predictions.py --h`.  
 Additional WoFS data fields can be extracted along with the WoFS predictions and 
 can be selected via a space delimited list in the command line. Common fields:    
 * U 
@@ -137,11 +209,33 @@ The current top models can be found under:
     - `tor_unet_sample90_10_classweights20_80_hyper/`
     - `tor_unet_sample50_50_classweights50_50_hyper/`
 
+Input raw WoFS data location: 
+* `/ourdisk/hpc/ai2es/wofs`   
+* Command line argument is `--loc_wofs`
+
+Input models location: 
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/`
+* Command line argument is `--loc_model`   
+
+Input calibration models location: 
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/`
+* Command line argument is `--loc_model_calib`   
+
+Input GridRad normalization stats (training mean and STD): 
+* `/ourdisk/hpc/ai2es/tornado/learning_patches/tensorflow/3D_light/training_int_nontor_tor/training_metadata_ZH_only.nc`
+* Command line argument is `--file_trainset_stats`.   
+
+Output WoFS prediction locations:
+* (50/50 Sample model predictions) `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/`
+* (all other models) `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/`
+
 Example model: `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tor_unet_sample50_50_classweightsNone_hyper/2023_07_20_20_55_39_hp_model00.h5`   
 Corresponding calibration model (as a python pickle file): `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/calibraion_model_iso_v00.pkl`
 
+
 ## Evaluate WoFS Performance
-Evaluate performance of the models from the WoFS predictions. 
+Evaluate performance of the models from the WoFS predictions. Can specify time 
+windows and neighborhood radii.   
 
 Executing code:   
 * Directory: `wofs_evaluations`   
@@ -150,4 +244,18 @@ Executing code:
     - (generate figures comparing multiple models) `wofs_evaluations/wofs_performance_plots.py`   
 * Batch Scripts: `wofs_evaluations/wofs_raw_predictions.sh`
 
-For details on command line arguments, execute `wofs_raw_predictions.py -h`.  
+For details on command line arguments, execute `wofs_raw_predictions.py --h`.  
+
+Input WoFS predictions:
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/`    
+    OR   
+    `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/`
+* Command line arg `--dir_wofs_preds`  
+
+Input storm reports used: 
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/tornado_reports/tornado_reports_${YEAR}_spring.csv`
+* Command line arg `--loc_storm_report` 
+
+Output performance results:
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/`
+* Command line arg `--out_dir`
