@@ -2,6 +2,7 @@
 author: Monique Shotande
 
 Read performance results from multiple csv files and plot them in the same figure
+Compare model configurations and lead times
 """
 
 import re, os, sys, errno, glob, argparse
@@ -29,7 +30,6 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 plt.rcParams.update({"text.usetex": True})
 #https://matplotlib.org/stable/tutorials/introductory/customizing.html
-plt.rcParams.update({"text.usetex": True})
 mpl.rcParams['font.size'] = 18 # default font size
 mpl.rcParams['axes.labelsize'] = 18
 #mpl.rcParams['axes.labelpad'] = 5
@@ -61,6 +61,9 @@ def create_argsparser(args_list=None):
     parser.add_argument('--files_wofs_eval_results', type=str, nargs='*', required=True, 
         help='List of results files to read')
 
+    parser.add_argument('--in_dir', type=str, required=True, 
+        help='Directory containing results directories to read results files from')
+    
     parser.add_argument('--out_dir', type=str, required=True, 
         help='Directory to store the results. By default, stored in loc_init directory')
 
@@ -107,24 +110,17 @@ def parse_args(args_list=None):
 
 
 if "__main__" == __name__:
-    # TODO: ML lead times 0-20, 20-60, 60-90, 90-180 (dialated)
-    # TODO: UH lead times 0-20, 20-60, 60-90, 90-180 (dialated)
-    # TODO: ML, UH, ML (dialated), UH (dialated) 3hrs
-    # TODO: mean different models ML (dialated)
-    # TODO: mean different models UH (dialated)
-    # TODO: median different models ML (dialated)
-    # TODO: median different models UH (dialated)
-
     args_list = ['', 
                  '--files_wofs_eval_results', '',
                  #'/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/tor_unet_sample90_10_classweights20_80_hyper/2019_performance_results_mean_00_36slice.csv', 
+                 '--in_dir', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/',
                  '--out_dir', './wofs_evaluations/_test_wofs_eval', 
                  '--legend_txt', 'lgd_txt', 
                  '--ax_title', 'ax_title', 
                  '--stat', 'mean', 
                  '--dilate',
                  #'--uh',
-                 #'--leadtimes',
+                 '--leadtimes',
                  '--skip_clearday',
                  #'--model_name', '',
                  '-w', '1', '--dry_run'] 
@@ -133,27 +129,25 @@ if "__main__" == __name__:
     #https://matplotlib.org/stable/users/explain/artists/transforms_tutorial.html
     #bbox_transform=ax.transAxes
 
-    dir_results = '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/'
+    dir_results = args.in_dir #'/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/'
     dirs = ['tor_unet_sample50_50_classweightsNone_hyper',
             'tor_unet_sample50_50_classweights50_50_hyper',
             'tor_unet_sample50_50_classweights20_80_hyper',
             'tor_unet_sample90_10_classweights20_80_hyper']
+    
     tuners = ['tor_unet_sample50_50_classweightsNone_hyper', 
               'tor_unet_sample50_50_classweights50_50_hyper',
               'tor_unet_sample50_50_classweights20_80_hyper',
               'tor_unet_sample90_10_classweights20_80_hyper',
               'uh']
+    
     tuners_legendtxt = ['Sampling: 50/50 \nClass Weighting: None', 
               'Sampling: 50/50 \nClass Weighting: 50/50',
               'Sampling: 50/50 \nClass Weighting: 20/80',
               'Sampling: 90/10 \nClass Weighting: 20/80',
               'UH']
     leadtimes = ['0-20min', '20-60min', '60-90min', '90-180min']
-    legend_txts = tuners_legendtxt #[1:]
-
-    prefix = ''
-    if args.dry_run:
-        prefix = '_test_'
+    legend_txts = tuners_legendtxt
 
     #'2019_performance_results_mean_00_36slice_dilated_uh.csv'
     #fn_lists = args.files_wofs_eval_results
@@ -166,21 +160,24 @@ if "__main__" == __name__:
     fn_lists += [fn_uh]
     
 
+    i_model = 3
+    _model = 'uh' if args.uh  else dirs[i_model]
     if args.leadtimes:
         fns = [f'2019_performance_results_{args.stat}_00_05slice{suffix}.csv', #min00_20 
                f'2019_performance_results_{args.stat}_05_13slice{suffix}.csv', #min20_60 
                f'2019_performance_results_{args.stat}_13_19slice{suffix}.csv', #min60_90 
-               f'2019_performance_results_{args.stat}_19_36slice{suffix}.csv', #min90_180
+               f'2019_performance_results_{args.stat}_19_37slice{suffix}.csv', #min90_180
                f'2019_performance_results_{args.stat}_00_36slice{suffix}.csv']
-        '''
-        fns = [f'2019_performance_results_{args.stat}_05_12slice{suffix}.csv', #min20_60 
-            f'2019_performance_results_{args.stat}_12_18slice{suffix}.csv', #min60_90 
-            f'2019_performance_results_{args.stat}_18_36slice{suffix}.csv'] #min90_180
-        '''
-        fn_lists = [os.path.join(dirs[0], f) for f in fns[:-1]] 
+
+        fn_lists = [os.path.join(dir_results, dirs[i_model], f'{dirs[i_model]}_{f}') for f in fns[:-1]] 
         suffix += '_leadtimes'
         legend_txts = leadtimes
 
+    prefix = ''
+    if args.dry_run:
+        prefix = '_test_'
+    if args.leadtimes:
+        prefix += f'{_model}_'
 
     fname = os.path.join(args.out_dir, f'{prefix}2019_performance_diagram_multiple_{args.stat}{suffix}.png')
     fname_zoom = os.path.join(args.out_dir, f'{prefix}2019_performance_diagram_multiple_{args.stat}{suffix}_zoomin.png')
@@ -194,6 +191,8 @@ if "__main__" == __name__:
 
     nfiles = len(fn_lists)
     columns = ['model', 'csi_max', 'pod_max', 'sr_max', 'f1_max', 'auc', 'auc_prc']
+    if args.leadtimes:
+        columns = ['leadtime'] + columns
     ncols = len(columns)
     model_scores = np.empty((nfiles, ncols), dtype=object)
 
@@ -243,7 +242,10 @@ if "__main__" == __name__:
                  save=False, return_scores=True, **kwargs)
         
         auc_roc = scores['auc']
-        model_scores[f] = [tuners[f], csi_max, pod_max, sr_max, f1_max, auc_roc, auc]
+        if args.leadtimes:
+            model_scores[f] = [legend_txts[f], _model, csi_max, pod_max, sr_max, f1_max, auc_roc, auc]
+        else:
+            model_scores[f] = [tuners[f], csi_max, pod_max, sr_max, f1_max, auc_roc, auc]
 
         # Detection error tradeoff (DET) curve
         det_curve(tps, tns, fpr_fnr=(fpr, fnr), figax=(fig, axs[2]))
