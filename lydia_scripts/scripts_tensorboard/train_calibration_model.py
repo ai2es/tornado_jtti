@@ -6,7 +6,7 @@ Train a regression model to calibration U-Net model predictions
 See create_argparser method for command line arguments
 
 1. Loads or builds_then_fits hypermodel
-2. Generate predictions for rain, val, and test sets
+2. Generate predictions for train, val, and test sets
 3. Fit calibration model on train set
 
 """

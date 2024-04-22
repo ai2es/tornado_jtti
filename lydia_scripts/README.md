@@ -42,11 +42,112 @@ Tensorflow & [keras_unet_collection](https://github.com/ai2es/keras-unet-collect
 
 
 
-UPDATES REGARDING WOFS PREDICTIONS:   
-To generate WoFS predictions using an ML model with or without a calibration model, use `wofs_raw_predictions.py`.   
-Example use case with command line arguments is in `wofs_raw_predictions.sh`.   
-Additional WoFS fields are extracted along with the predictions and can be selected via the command line:   
-`U V W WSPD10MAX W_UP_MAX P PB PH PHB HGT`. (NOTE: `P PB PH PHB HGT` are REQUIRED for WoFS interpolation to the GridRad grid).   
-Current top model: /ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tor_unet_sample50_50_classweightsNone_hyper/2023_07_20_20_55_39_hp_model00.h5   
-Current calibration model (python pickle files): /ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/calibraion_model_iso_v00.pkl
+# UPDATES 
+## General Workflow
+1. pre-process GridRad data for training, validation, and testing (directory: `scripts_data_pipeline`)
+    a. generate patches
+    b. ...
+2. generate mean and standard deviation of the training data (directory: `scripts_data_pipeline`)
+3. run hyperparameter search (scripts: `scripts_tensorboard/unet_hypermodel.py` and `scripts_tensorboard/unet_hypermodel.sh`)
+4. create calibration model from GridRad training set predictions (scripts: `scripts_tensorboard/train_calibration_model.py` and `scripts_tensorboard/...sh`)
+5. generate WoFS data predictions (script: `wofs_raw_predictions.py`, `wofs_raw_predictions.sh` [for single wofs file], and `wofs_raw_predictions_array_ens.sh` [for multiple wofs files])
+    a. interpolate to GridRad domain
+    b. normalize using GridRad training set mean and standard deviation
+    c. use model to generate predictions
+    d. recalibrate predictions using calibration model
+    e. interpolate predictions to WoFS domain
+6. evaluate WoFS performance (directory: `tornado_jtti/wofs_evaluations`)
 
+## Running Hyperparameter Search
+Run hyperparameter search using GridRad training and validation data sets. 
+Various Keras Tuners are available for use. I (Monique) used Hyperband   
+
+Executing code:   
+* Directory: `scripts_tensorboard`   
+* Python Script: `scripts_tensorboard/unet_hypermodel.py`   
+* Test Script: `scripts_tensorboard/unet_hypermodel_test.py`   
+* Batch Script: `scripts_tensorboard/unet_hypermodel.sh`   
+
+For details on command line arguments, execute `unet_hypermodel.py -h`.   
+
+Input GridRad data locations:   
+These data sets are created using the scripts in the `scripts_data_pipeline` directory. 
+* (training set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf`
+* (validation set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only.tf`
+* (test set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf`
+
+Hyperparameter search results location:   
+Models, training and validation performance figures and results csv files are saved.
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning`
+
+
+## Create Calibration Model
+Train calibration models for a U-Net using the GridRad predictions from the 
+training set. Calibration models are learning using isotonic or linear regression.
+
+Executing code:   
+* Directory: `scripts_tensorboard`   
+* Python Scripts: `scripts_tensorboard/train_calibration_model.py`  
+* Batch Scripts: `scripts_tensorboard/evaluate_models.sh`
+
+For details on command line arguments, execute `train_calibration_model.py -h`. 
+
+Input GridRad data locations:
+* (Training set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/train_int_nontor_tor/train_ZH_only.tf`
+* (Validation set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/val_int_nontor_tor/val_ZH_only.tf`
+* (Test set) `/ourdisk/hpc/ai2es/tornado/learning_patches_V2/tensorflow/3D_light/test_int_nontor_tor/test_ZH_only.tf`   
+
+UNet models location: `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/`
+
+Output GridRad calibration results location: `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/`. Contains calibration model as python pickle file,
+and figures for reliability diagram and histograms of the prediction probabilities.
+
+
+## Generate WoFS Predictions:   
+To generate WoFS predictions using an ML model with or without a calibration 
+model, use `wofs_raw_predictions.py`. 
+
+Executing code:   
+* Directory: `lydia_scripts`   
+* Python Script: `lydia_scripts/wofs_raw_predictions.py`   
+* Batch Scripts: 
+    - (for single WoFS prediction file) `lydia_scripts/wofs_raw_predictions.sh` 
+    - (for multiple WoFS prediction files) `lydia_scripts/wofs_raw_predictions_array_ens.sh` 
+
+For details on command line arguments, execute `wofs_raw_predictions.py -h`.  
+Additional WoFS data fields can be extracted along with the WoFS predictions and 
+can be selected via a space delimited list in the command line. Common fields:    
+* U 
+* V 
+* W
+* WSPD10MAX 
+* W_UP_MAX 
+* P 
+* PB 
+* PH 
+* PHB
+* HGT   
+
+(NOTE: `P PB PH PHB HGT` are REQUIRED for WoFS interpolation to the GridRad grid).   
+
+The current top models can be found under: 
+* `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/`
+    - `tor_unet_sample50_50_classweightsNone_hyper/`
+    - `tor_unet_sample50_50_classweights20_80_hyper/`
+    - `tor_unet_sample90_10_classweights20_80_hyper/`
+    - `tor_unet_sample50_50_classweights50_50_hyper/`
+
+Example model: `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning/tor_unet_sample50_50_classweightsNone_hyper/2023_07_20_20_55_39_hp_model00.h5`   
+Corresponding calibration model (as a python pickle file): `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds/calibraion_model_iso_v00.pkl`
+
+## Evaluate WoFS Performance
+Evaluate performance of the models from the WoFS predictions. 
+
+Executing code:   
+* Directory: `wofs_evaluations`   
+* Python Scripts: 
+    - (generate csv files with confusion matrix) `wofs_evaluations/wofs_raw_predictions.py`  
+    - (generate figures comparing multiple models) `wofs_evaluations/wofs_performance_plots.py`   
+* Batch Scripts: `wofs_evaluations/wofs_raw_predictions.sh`
+
+For details on command line arguments, execute `wofs_raw_predictions.py -h`.  

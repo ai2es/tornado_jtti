@@ -27,8 +27,6 @@ conda activate tf #_2023_01
 # Source conda
 #source ~/.bashrc
 #bash 
-# if conda env tornado does not exist
-#conda env create --name tornado --file environment.yml
 #conda clean --all -v
 
 

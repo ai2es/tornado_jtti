@@ -1,9 +1,9 @@
 """
-author: Monique Shotande (monique . shotande a ou . edu)
+author: Monique Shotande 
 
 UNet Hyperparameter Search using keras tuners. 
-A keras_tuner.HyperModel subclass is defined as UNetHyperModel
-that defines how to build various versions of UNet models
+A keras_tuner.HyperModel subclass is defined as UNetHyperModel, that defines how 
+to build various versions of UNet models. 
 
 Expected working directory is tornado_jtti/
 
@@ -79,7 +79,6 @@ from tensorboard.plugins.hparams import summary as hp_summary
 sys.path.append("lydia_scripts")
 from custom_losses import make_fractions_skill_score
 from custom_metrics import MaxCriticalSuccessIndex
-#sys.path.append("../../../keras-unet-collection")
 sys.path.append("../keras-unet-collection")
 from keras_unet_collection import models
 
