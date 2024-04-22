@@ -10,10 +10,16 @@ Mean and median UH and ML probabilities can be computed across the
 ensembles. Results for UH can be optionally computed with the 
 argument flag, --uh_compute.
 
+Outputs performance diagram and csv files with the confusion/contingency
+matrix and other useful metrics for each selected threshold
+
+Example execution in `wofs_preds_evaluations.sh`
+
+          cooresponding index range
 min00-20 :  0,  5
-min20-60 :  5, 12
-min60-90 : 12, 18
-min90-180: 18, 36
+min20-60 :  5, 13
+min60-90 : 13, 19
+min90-180: 19, 37
 
 """
 
@@ -946,7 +952,7 @@ if "__main__" == __name__:
                  '--year', '2019', 
                  '--date0', '2019-04-28', 
                  '--date1', '2019-06-03',
-                 '--forecast_duration', '0', '5',
+                 '--forecast_duration', '5', '13',
                  '--thres_dist', '50', '--thres_time', '20', '--stat', 'mean', 
                  '--nthresholds', '51', '--ml_probabs_dilation', '33', 
                  #'--uh_compute',
@@ -956,7 +962,7 @@ if "__main__" == __name__:
                  '-w', '1', '--dry_run'] 
                  #, '--ml_probabs_norm',
                  #'--uh_thres_list', '0', '200'  #'363'
-    args = parse_args() #args_list)
+    args = parse_args() #args_list)#
     print(args)
 
     # "Round" dilation kernel mask
@@ -972,10 +978,6 @@ if "__main__" == __name__:
     lats_storm = df_storm_report['Lat'].values 
     lons_storm = df_storm_report['Lon'].values
 
-    # Set reports to index by DateTime for convenience
-    #storm_reports = df_storm_report.copy()
-    #storm_reports = storm_reports.set_index('DateTime')
-
 
     # TODO: pull IEM polygons
     # def generate_polygon_mask(polygons)
@@ -985,12 +987,16 @@ if "__main__" == __name__:
 
     
     # CONSTRUCT LIST OF DATA FILES
+    # TODO (Maybe): create command line args for extr_args
+    # Format string for python datetime object
     fmt_dt = '%Y-%m-%d_%H:%M:%S' #'%Y-%m-%d_%H_%M_%S' '%Y-%m-%d_%H_%M_%S'
+    # regex pattern string for the datetime format
     fmt_re = r'\d{4}-\d{2}-\d{2}_\d{2}(_|:)\d{2}(_|:)\d{2}'
-    extr_args = {'method': 're', 'fmt_dt': fmt_dt, #args.extract_date_method, args.fmt_dt, args.fmt_re}
-                 'fmt_re': fmt_re}
+    extr_args = {'method': 're', 'fmt_dt': fmt_dt, 'fmt_re': fmt_re}
+
     dir_preds = os.path.join(args.dir_wofs_preds, args.year)
     rdates = sorted(os.listdir(dir_preds))
+
     all_dfs = []
     for DATE in rdates:
         _df = generate_init_times_files_list_all(dir_preds, DATE, 
@@ -1014,8 +1020,6 @@ if "__main__" == __name__:
     print("# File Times", n_ftimes)
 
     wofs_cZH = {}
-    #wofs_prob = {}
-    #wofs_uh = {}
     y_preds = None
     y_uh = None
 
@@ -1032,20 +1036,19 @@ if "__main__" == __name__:
     results = {'tps': NANs.copy(), 'fps': NANs.copy(), #np.full((n_ftimes, nthreshs), np.nan)
                'fns': NANs.copy(), 'tns': NANs.copy(),
                'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()} 
-               #'srs': NANs.copy(), 'pods': NANs.copy(), 'csis': NANs.copy()}
     
-    NANs = np.zeros((n_ftimes, nthreshs_uh)) #np.full((n_ftimes, nthreshs_uh), np.nan) 
+    NANs = np.zeros((n_ftimes, nthreshs_uh))  
     results_uh = {'tps': NANs.copy(), 'fps': NANs.copy(), 
                   'fns': NANs.copy(), 'tns': NANs.copy(),
                   'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()}
-                  #'srs': NANs.copy(), 'pods': NANs.copy(), 'csis': NANs.copy()}
     
+    # pandas.DateFrame datetime format string
     fmt_dt_pd = '%Y-%m-%d %H:%M:%S'
     storm_timedelta = pd.Timedelta(hours=1) #timedelta(hours=1) #
 
     kdtree = None
 
-    # For hist and reliability plots
+    # For histogram and reliability plots
     # Observed distribution
     obs_distr = np.zeros((0,))
     # UH distribution
@@ -1069,7 +1072,7 @@ if "__main__" == __name__:
         fslice = slice(*args.forecast_duration)
 
     # Iterate of WoFS run dates
-    for r, rdate in enumerate(rdates): #[3:4] #20190502
+    for r, rdate in enumerate(rdates): # #[3:4]20190502
         rdate_files = df_all_files.loc[df_all_files['run_date'] == rdate]
         itimes = np.unique(rdate_files['init_time'].values)
         itimes = np.unique(itimes)
@@ -1079,6 +1082,7 @@ if "__main__" == __name__:
         t0 = datetime.strptime(t0, fmt_dt).strftime(fmt_dt_pd)
         t1 = rdate_files['forecast_time'].max()
         t1 = datetime.strptime(t1, fmt_dt).strftime(fmt_dt_pd)
+
         storms_for_rdate = df_storm_report[t0:t1]
         _latstorm = storms_for_rdate['Lat'].values
         _lonstorm = storms_for_rdate['Lon'].values
@@ -1125,7 +1129,8 @@ if "__main__" == __name__:
                 fslice = slice(0, nt)
             if args.dry_run: print(forecast_times[fslice])
 
-            # Iterate over first 3 hours of forecast times
+            # Iterate over first 3 hours of forecast times or the selected 
+            #   forecast time range
             for f, ftime in enumerate(forecast_times[fslice]): 
                 sel_files_by_ftime = select_files(df_all_files, itime, ftime, 
                                                   emember=None, rdate=rdate)
@@ -1312,14 +1317,14 @@ if "__main__" == __name__:
                          fname, threshs=csithreshs, 
                          label=f'ML Probabilities {legend_txt}', color='blue', 
                          save=False, srs_pods_csis=(srs_agg, pods_agg, csis_agg, pos_rate),
-                         return_scores=False, fig_ax=(fig, axs[1]))
+                         return_scores=False, draw_ann=3, fig_ax=(fig, axs[1]))
         #cb = fig.colorbar(axs[1].collections[-1], ax=axs[1])
         #cb = axs[1].collections[0].colorbar
 
         # ROC Curve
-        _figax = plot_roc(obs_distr, prob_distr, fname, 
-                           tpr_fpr=(pods_agg, fpr), fig_ax=(fig, axs[0]), 
-                           save=False) #figsize=figsize, 
+        _figax = plot_roc(obs_distr, prob_distr, fname, tpr_fpr=(pods_agg, fpr), 
+                           fig_ax=(fig, axs[0]), save=False, plot_ann=3) 
+                           
 
         '''# PRC
         _figax = plot_prc(obs_distr, prob_distr, fname, 

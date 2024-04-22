@@ -1378,7 +1378,7 @@ def plot_confusion_matrix(y, y_preds, fname, thresh, p=.5, fig_ax=None,
     return fig, ax
 
 def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10), 
-             save=False, dpi=160, DB=False, plot_ann=False, return_scores=True, 
+             save=False, dpi=160, DB=False, plot_ann=False, return_scores=False, 
              **kwargs):
     '''
     Plot the Reciever Operating Characteristic (ROC) Curve

@@ -1,6 +1,8 @@
 """
-Unit tests for U-net hypermodel for tuning the U-net
-hyperparameters.
+Unit tests for U-net hypermodel for tuning the U-net hyperparameters 
+(unet_hypermodel.py).
+
+Runs but non-exhaustive
 
 execute:
 >> python -m unittest -v lydia_scripts/scripts_tensorboard/unet_hypermodel_test.py [METHOD]
