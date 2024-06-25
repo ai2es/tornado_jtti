@@ -1,22 +1,32 @@
-name: tornado
+name: tf_tornado
 channels:
   - conda-forge
+  - defaults
+  - anaconda
 dependencies:
-  - python=3.7
-  - numpy=1.18.*
-  - scipy
-  - matplotlib
+  - python=3.10
+  - tensorflow
+  - keras-tuner
   - xarray
+  - jupyterlab
   - netcdf4
-  - pyyaml
-  - pandas
-  - scikit-learn
-  - pytest
-  - pyproj
-  - jupyter
+  - wrf-python
+  - metpy
+  - tqdm
   - dask
-  - distributed
-  - cartopy
   - pip
+  - pytest
+  - pyyaml
+  - pyproj
+  - py3nvml
+  - pydot
+  - seaborn
+  - matplotlib
+  - scikit-learn
+  - msgpack-python
   - pip:
-    - tensorflow
+     - git+https://github.com/dopplerchase/keras-unet-collection.git
+     - azure-mgmt-compute
+     - azure-mgmt-storage
+     - azure-storage-blob
+     - azure-storage-queue
