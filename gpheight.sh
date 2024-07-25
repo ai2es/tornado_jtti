@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH -p debug
+#SBATCH -p normal
 #SBATCH --nodes=1
 #SBATCH -n 1
-#SBATCH --mem=64G
-#SBATCH --time=01:00:00
+#SBATCH --mem=8G
+#SBATCH --time=12:00:00
 #SBATCH --chdir=/home/ggantos/tornado_jtti/
 #SBATCH --job-name="hgt_debug"
 #SBATCH --mail-user=ggantos@ucar.edu
@@ -13,8 +13,10 @@
 #SBATCH --error=/home/ggantos/slurmouts/R-%x.%j.err
 
 module load Mamba
-bash 
-conda activate tf_tornado 
+mamba init
+source ~/.bashrc
+bash
+mamba activate tf_tornado 
  
 #QC and convert the sparse gridrad data to grids 
 python -u gpheight.py
