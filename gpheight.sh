@@ -18,5 +18,4 @@ source ~/.bashrc
 bash
 mamba activate tf_tornado 
  
-#QC and convert the sparse gridrad data to grids 
 python -u gpheight.py
