@@ -36,6 +36,6 @@ for date in dates:
     
                 encoding_vars = [k for k in preds.variables.keys() if k not in ["Times", "Time"]]
                 encoding = {var: {"zlib":True, "complevel":4, "least_significant_digit":2} for var in encoding_vars}
-                if encoding["ML_PREDICTED_TOR"]:
+                if "ML_PREDICTED_TOR" in encoding.keys():
                     encoding["ML_PREDICTED_TOR"]['least_significant_digit'] = 3
                 preds.to_netcdf(savepath, encoding=encoding)
