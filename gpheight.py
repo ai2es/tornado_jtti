@@ -29,7 +29,7 @@ for date in dates:
             for file in files:
                 print(file)
                 preds = xr.open_dataset(file, engine=engine, decode_times=False, decode_coords=True)
-                preds = preds.merge(wofs[["HGT", "P", "PH", "PHB"]], compat='override')
+                preds = preds.merge(wofs[["HGT", "P", "PB", "PH", "PHB"]], compat='override')
     
                 savepath = file.replace('wofs-preds-2023', 'wofs-preds-2023-hgt')
                 os.makedirs(savepath.split('wrfwof')[0], exist_ok=True)
