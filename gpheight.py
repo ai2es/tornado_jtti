@@ -6,7 +6,7 @@ engine = 'netcdf4'
 preds_dir = "/ourdisk/hpc/ai2es/tornado/wofs-preds-2023/"
 init_dir = "/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-init/2023/"
 
-dates = [i[-8:] for i in glob.glob(preds_dir+'2023****', recursive=True)]
+dates = [i[-8:] for i in glob.glob(preds_dir+'20230512', recursive=True)]
 
 for date in dates:
 
