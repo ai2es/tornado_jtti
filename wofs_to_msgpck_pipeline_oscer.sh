@@ -5,7 +5,7 @@
 #SBATCH --mem=128G
 #SBATCH --time=23:59:00
 #SBATCH --chdir=/home/ggantos/tornado_jtti/
-#SBATCH --job-name="msgpk_0524"
+#SBATCH --job-name="msgpk_0512"
 #SBATCH --mail-user=ggantos@ucar.edu
 #SBATCH --mail-type=ALL
 #SBATCH --mail-type=END
@@ -19,6 +19,7 @@ python -u process_wofs_oscer.py  \
 --blob_url_ncar="https://wofsdltornado.blob.core.windows.net"  \
 --hours_to_analyze=3  \
 --vm_datadrive="/ourdisk/hpc/ai2es/tornado"  \
+--date="20230512"  \
 --dir_wofs="wofs-preds-2023-hgt"  \
 --dir_preds="wofs-preds-2023-update"  \
 --dir_patches="wofs-patches"  \

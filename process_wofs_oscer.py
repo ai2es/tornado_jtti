@@ -33,6 +33,10 @@ def parse_args():
     # wofs_to_preds ___________________________________________________
     parser.add_argument('--vm_datadrive', type=str, required=True,
                         help='NCAR VM path to datadrive')
+
+    # date directory to run predictions _______________________________
+    parser.add_argument('--date', type=str, required=True,
+                        help='Date to process in preds_dir')
     
     # relative directories for various files to be saved
     parser.add_argument('--dir_wofs', type=str, required=True,
@@ -125,7 +129,7 @@ if __name__ == '__main__':
     else:
         raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
 
-    wofs_fps = sorted(glob.glob("/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt/20230524/**/**/**.nc"))
+    wofs_fps = sorted(glob.glob(f"/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt/{args.date}/**/**/**.nc"))
 
     with Pool(9) as p:
 
