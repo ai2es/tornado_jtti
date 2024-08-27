@@ -15,4 +15,4 @@
 python -u gpheight.py  \
 --preds_dir="/ourdisk/hpc/ai2es/tornado/wofs-preds-2023/"  \
 --init_dir="/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-init/2023/"  \
---date="20230510"
+--date="20230512"
