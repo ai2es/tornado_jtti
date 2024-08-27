@@ -125,8 +125,8 @@ if __name__ == '__main__':
     else:
         raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
 
-    wofs_fps = sorted(glob.glob("tornado/wofs-preds-2023-hgt/20230511/2230/ENS_MEM_1/**")[:5]+glob.glob("tornado/wofs-preds-2023-hgt/20230511/2230/ENS_MEM_2/**")[:5])
-    
+    wofs_fps = sorted(glob.glob("/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt/20230524/**/**/**.nc"))
+
     with Pool(9) as p:
 
         # begin processing
@@ -134,7 +134,7 @@ if __name__ == '__main__':
             result = p.starmap(process_one_file,
                                [(wofs_fp, args) for wofs_fp in wofs_fps],
                                )
-            # result = process_one_file(wofs_fps[0], args)
+            #result = process_one_file(wofs_fps[0], args)
             print(result)
             preds_to_msgpk_oscer.preds_to_msgpk(result, args)
 

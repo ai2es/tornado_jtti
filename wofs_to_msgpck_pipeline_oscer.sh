@@ -1,22 +1,16 @@
-#!/usr/bin/bash
+#!/usr/bin/bash -l
 #SBATCH -p normal
 #SBATCH --nodes=1
-#SBATCH -n 1
-#SBATCH --mem=8G
-#SBATCH --time=24:00:00
+#SBATCH -n 9
+#SBATCH --mem=128G
+#SBATCH --time=23:59:00
 #SBATCH --chdir=/home/ggantos/tornado_jtti/
-#SBATCH --job-name="hgt_debug"
+#SBATCH --job-name="msgpk_0524"
 #SBATCH --mail-user=ggantos@ucar.edu
 #SBATCH --mail-type=ALL
 #SBATCH --mail-type=END
 #SBATCH --output=/home/ggantos/slurmouts/R-%x.%j.out
 #SBATCH --error=/home/ggantos/slurmouts/R-%x.%j.err
-
-module load Mamba
-mamba init
-source ~/.bashrc
-bash
-mamba activate tf_tornado
 
 export AZCOPY_AUTO_LOGIN_TYPE="MSI"
 python -u process_wofs_oscer.py  \
@@ -36,6 +30,6 @@ python -u process_wofs_oscer.py  \
 --variables ML_PREDICTED_TOR COMPOSITE_REFL_10CM UP_HELI_MAX  \
 --thresholds 0.08 20 25 \
 --loc_model="lydia_scripts/models/2023_07_20_20_55_39/2023_07_20_20_55_39_hp_model00.h5"  \
---file_trainset_stats="lydia_scripts/models/2023_07_20_20_55_39/training_metadata_ZH_only.nc"  \
+--file_trainset_stats="lydia_scripts/models/2023_04_06_18_23_50/training_metadata_ZH_only.nc"  \
 --write=1  \
 |& tee ./logs/$(date +"%Y%m%d_%H%M%S")_output.txt

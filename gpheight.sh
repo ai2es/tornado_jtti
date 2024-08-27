@@ -5,7 +5,7 @@
 #SBATCH --mem=64G
 #SBATCH --time=23:00:00
 #SBATCH --chdir=/home/ggantos/tornado_jtti/
-#SBATCH --job-name="hgt_0512"
+#SBATCH --job-name="hgt_0510"
 #SBATCH --mail-user=ggantos@ucar.edu
 #SBATCH --mail-type=ALL
 #SBATCH --mail-type=END
