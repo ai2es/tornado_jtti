@@ -1243,18 +1243,7 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
     if args.write in [1, 2, 4]:
         fname = os.path.basename(wofs_orig.filenamepath)
         fname, file_extension = os.path.splitext(fname)
-
-        # Check whether the predictions directory exists
-        if not os.path.exists(args.dir_preds):
-            # Create the predictions directory if its parent directory exists
-            dir_parent = os.path.dirname(args.dir_preds)
-            if os.path.exists(dir_parent):
-                os.mkdir(args.dir_preds)
-                print(f"Made directory {args.dir_preds}")
-            else:
-                raise NotADirectoryError(errno.ENOTDIR, 
-                                         f'Predictions directory does not exist: {args.dir_preds}')
-
+        os.makedirs(args.dir_preds, exist_ok=True)
         savepath = os.path.join(args.dir_preds, f'{fname}.nc')
         print(f"Save WoFS grid predictions to {savepath}\n")
         wofs_like.to_netcdf(savepath)
