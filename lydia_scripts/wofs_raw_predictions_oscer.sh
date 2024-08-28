@@ -22,7 +22,7 @@ echo "SLURM_ARRAY_JOB_ID: ${SLURM_ARRAY_JOB_ID}"
 echo "SLURM_JOBID,SLURM_JOB_ID: ${SLURM_JOBID}, ${SLURM_JOB_ID}"
 
 WOFS_ROOT="/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt"
-WOFS_REL_PATH="20230512/0000/ENS_MEM_1"
+WOFS_REL_PATH=""$rel_path""
 
 wofs_files=($(ls $WOFS_ROOT/$WOFS_REL_PATH))
 echo "WOFS DIR ${WOFS_ROOT}/${WOFS_REL_PATH}"
