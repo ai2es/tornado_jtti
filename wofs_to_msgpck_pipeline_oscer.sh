@@ -1,9 +1,9 @@
 #!/usr/bin/bash -l
-#SBATCH -p normal
+#SBATCH -p debug #normal
+#SBATCH --time=6:00:00
 #SBATCH --nodes=1
 #SBATCH -n 9
 #SBATCH --mem=128G
-#SBATCH --time=23:59:00
 #SBATCH --chdir=/home/ggantos/tornado_jtti/
 #SBATCH --job-name="mpk_0512"
 #SBATCH --mail-user=ggantos@ucar.edu
