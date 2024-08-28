@@ -69,7 +69,7 @@ if __name__ == '__main__':
                 with Pool(ncpus) as p:
                     try:
                         result = p.starmap(process_one_file,
-                                           [(files_net, wofs) for file in files_net])
+                                           [(f, wofs) for f in files_net])
                         print(result)
 
                     except Exception as e:
