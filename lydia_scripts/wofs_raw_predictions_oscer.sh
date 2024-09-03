@@ -1,6 +1,6 @@
 #!/bin/bash
-# SBATCH -p debug #normal #debug 
-# SBATCH --time=00:10:00
+# SBATCH -p normal #normal #debug 
+# SBATCH --time=00:01:00
 # SBATCH --nodes=1
 # SBATCH -n 18
 # SBATCH --mem-per-cpu=1000
@@ -12,7 +12,6 @@
 # SBATCH --error=/home/ggantos/slurmouts/R-%x.%j.%N.err
 # SBATCH --open-mode=truncate
 # SBATCH --array=37  #0-36%5
-# #SBATCH --array=7-9 #at 35, 40, 35 min #37files
 
 # #########################################################
 
