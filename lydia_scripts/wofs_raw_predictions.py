@@ -74,7 +74,7 @@ import pickle
 import tensorflow as tf
 print("tensorflow version", tf.__version__)
 from tensorflow import keras
-print("keras version", keras.__version__)
+#print("keras version", keras.__version__)
 from keras_tuner import HyperParameters
 
 # Working directory expected to be tornado_jtti/
