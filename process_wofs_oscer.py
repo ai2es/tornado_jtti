@@ -11,8 +11,9 @@ warnings.filterwarnings("ignore")
 
 
 def process_one_file(wofs_filepath, args):
-    from real_time_scripts import download_file, wofs_to_preds_oscer
+    # from real_time_scripts import download_file, wofs_to_preds_oscer
     # ncar_filepath = download_file.download_file(wofs_filepath, args)
+    from lydia_scripts import wofs_raw_predictions
     vm_filepath = wofs_to_preds_oscer.wofs_to_preds(wofs_filepath, args)
     print(vm_filepath)
     return vm_filepath
@@ -130,8 +131,9 @@ if __name__ == '__main__':
         raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
 
     wofs_fps = sorted(glob.glob(f"/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt/{args.date}/**/**/**.nc"))
-
-    with Pool(9) as p:
+    ncpus = int(os.getenv("SLURM_CPUS_PER_TASK"))
+    
+    with Pool(ncpus) as p:
 
         # begin processing
         try:

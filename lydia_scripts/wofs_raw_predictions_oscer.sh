@@ -11,7 +11,7 @@
 # SBATCH --output=/home/ggantos/slurmouts/R-%x.%j.%N.out
 # SBATCH --error=/home/ggantos/slurmouts/R-%x.%j.%N.err
 # SBATCH --open-mode=truncate
-# SBATCH --array=37  #0-36%5
+# SBATCH --array=666 
 
 # #########################################################
 
@@ -23,7 +23,7 @@ echo "SLURM_JOBID,SLURM_JOB_ID: ${SLURM_JOBID}, ${SLURM_JOB_ID}"
 WOFS_ROOT="/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt"
 WOFS_REL_PATH=""$rel_path""
 
-wofs_files=($(ls $WOFS_ROOT/$WOFS_REL_PATH))
+wofs_files=($(find $WOFS_ROOT/$WOFS_REL_PATH -type f))
 echo "WOFS DIR ${WOFS_ROOT}/${WOFS_REL_PATH}"
 echo "WOFS FILES:: [${SLURM_ARRAY_TASK_ID}] ${wofs_files[@]}"
 
