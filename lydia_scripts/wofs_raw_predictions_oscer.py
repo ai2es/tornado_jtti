@@ -92,95 +92,6 @@ import gc
 gc.collect()
 
 
-def create_argsparser(args_list=None):
-    ''' 
-    Create command line arguments parser
-
-    @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing.
-            Element at index 0 should either be the empty string or the name of
-            the python script
-
-    @return: the argument parser object
-    '''
-    if not args_list is None:
-        sys.argv = args_list
-        
-    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
-
-    # WoFS file(s) path 
-    parser.add_argument('--loc_wofs', type=str, required=True, 
-        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
-
-    parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
-        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
-    parser.add_argument('--filename_prefix', type=str, 
-        help='Prefix used in the WoFS file name')
-
-    parser.add_argument('--dir_preds', type=str, required=True, 
-        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
-    parser.add_argument('--dir_patches', type=str,  
-        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
-    parser.add_argument('--dir_figs', type=str,  
-        help='Top level directory to save any corresponding figures.')
-
-    #parser.add_argument('-p', '--patch_shape', type=tuple, default=(32, 32, 12), #required=True, 
-    #    help='Shape of patches. Can be empty (), 2D (xy, h), 2D (x, y, h), or 3D (x, y, c, h) tuple. If empty tuple, patching is not performed. Last dimension must contain the number of GridRad elevation levels. If 2D, the x and y dimension are the same. Ex: (32, 12) or (32, 32, 12).')
-    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,), #required=True, 
-        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
-    parser.add_argument('--with_nans', action='store_true', 
-        help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
-    parser.add_argument('-Z', '--ZH_only', action='store_true',  
-        help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', type=str, nargs='+', #type=list,
-        help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
-    parser.add_argument('--interp_method', type=int, default=0,
-        help='WoFS to GridRad (and vice versa) interpolation method. 0 to use scipy.interpolate.RectBivariateSpline. 1 to use scipy.spatial.cKDTree')
-
-    # Model directories and files
-    parser.add_argument('--loc_model', type=str, required=True,
-        help='Trained model directory or file path (i.e. file descriptor)') 
-    parser.add_argument('--loc_model_calib', type=str, 
-        help='Path to pickle file with a trained model for calibrating the predictions')
-    parser.add_argument('--file_trainset_stats', type=str, required=True,
-        help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
-    # If loading model weights and using hyperparameters from_weights
-    hyperparmas_sparsers = parser.add_subparsers(title='model_loading', dest='load_options', 
-        help='optional, additional model loading options')
-    hp_parsers = hyperparmas_sparsers.add_parser('load_weights_hps', #aliases=['hyper'], 
-        help='Specifiy details to load model weights and UNetHyperModel hyperparameters')
-    #hp_parsers.add_argument('--from_weights', action='store_true',
-    #    help='Boolean whether to load the model as weights')
-    hp_parsers.add_argument('--hp_path', type=str, required=True,
-        help='Path to the csv containing the top hyperparameters')
-    hp_parsers.add_argument('--hp_idx', type=int, default=0,
-        help='Index indicating the row to use within the csv of the top hyperparameters')
-
-    parser.add_argument('-w', '--write', type=int, default=0,
-        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files ([patched ]data on gridrad grid), set to 3 to only save figures, and set to 4 to save all data files and all figures')
-    parser.add_argument('-d', '--dry_run', action='store_true',
-        help='For testing and debugging. Execute without running models or saving data and display output paths')
-
-    return parser
-
-def parse_args(args_list=None):
-    '''
-    Create and parse the command line args parser
-
-    @param args_list: list of strings with command line arguments to override
-            any received arguments. default value is None and args are not 
-            overridden. not used in production. mostly used for unit testing.
-            Element at index 0 should either be the empty string or the name of
-            the python script
-
-    @return: the parsed arguments object
-    '''
-    parser = create_argsparser(args_list=args_list)
-    args = parser.parse_args()
-    return args
-
-
 """
 WoFS to GridRad interpolation methods, refactored from lydia_scripts/scripts_data_pipeline
 """
@@ -311,7 +222,7 @@ def get_wofs_datetime(fnpath, filename_prefix=None, wofs_datetime=None,
     datetime_obj = wofs_datetime
     if not isinstance(datetime_obj, datetime):
         # Convert datetime string to datetime object
-        datetime_obj = datetime.strptime(wofs_datetime, datetime_fmt) #datetime_format
+        datetime_obj = datetime.strptime(wofs_datetime, datetime_format) #datetime_format
         if DB: print(f"\nExtracted datetime object:: {wofs_datetime}={datetime_obj} from file {fnpath}({fname})")
 
     # Convert datetime object to np.datetime int
@@ -1241,14 +1152,12 @@ def to_wofsgrid(args, wofs_orig, wofs_gridrad, stats, gridrad_spacing=48,
 
     # Save out the interpolated file
     if args.write in [1, 2, 4]:
-        fname = os.path.basename(wofs_orig.filenamepath)
-        fname, file_extension = os.path.splitext(fname)
-        os.makedirs(args.dir_preds, exist_ok=True)
-        savepath = os.path.join(args.dir_preds, f'{fname}.nc')
+        savepath = wofs_orig.filenamepath.replace('wofs-preds-2023-hgt', 'wofs-preds-2023-update')
+        os.makedirs(os.path.dirname(savepath), exist_ok=True)
         print(f"Save WoFS grid predictions to {savepath}\n")
         wofs_like.to_netcdf(savepath)
     
-    return predictions, wofs_like
+    return predictions, wofs_like, savepath
 
 def stitch_patches(args, wofs, stats, gridrad_spacing=48, 
                    seconds_since='seconds since 2001-01-01', DB=0):
@@ -1599,9 +1508,8 @@ def create_gif(args, wofs, suffix, field0=None, field1=None, interval=50,
     return fig, animator
 
 
-if __name__ == '__main__':
-
-    args = parse_args()
+def wofs_to_preds(wofs_filepath, args):
+    
     DB = args.dry_run
 
     if DB: 
@@ -1609,12 +1517,12 @@ if __name__ == '__main__':
         print("FIELDS", args.fields, len(args.fields))
 
     wofs_files = []
-    if os.path.isfile(args.loc_wofs):
-        wofs_files = args.loc_wofs #.replace(":", "_")
+    if os.path.isfile(wofs_filepath):
+        wofs_files = wofs_filepath #.replace(":", "_")
     #TODO elif os.path.isdir(args.loc_wofs):
     #    wofs_files = os.listdir(args.loc_wofs)
     else: 
-        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should be a file, but was {args.loc_wofs}")
+        raise ValueError(f"[ARGUMENT ERROR] --loc_wofs should be a file, but was {wofs_filepath}")
     
     # Opens all data files into a Dataset
     print("Open WoFS file(s)", wofs_files)
@@ -1653,7 +1561,7 @@ if __name__ == '__main__':
     wofs_combo = combine_fields(args, wofs_gridrad, preds, DB=DB)
 
     # Interpolate back to WoFS grid
-    preds_gridrad_stitched, preds_wofsgrid = to_wofsgrid(args, wofs, wofs_combo, 
+    preds_gridrad_stitched, preds_wofsgrid, savepath = to_wofsgrid(args, wofs, wofs_combo, 
                                            train_stats, method=args.interp_method,
                                            gridrad_spacing=GRIDRAD_SPACING, 
                                            seconds_since=SECS_SINCE, DB=DB)
@@ -1797,3 +1705,4 @@ if __name__ == '__main__':
     #ds_stitched.close()
     #ds_wofs_as_gridrad.close()
     print(f"PREDICTIONS COMPLETE FOR {wofs_files}.")
+    return savepath

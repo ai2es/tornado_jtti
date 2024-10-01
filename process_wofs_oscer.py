@@ -1,6 +1,4 @@
 import os, glob, json, time, argparse, traceback, datetime
-# from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
-# from azure.storage.blob import BlobServiceClient
 from multiprocessing.pool import Pool
 from real_time_scripts import preds_to_msgpk_oscer
 import pandas as pd
@@ -10,140 +8,123 @@ import subprocess
 warnings.filterwarnings("ignore")
 
 
-def process_one_file(wofs_filepath, args):
-    # from real_time_scripts import download_file, wofs_to_preds_oscer
-    # ncar_filepath = download_file.download_file(wofs_filepath, args)
-    # from lydia_scripts import wofs_raw_predictions
-    from real_time_scripts import wofs_to_preds_oscer
-    vm_filepath = wofs_to_preds_oscer.wofs_to_preds(wofs_filepath, args)
-    print(vm_filepath)
-    return vm_filepath
+def create_argsparser(args_list=None):
+    ''' 
+    Create command line arguments parser
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Process single timestep from WoFS to msgpk')
-    
-    # download_file ___________________________________________________
-    parser.add_argument('--account_url_wofs', type=str, required=True,
-                        help='WoFS queue account url')
-    parser.add_argument('--queue_name_wofs', type=str, required=True,
-                        help='WoFS queue name for available files')    
-    parser.add_argument('--blob_url_ncar', type=str, required=True,
-                        help='NCAR path to storage blob')
-    parser.add_argument('--hours_to_analyze', type=int, required=True,
-                        help='Number of hours to analyze, starting from 0, for each runtime.')
-    
-    # wofs_to_preds ___________________________________________________
-    parser.add_argument('--vm_datadrive', type=str, required=True,
-                        help='NCAR VM path to datadrive')
+    @param args_list: list of strings with command line arguments to override
+            any received arguments. default value is None and args are not 
+            overridden. not used in production. mostly used for unit testing.
+            Element at index 0 should either be the empty string or the name of
+            the python script
 
-    # date directory to run predictions _______________________________
-    parser.add_argument('--date', type=str, required=True,
-                        help='Date to process in preds_dir')
+    @return: the argument parser object
+    '''
+    if not args_list is None:
+        sys.argv = args_list
+        
+    parser = argparse.ArgumentParser(description='Tornado Prediction end-to-end from raw WoFS data', epilog='AI2ES')
+
+    # WoFS file(s) path 
+    parser.add_argument('--loc_wofs', type=str, required=True, 
+        help='Location of the WoFS file(s). Can be a path to a single file or a directory to several files')
     
-    # relative directories for various files to be saved
-    parser.add_argument('--dir_wofs', type=str, required=True,
-                        help='Directory to store WoFS on NCAR VM')
-    parser.add_argument('--dir_preds', type=str, required=True,
-                        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
-    parser.add_argument('--dir_patches', type=str,
-                        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
-    
-    # Various other parameters
     parser.add_argument('--datetime_format', type=str, required=True, default="%Y-%m-%d_%H:%M:%S",
-                        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
-    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,),
-                        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
+        help='Date time format string used in the WoFS file name. See python datetime module format codes for more details (https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes). ')
+    parser.add_argument('--filename_prefix', type=str, 
+        help='Prefix used in the WoFS file name')
+
+    parser.add_argument('--dir_preds', type=str, required=True, 
+        help='Directory to store the predictions. Prediction files are saved individually for each WoFS files. The prediction files are saved of the form: <WOFS_FILENAME>_predictions.nc')
+    parser.add_argument('--dir_patches', type=str,  
+        help='Directory to store the patches of the interpolated WoFS data. The files are saved of the form: <WOFS_FILENAME>_patched_<PATCH_SHAPE>.nc. This field is optional and mostly for testing')
+    parser.add_argument('--dir_figs', type=str,  
+        help='Top level directory to save any corresponding figures.')
+    parser.add_argument('-p', '--patch_shape', type=tuple, default=(32,), #required=True, 
+        help='Shape of patches. Can be empty (), 2D (xy,), 2D (x, y), or 3D (x, y, h) tuple. If empty tuple, patching is not performed. If tuple length is 1, the x and y dimension are the same. Ex: (32) or (32, 32).')
     parser.add_argument('--with_nans', action='store_true', 
         help='Set flag such that data points with reflectivity=0 are stored as NaNs. Otherwise store as normal floats. It is recommended to set this flag')
     parser.add_argument('-Z', '--ZH_only', action='store_true',  
         help='Use flag to only extract the reflectivity (COMPOSITE_REFL_10CM and REFL_10CM), updraft (UP_HELI_MAX) and forecast time (Times) data fields, excluding divergence and vorticity fields. Additionally, do not compute divergence and vorticity. Regardless of the value of this flag, only reflectivity is used for training and prediction.')
-    parser.add_argument('-f', '--fields', nargs='+', type=str,
+    parser.add_argument('-f', '--fields', type=str, nargs='+', #type=list,
         help='Space delimited list of additional WoFS fields to store. Regardless of whether these fields are specified, only reflectivity is used for training and prediction. Ex use: --fields U WSPD10MAX W_UP_MAX')
+    parser.add_argument('--interp_method', type=int, default=0,
+        help='WoFS to GridRad (and vice versa) interpolation method. 0 to use scipy.interpolate.RectBivariateSpline. 1 to use scipy.spatial.cKDTree')
+
+    # Model directories and files
+    parser.add_argument('--loc_model', type=str, required=True,
+        help='Trained model directory or file path (i.e. file descriptor)') 
+    parser.add_argument('--loc_model_calib', type=str, 
+        help='Path to pickle file with a trained model for calibrating the predictions')
+    parser.add_argument('--file_trainset_stats', type=str, required=True,
+        help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
+    # If loading model weights and using hyperparameters from_weights
+    hyperparmas_sparsers = parser.add_subparsers(title='model_loading', dest='load_options', 
+        help='optional, additional model loading options')
+    hp_parsers = hyperparmas_sparsers.add_parser('load_weights_hps', #aliases=['hyper'], 
+        help='Specifiy details to load model weights and UNetHyperModel hyperparameters')
+    #hp_parsers.add_argument('--from_weights', action='store_true',
+    #    help='Boolean whether to load the model as weights')
+    hp_parsers.add_argument('--hp_path', type=str, required=True,
+        help='Path to the csv containing the top hyperparameters')
+    hp_parsers.add_argument('--hp_idx', type=int, default=0,
+        help='Index indicating the row to use within the csv of the top hyperparameters')
     
     # Preds to msgpk ___________________________________________________
-    parser.add_argument('--dir_preds_msgpk', type=str, required=True,
-        help='Directory to store the machine learning predictions in MessagePack format. The files are saved of the form: <wofs_sparse_prob_<DATETIME>.msgpk')
     parser.add_argument('-v', '--variables', nargs='+', type=str,
         help='List of string variables to save out from predictions. Ex use: --variables ML_PREDICTED_TOR REFL_10CM')
     parser.add_argument('-t', '--thresholds', nargs='+', type=float,
         help='Space delimited list of float thresholds. Ex use: --thresholds 0.08 0.07')
-
-    # Model directories and files
-    parser.add_argument('--loc_model', type=str, required=True,
-        help='Trained model directory or file path (i.e. file descriptor)')
-    parser.add_argument('--file_trainset_stats', type=str, required=True,
-        help='Path to training set statistics file (i.e., training metadata in Lydias code) for normalizing test data. Contains the means and std computed from the training data for at least the reflectivity (i.e., ZH)')
     
-    # Functionality parameters
     parser.add_argument('-w', '--write', type=int, default=0,
-        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files, set to 3 to only save figures, and set to 4 to save all data files and all figures')
-    parser.add_argument('-d', '--debug_on', action='store_true',
+        help='Write/save data and/or figures. Set to 0 to save nothing, set to 1 to only save WoFS predictions file (.nc), set to 2 to only save all .nc data files ([patched ]data on gridrad grid), set to 3 to only save figures, and set to 4 to save all data files and all figures')
+    parser.add_argument('-d', '--dry_run', action='store_true',
         help='For testing and debugging. Execute without running models or saving data and display output paths')
-    
-    # If loading model weights and using hyperparameters from_weights
-    hyperparams_subparser = parser.add_subparsers(title='model_loading', dest='load_options', 
-        help='optional, additional model loading options')
-    hp_parser = hyperparams_subparser.add_parser('load_weights_hps', 
-        help='Specifiy details to load model weights and UNetHyperModel hyperparameters')
-    hp_parser.add_argument('--hp_path', type=str, required=True,
-        help='Path to the csv containing the top hyperparameters')
-    hp_parser.add_argument('--hp_idx', type=int, default=0,
-        help='Index indicating the row to use within the csv of the top hyperparameters')
-    
+
+    return parser
+
+def parse_args(args_list=None):
+    '''
+    Create and parse the command line args parser
+
+    @param args_list: list of strings with command line arguments to override
+            any received arguments. default value is None and args are not 
+            overridden. not used in production. mostly used for unit testing.
+            Element at index 0 should either be the empty string or the name of
+            the python script
+
+    @return: the parsed arguments object
+    '''
+    parser = create_argsparser(args_list=args_list)
     args = parser.parse_args()
     return args
 
-def append_to_available_dates_csv(new_rundatetime, args):
-    run_date_dt = datetime.datetime.strptime(new_rundatetime, "%Y%m%d%H%M")
-    if run_date_dt.hour < 4:
-        run_date_dt = run_date_dt - datetime.timedelta(hours=24)
-    run_date_dt_str = run_date_dt.strftime("%Y%m%d%H%M")
-    conn_string = "DefaultEndpointsProtocol=https;AccountName=wofsdltornado;AccountKey=gS4rFYepIg7Rtw0bZcKjelcJ9TNoVEhKV5cZBGc1WEtRZ4eCn35DhDnaDqugDXtfq+aLnA/rD0Bc+ASt4erSzQ==;EndpointSuffix=core.windows.net"
-    container = args.dir_preds_msgpk
-
-    blob_service_client = BlobServiceClient.from_connection_string(conn_string)
-    container_client = blob_service_client.get_container_client(container)
-
-    filename = "available_dates.csv"
-    blob_client = container_client.get_blob_client(filename)
-    with open(filename, "wb") as new_blob:
-        download_stream = blob_client.download_blob()
-        new_blob.write(download_stream.readall())
-
-    df = pd.read_csv(filename)
-    df.loc[len(df.index)] = run_date_dt_str
-
-    csv_string = df.to_csv(index=False)
-    csv_bytes = csv_string.encode()
-    blob_client.upload_blob(csv_bytes, overwrite=True)
-
-    os.remove(filename)
-
+def process_one_file(wofs_filepath, args):
+    
+    from lydia_scripts import wofs_raw_predictions_oscer
+    vm_filepath = wofs_raw_predictions_oscer.wofs_to_preds(wofs_filepath, args)
+    
+    return vm_filepath
 
 if __name__ == '__main__':
     
     args = parse_args()
 
-    if args.hours_to_analyze > 3:
-        len_rundatetimes = 11*args.hours_to_analyze*12 + 10*3*12
-    elif args.hours_to_analyze < 4:
-        len_rundatetimes = 21*args.hours_to_analyze*12
-    else:
-        raise ValueError(f"Argument hours_to_analyze should be between 0 and 6 but was {args.hours_to_analyze}")
-
-    wofs_fps = sorted(glob.glob(f"/ourdisk/hpc/ai2es/tornado/wofs-preds-2023-hgt/{args.date}/**/**/**.nc"))[:36]
+    fcst_time_files = sorted(glob.glob(args.loc_wofs+"/ENS_MEM_1/**.nc"))
+    fcst_time_files = [f.rsplit("/")[-1] for f in fcst_time_files]
     ncpus = int(os.getenv("SLURM_CPUS_PER_TASK"))
     
-    with Pool(ncpus) as p:
-
-        # begin processing
-        try:
-            result = p.starmap(process_one_file,
-                               [(wofs_fp, args) for wofs_fp in wofs_fps],
-                               )
-            #result = process_one_file(wofs_fps[0], args)
-            print(result)
-            preds_to_msgpk_oscer.preds_to_msgpk(result, args)
-
-        except Exception as e:
-            print(traceback.format_exc())
+    for fcst_time_file in fcst_time_files:
+        wofs_fps = sorted(glob.glob(args.loc_wofs+f"/ENS_MEM_**/{fcst_time_file}"))
+        with Pool(ncpus) as p:
+            try:
+                result = p.starmap(process_one_file,
+                                   [(wofs_fp, args) for wofs_fp in wofs_fps],
+                                   )
+                # result = process_one_file(wofs_fps[0], args)
+                # result = [f.replace('wofs-preds-2023-hgt', 'wofs-preds-2023-update') for f in wofs_fps]
+                print(result)
+                preds_to_msgpk_oscer.preds_to_msgpk(result, args)
+    
+            except Exception as e:
+                print(traceback.format_exc())
