@@ -35,6 +35,8 @@ def preds_to_msgpk(paths, args):
     
     for variable, threshold in zip (args.variables, args.thresholds):
         ds_list = []
+        dir = root_path+args.date
+        times = [i[-4:] for i in sorted(glob.glob(dir+'/****', recursive=True))]
         for i in range(1, 19):
             files = sorted(glob.glob(paths[0].split('ENS_MEM')[0] + f'ENS_MEM_{i}/' + paths[0].rsplit('/')[-1]))
             ds_list.append(xr.open_mfdataset(files,
