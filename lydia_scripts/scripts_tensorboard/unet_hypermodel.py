@@ -15,7 +15,7 @@ python -m tensorboard.main --logdir=[PATH_TO_LOGDIR] [--port=6006]
 """
 
 import wandb
-from wandb.keras import WandbMetricsLogger, WandbCallback
+from wandb.integration.keras import WandbMetricsLogger, WandbCallback
 #wandb.login()
 
 import os, io, sys, random, shutil

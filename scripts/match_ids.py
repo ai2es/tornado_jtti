@@ -1,9 +1,11 @@
+import time
 import pandas as pd
 import numpy as np
 import xarray as xr
 from os.path import exists, join
 from os import listdir
 from glob import glob
+from datetime import datetime, timedelta
 import pickle
 
 def main():
@@ -20,13 +22,11 @@ def main():
         overlap = np.intersect1d(poly_id, ds_id)
         print(date, poly_id.size, ds_id.size, overlap.size)
         storm_ds.close()
-
     return
-
 
 def get_all_pickle_dates(tor_path):
     tor_years = sorted(listdir(tor_path))[:-1]
-    print(tor_years)
+    print(f"Years in data: {tor_years}")
     all_dates = []
     for year in tor_years:
         all_dates.extend(sorted(listdir(join(tor_path, year))))
@@ -34,13 +34,18 @@ def get_all_pickle_dates(tor_path):
 
 def load_track_day(tor_path, date):
     object_files = sorted(glob(join(tor_path, date[:4], date, "scale_314159265m2", "*.p")))
+    print(f"Number of files for {date}: {len(object_files)}")
     storm_frames = []
     for object_file in object_files:
         with open(object_file, "rb") as obj_file_r:
-            storm_frames.append(pickle.load(obj_file_r))
+            df = pickle.load(obj_file_r)
+            run_time = time.mktime(datetime.strptime(object_file.split('segmotion_')[1].split('.')[0], '%Y-%m-%d-%H%M%S').timetuple())
+            df['run_time_unix_sec'] = [run_time] * df.shape[0]
+            storm_frames.append(df)
     storms = pd.concat(storm_frames)
+    storms = storms.sort_values(by=['run_time_unix_sec', 'valid_time_unix_sec'])
+    storms = storms.reset_index(drop=True)
     return storms
-
 
 def load_patch_day(tor_path, date, downsampled=False):
     if downsampled:
