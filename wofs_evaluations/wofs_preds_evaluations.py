@@ -23,7 +23,7 @@ min90-180: 19, 37
 
 """
 
-import re, os, sys, errno, glob, argparse
+import re, os, sys, stat, errno, glob, argparse
 from datetime import timedelta, datetime, date, time
 from dateutil.parser import parse as parse_date
 
@@ -87,7 +87,11 @@ def create_argsparser(args_list=None):
     # TODO: mutually exclusive args
     grp = parser.add_mutually_exclusive_group(required=True)
     grp.add_argument('--dir_wofs_preds', type=str, #required=True, 
-        help='Directory location of WoFS predictions, with subdirectories for the initialization times, which each contain subdirectories for all ensembles, which contains the predictions for each forecast time. Example directory: wofs_preds/2023/20230602. Example directory structure: wofs_preds/2023/20230602/1900/ENS_MEM_13/wrfwof_d01_2023-06-02_20_30_00_predictions.nc')
+        help='Directory location of WoFS predictions, with subdirectories for \
+        the initialization times, which each contain subdirectories for all \
+        ensembles, which contains the predictions for each forecast time. \
+        Example directory: wofs_preds/2023/20230602. Example directory \
+        structure: wofs_preds/2023/20230602/1900/ENS_MEM_13/wrfwof_d01_2023-06-02_20_30_00_predictions.nc')
     grp.add_argument('--loc_files_list', type=str, #required=True, 
         help='Path to the csv file that lists all the predictions files')
 
@@ -105,7 +109,9 @@ def create_argsparser(args_list=None):
                        help='End date, of the format YYYY-mm-dd, in the corresponding storm report file. ex: 2019-06-03')
     
     parser.add_argument('--forecast_duration', type=int, nargs='+', default=[36],
-                       help='List of at most 2 integers. The indices of the forecast range to evaluate on. For example, for the forecast range 0 to 20 min, the indices are 0 and 5. ')
+                       help='List of at most 2 integers. The indices of the \
+                       forecast range to evaluate on. For example, for the \
+                       forecast range 0 to 20 min, the indices are 0 and 5. ')
 
     parser.add_argument('--uh_compute', action='store_true',
         help='Whether to compute performance results for the UH')
@@ -142,6 +148,8 @@ def create_argsparser(args_list=None):
 
     parser.add_argument('-w', '--write', type=int, default=0,
         help='Write/save data and/or figures. Set to 0 to save nothing')
+    parser.add_argument('--write_storm_masks', action='store_true',
+        help='Write/save the masks generated from the storm reports')
     parser.add_argument('-d', '--dry_run', action='store_true',
         help='For testing and debugging')
 
@@ -896,19 +904,21 @@ def plot_zh_n_probs(ZH, P, thres_prob=None, contours=None, figax=None,
     
     return f_, a_
 
-def det_curve(y, y_pred, fpr_fnr=None, figax=None, figsize=(8, 8)):
+def det_curve(y, y_pred, fpr_fnr=None, use_ppf=0, gridon=True, figax=None, figsize=(8, 8)):
     '''
     Detection error tradeoff (DET) curve
+    Analyze false positive - miss (FN) trade-off
     https://scikit-learn.org/stable/auto_examples/model_selection/plot_det.html#sphx-glr-auto-examples-model-selection-plot-det-py
     https://github.com/scikit-learn/scikit-learn/blob/5c4aa5d0d/sklearn/metrics/_ranking.py#L273
     '''
-    fpr, fnr = fpr_fnr
-    fpr_plt = stats.norm.ppf(fpr)
-    fnr_plt = stats.norm.ppf(fnr)
+    fpr_plt, fnr_plt = fpr_fnr
+    if use_ppf:
+        fpr_plt = stats.norm.ppf(fpr)
+        fnr_plt = stats.norm.ppf(fnr)
 
     #line_kwargs = {} if name is None else {"label": name}
     #line_kwargs.update(**kwargs)
-    #fpr, fnr, thresholds = det_curve(y_true, y_scores)
+    #fpr_plt, fnr_plt, thresholds = det_curve(y_true, y_scores)
 
     fig = None
     ax = None
@@ -920,46 +930,78 @@ def det_curve(y, y_pred, fpr_fnr=None, figax=None, figsize=(8, 8)):
     ax.plot(fpr_plt, fnr_plt, lw=3)
     ax.set(xlabel='FPR', ylabel='FNR')
     ax.set_aspect('equal')
-    ax.grid()
+    ax.grid(gridon)
     #_a.legend()
 
-    ticks = [0.001, 0.01, 0.05, 0.20, 0.5, 0.80, 0.95, 0.99, 0.999]
-    tick_locations = stats.norm.ppf(ticks)
-    tick_labels = [
-        "{:.0%}".format(s) if (100 * s).is_integer() else "{:.1%}".format(s)
-        for s in ticks
-    ]
-    ax.set_xticks(tick_locations)
-    ax.set_xticklabels(tick_labels)
-    ax.set_xlim(-3, 3)
-    ax.set_yticks(tick_locations)
-    ax.set_yticklabels(tick_labels)
-    ax.set_ylim(-3, 3)
+    if not use_ppf:
+        ticks = np.linspace(0, 1, 6)
+        tick_labels = ["{:.3}".format(t) for t in ticks]
+
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(tick_labels)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+    else:
+        ticks = [0.001, 0.01, 0.05, 0.20, 0.5, 0.80, 0.95, 0.99, 0.999]
+        tick_labels = [
+            "{:.0%}".format(s) if (100 * s).is_integer() else "{:.1%}".format(s)
+            for s in ticks
+        ]
+
+        tick_locations = stats.norm.ppf(ticks)
+        ax.set_xticks(tick_locations)
+        ax.set_xticklabels(tick_labels)
+        ax.set_xlim(-3, 3)
+        ax.set_yticks(tick_locations)
+        ax.set_yticklabels(tick_labels)
+        ax.set_ylim(-3, 3)
 
     return fig, ax
+
+from MLstatkit.stats import Delong_test
+def compare_rocs(ytrue, ypreds): #, rocs:np.ndarray=None):
+    '''
+    Pair wise statistical comparison between a list of ROC curves. All curves
+    are compared to the first curve ypreds[0].
+    https://pmc.ncbi.nlm.nih.gov/articles/PMC2774909/
+
+        ytrue: list of ground truth
+        ypreds: matrix where each column contains the predictions for each model.
+                column 0 is the reference model all other models are compared to
+    '''
+    # Perform DeLong's test
+    zscores = []
+    pvals = []
+    for i in range(1, ypreds.shape[1]):
+        z, p = Delong_test(ytrue, ypreds[:,0], ypreds[:,i])
+        zscores.append(z)
+        pvals.append(p)
+
+    return pd.DataFrame({'z_score': zscores, 'p_value': pvals})
 
 
 if "__main__" == __name__:
     args_list = ['', 
                  #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds', 
                  #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights20_80_hyper', 
-                 #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights50_50_hyper', 
-                 '--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample90_10_classweights20_80_hyper', 
-                 '--loc_storm_report', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/tornado_reports/tornado_reports_2019_spring.csv', 
+                 '--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights50_50_hyper', 
+                 #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample90_10_classweights20_80_hyper', 
+                 '--loc_storm_report', '/ourdisk/hpc/ai2es/tornado/tor_spc_ncei/2019_actual_tornadoes_clean.csv', # Paper revision with NCEI due Jul 13 2025
+                 #'/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/tornado_reports/tornado_reports_2019_spring.csv', #original
                  #'/ourdisk/hpc/ai2es/tornado/stormreports/processed/tornado_reports_2019.csv', 
-                 '--out_dir', './wofs_evaluations/_test_wofs_eval', 
+                 '--out_dir', './wofs_evaluations/_test_wofs_eval/revisions', 
                  #'--out_dir', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/20190430/summary', 
                  '--year', '2019', 
                  '--date0', '2019-04-28', 
                  '--date1', '2019-06-03',
-                 '--forecast_duration', '5', '13',
+                 #'--forecast_duration', '5', '13',
                  '--thres_dist', '50', '--thres_time', '20', '--stat', 'mean', 
                  '--nthresholds', '51', '--ml_probabs_dilation', '33', 
-                 #'--uh_compute',
+                 '--uh_compute', #
                  '--skip_clearday',
                  #'--skip_cleartime',
-                 '--model_name', 'tor_unet_sample50_50_classweights20_80_hyper',
-                 '-w', '1', '--dry_run'] 
+                 '--model_name', 'tor_unet_sample50_50_classweights50_50_hyper',
+                 '-w', '0', '--dry_run'] 
                  #, '--ml_probabs_norm',
                  #'--uh_thres_list', '0', '200'  #'363'
     args = parse_args() #args_list)#
@@ -1060,7 +1102,13 @@ if "__main__" == __name__:
     #prob_max = []
     #uh_max = []
 
+    # List to print the forescast and storm datetimes of interest
     of_interest = []
+    df_availstorms = pd.DataFrame({'date': [], 'ftime0': [], 
+                                   'ftime1': [], 'storm_count': []})
+    df_forecaststorms = pd.DataFrame({'rundate': [], 'ftime0': [], 
+                                   'ftime1': [], 'forecastime': [], 
+                                   'storm_pixel_count': []})
 
     # For selecting windows of forecast times
     n_3hrs = 37 #64 
@@ -1090,6 +1138,10 @@ if "__main__" == __name__:
         print(storms_for_rdate)
 
         nstorms = storms_for_rdate.shape[0]
+        if args.write_storm_masks:
+            df_availstorms = pd.concat([df_availstorms, 
+                                        pd.DataFrame({'date': [rdate], 'ftime0': [t0], 
+                                        'ftime1': [t1], 'storm_count': [nstorms]})])
         if nstorms == 0:
             print(f"No storms on {rdate}. nstorms={nstorms}")
             if args.skip_clearday: continue
@@ -1187,15 +1239,33 @@ if "__main__" == __name__:
                                                               kdworkers=-1)
                 
                 npos = np.count_nonzero(y_storm)
+                if args.write_storm_masks:
+                    df_forecaststorms = pd.concat([df_forecaststorms,
+                                                pd.DataFrame({'rundate': [rdate], 
+                                                                'ftime0': [t0],
+                                                                'ftime1': [t1], 
+                                                                'forecastime': [ftime], 
+                                                                'storm_pixel_count': [npos]})])
+                # write stormmasks
+                #dir_stormmask = f'/ourdisk/hpc/ai2es/tornado/tornado_report_masks_2019_spring/50km_20min/{args.year}/{rdate}/{itime}'
+                dir_stormmask = f'/ourdisk/hpc/ai2es/tornado/tor_spc_ncei/report_masks_2019_spring/50km_20min/{args.year}/{rdate}/{itime}'
+                fn_stormmask = os.path.join(dir_stormmask, f'{ftime}.txt')
+                #if not os.path.exists(dir_stormmask): 
+                os.makedirs(dir_stormmask, exist_ok=True) 
                 if npos == 0: 
                     print(f"No tornados at {itime} {ftime} or within the WoFS Domain. npos={npos}")
+                    if not os.path.exists(fn_stormmask) and args.write_storm_masks: 
+                        np.savetxt(fn_stormmask, np.array([[0]]), fmt='%d')
                     if args.skip_cleartime: continue
+                elif not os.path.exists(fn_stormmask) and args.write_storm_masks: 
+                    np.savetxt(fn_stormmask, y_storm, fmt='%d')
+                ### continue ###
 
                 # COMPUTE PERFORMANCE
                 #y_storm = masks #"ground truth"
                 _npos = np.count_nonzero(y_storm)
                 _nneg = np.count_nonzero(~y_storm)
-                print(f"pos: {_npos}  neg: {_nneg}; total: {_npos + _nneg}")
+                print(f"pos: {_npos}  neg: {_nneg}; total: {_npos + _nneg}; size: {y_storm.size}")
                 if args.dry_run: 
                     classes, counts = np.unique(y_storm, return_counts=True)
                     print("Storm Counts", classes, ":", counts)
@@ -1253,8 +1323,13 @@ if "__main__" == __name__:
                     results_uh['npos'][f] += _npos
                     results_uh['nneg'][f] += _nneg
 
-
     if args.write:
+        if args.write_storm_masks:
+            fn_avail = fname = os.path.join(args.out_dir, f'{args.year}_adjusted_storm_counts.csv')
+            df_availstorms.to_csv(fn_avail, index=False)
+            fn_avail = fname = os.path.join(args.out_dir, f'{args.year}_forecast_storm_counts.csv')
+            df_forecaststorms.to_csv(fn_avail, index=False)
+
         # Construct file name prefix and suffix
         fn_suffix = '_00_36slice' if nf == 1 else  f'_{fslice.start:02d}_{fslice.stop:02d}slice'
         legend_txt = ''
@@ -1303,7 +1378,7 @@ if "__main__" == __name__:
 
         # Write for each model type and time interval
         fname = os.path.join(args.out_dir, f'{prefix}{args.year}_performance_results_{args.stat}{fn_suffix}.csv') 
-        if args.dry_run: print(f"Saving {fname}")
+        print(f"Saving {fname}")
         pd.DataFrame({'thres': csithreshs, 'tps': tps, 'fps': fps, 'fns': fns, 
                       'tns': tns, 'srs': srs_agg, 'pods': pods_agg, 'csis': csis_agg,
                       'fpr': fpr, 'fnr': fnr, 'acc': acc, 'f1': f1}).to_csv(fname, header=True)
@@ -1324,7 +1399,17 @@ if "__main__" == __name__:
         # ROC Curve
         _figax = plot_roc(obs_distr, prob_distr, fname, tpr_fpr=(pods_agg, fpr), 
                            fig_ax=(fig, axs[0]), save=False, plot_ann=3) 
-                           
+
+        if args.uh_compute:
+            roc_stattest = compare_rocs(obs_distr, np.concatenate([uh_distr, prob_distr]), axis=1)
+
+            fn_roc_stattest = os.path.join(args.out_dir, f'{prefix}{args.year}_roc_stattest_{args.stat}{fn_suffix}.csv') 
+            roc_stattest.to_csv(fn_roc_stattest, header=True, index=False)
+            print(f"Saved {fn_roc_stattest}")
+
+            fn_ = os.path.join(args.out_dir, f'{prefix}{args.year}_ytrue_ypreds_{args.stat}{fn_suffix}.csv')
+            pd.DataFrame({'ytrue':obs_distr, 'y_uh':uh_distr, f'y_{args.model_name}':prob_distr}).to_csv(fn_, header=True, index=False)
+            print(f"Saved {fn_}")
 
         '''# PRC
         _figax = plot_prc(obs_distr, prob_distr, fname, 
@@ -1367,7 +1452,6 @@ if "__main__" == __name__:
 
         print("Saving plots")
         print(fname)
-        #fig.tight_layout(pad=1.5)
         plt.subplots_adjust(wspace=.18, hspace=.35)
         plt.savefig(fname, dpi=160, bbox_inches='tight')
         

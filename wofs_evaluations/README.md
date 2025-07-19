@@ -19,7 +19,7 @@ particular day use batch script `wofs_raw_predictions_array_ens.sh`.
 `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning`
 
 ## Isotonic Regression Models Directory:
-(these models and outputs are for recalibrating the original UNet outputs)
+(these models and outputs are for recalibrating the original UNet outputs)   
 `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds`
 
 ## UNet model training and hyperparameter search scripts:
@@ -32,17 +32,17 @@ particular day use batch script `wofs_raw_predictions_array_ens.sh`.
 `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/unet/ZH_only/tuning`
 
 ## GridRad prediction outputs:
-(generated from the hyperparameter search)
+(generated from the hyperparameter search)   
 `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/gridrad/preds`
 
 ## WoFS prediction outputs:
-(output for unet model learned with 50-50 patch sampling and no class weighting)
-`/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/`
-(output for all other unet models)
+(output for unet model learned with 50-50 patch sampling and no class weighting)   
+`/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds/`   
+(output for all other unet models)   
 `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/`
 
 ## WoFS evaluation results:
-(evaluation results as csv files and figures for the 2019 season for top 4 models)
+(evaluation results as csv files and figures for the 2019 season for top 4 models)   
 `/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_figs/2019/summary/<TUNER>`
 
 ## Storm reports used for WoFS evaluations:

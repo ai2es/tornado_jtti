@@ -44,6 +44,7 @@ font = {#'family' : 'normal',
         #'weight' : 'bold',
         'size'   : 14}
 matplotlib.rc('font', **font)
+plt.rcParams.update({"text.usetex": True})
 
 # Display all pd.DataFrame columns
 pd.set_option('display.max_rows', None)
@@ -1415,7 +1416,7 @@ def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10),
     _auc = auc(fpr, tpr)
     if DB: print("AUC", _auc)
 
-    ax.plot(fpr, tpr, linewidth=3, **kwargs)
+    line_objs = ax.plot(fpr, tpr, linewidth=3, **kwargs)
     if plot_ann in [1, 3]: ax.plot([0, 1], [0, 1], '--', label='No skill')
 
     # Max PSS = TPR - FPR
@@ -1424,7 +1425,8 @@ def plot_roc(y, y_preds, fname, tpr_fpr=None, fig_ax=None, figsize=(10, 10),
     fmax = fpr[imax]
     tmax = tpr[imax]
 
-    plt1 = ax.plot(fmax, tmax, '*', c='r', ms=15, label='Max PSS')
+    line_color = line_objs[0].get_color()
+    plt1 = ax.plot(fmax, tmax, '*', c=line_color, ms=15, label='Max PSS') #c='r'
     if plot_ann in [2, 3]:
         text = f'{pss[imax]:.02f}'
         ax.text(fmax-0.12, tmax-0.05, text, fontsize=18, color='k')
@@ -1575,7 +1577,9 @@ def plot_reliabilty_curve(y, y_preds, fname, n_bins=20, strategy='quantile',
     return fig, ax
 
 def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True, 
-                  csi_cmap='Greys_r', show_cb=True, fb_strfmt='%.2f', fb_padding=5):
+                  csi_cmap='Greys_r', show_cb=True, fb_strfmt='%.2f', 
+                  fb_padding=5, cb_label='CSI', csi_levels=np.arange(0,1.1,0.1),
+                  bias_lines=[.25,.5,.75,1,1.5,2,3,5], xlabel='SR', ylabel='POD'):
     '''
     Based on make_performance_diagram_axis() from Dr. Ryan Laguerquist and found 
     originally in his gewitter repo (https://github.com/thunderhoser/GewitterGefahr).
@@ -1586,8 +1590,11 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
     @param show_fb: bool whether to plot the frequency bias lines
     @param csi_cmap: color map to use for the CSI contours
     @param show_cb: bool whether to show the CSI colorbar
+    @param cb_label: str CSI colorbar label
     @param fb_strfmt: string format for the frequency bias values
     @param fb_padding: space in pixels on each side of the frequency bias labels
+    @param csi_levels: list of rendered CSI contour lines
+    @param bias_lines: list of bias lines
     '''
     # For text outlines
     import matplotlib.patheffects as path_effects
@@ -1604,8 +1611,8 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
         pod_array = np.linspace(0.001, 1, 200)
         X, Y = np.meshgrid(sr_array, pod_array)
         csi_vals = csi_from_sr_and_pod(X, Y)
-        pm = ax.contourf(X, Y, csi_vals, levels=np.arange(0,1.1,0.1), cmap=csi_cmap)
-        if show_cb: plt.colorbar(pm, ax=ax, label='CSI') #, shrink=1)
+        pm = ax.contourf(X, Y, csi_vals, levels=csi_levels, cmap=csi_cmap)
+        if show_cb: plt.colorbar(pm, ax=ax, label=cb_label) #, shrink=1)
         #from mpl_toolkits.axes_grid1 import make_axes_locatable;divider = make_axes_locatable(ax1); cax1 = divider.append_axes("right", size="5%", pad=0.05)
         #https://www.geeksforgeeks.org/set-matplotlib-colorbar-size-to-match-graph/
         #https://en.moonbooks.org/Articles/How-to-match-the-colorbar-size-with-the-figure-size-in-matpltolib-/
@@ -1613,19 +1620,19 @@ def make_csi_axis(ax=None, figsize=(10, 10), show_csi=True, show_fb=True,
     
     if show_fb:
         fb = frequency_bias_from_sr_and_pod(X, Y)
-        bias = ax.contour(X, Y, fb, levels=[.25,.5,.75,1,1.5,2,3,5], 
+        bias = ax.contour(X, Y, fb, levels=bias_lines, 
                           linestyles='--', colors='Grey')
         plt.clabel(bias, inline=True, inline_spacing=fb_padding, 
                    fmt=fb_strfmt, fontsize=15, colors='Grey')
     
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
-    ax.set_xlabel('SR')
-    ax.set_ylabel('POD')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
     return ax
 
 def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue', 
-             figsize=(10, 10), save=False, dpi=160, srs_pods_csis=None, 
+             figsize=(11, 10), save=False, dpi=160, srs_pods_csis=None, 
              return_scores=False, pt_ann=True, tight=False, draw_ann=0, **csiargs):#, **plotargs):
     '''
     Plot the performance curve. This relates to the Critical Success Index (CSI).
@@ -1691,9 +1698,10 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     _sel = np.linspace(0, nthreshs - 1, 3, dtype=int).tolist()
 
     ax = make_csi_axis(ax=ax, **csiargs)
-    plt0 = ax.plot(srs, pods, color=color, lw=3, label=label) #, **plotargs) #srs[:idx_stop], pods[:idx_stop]
-    ax.plot(np.take(srs, _sel), np.take(pods, _sel), 's', color=color, markerfacecolor='w') 
-    plt1 = ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c='r', ms=15, label='Max CSI') 
+    plt0 = ax.plot(srs, pods, color=color, lw=4.8, label=label) #, **plotargs) #srs[:idx_stop], pods[:idx_stop]
+    if draw_ann > 2 or pt_ann: ax.plot(np.take(srs, _sel), np.take(pods, _sel), 's', color=color, markerfacecolor='w') 
+    plt1 = ax.plot(sr_of_maxcsi, pod_of_maxcsi, '*', c=color, ms=25, 
+                   label=label + r' $CSI_{max}=$' + f'{max_csi:.02f}') #c='r'
 
     # Max F1 score (precision=SR; recall=POD)
     f1 = 2 * srs * pods / (srs + pods)
@@ -1724,18 +1732,27 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
     _auc = auc(_prec[_inds], _reca[_inds])
 
     if draw_ann in [2, 3]:
-        ax.annotate(f"AUC = {_auc:0.2f}", xy=(.48, .9), fontsize=18, color='k')
+        text = f'Max CSI {max_csi:.02f}'
+        ax.text(sr_of_maxcsi-0.1, pod_of_maxcsi-0.02, text, path_effects=pe1, 
+                fontsize=16, color='white')
+        
+    if draw_ann == 3:
+        ax.annotate(f"AUC = {_auc:0.2f}", xy=(sr_of_maxcsi-0.12, pod_of_maxcsi-0.27), 
+                    fontsize=18, color='white')
 
-        text = f'Max CSI = {max_csi:.02f}'
-        ax.text(.48, .8, text, fontsize=18, color='k')
-        #ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, fontsize=18, color='white')
+        #text = f'Max CSI = {max_csi:.02f}'
+        #ax.text(.48, .8, text, fontsize=18, color='k')
+        #ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, 
+        #        fontsize=20, color='white')
         
         text = f'Max F1 = {f1[imax]:.02f}'
-        ax.text(.48, .7, text, fontsize=18, color='k') # path_effects=pe1,
+        #ax.text(.48, .7, text, fontsize=18, color='k') # path_effects=pe1,
+        ax.text(sr_of_maxcsi-0.1, pod_of_maxcsi-0.16, text, path_effects=pe1, 
+                fontsize=20, color='white')
 
-        print(f"Max F1: {f1[imax]:.02f}. Pre={pmax:.03f}. Rec={rmax:.03f}")
-        print(f"Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
-        print("AUC", _auc)
+    print(f"{label} Max F1: {f1[imax]:.02f}. Pre={pmax:.03f}. Rec={rmax:.03f}")
+    print(f"{label} Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
+    print(f"{label} AUC", _auc)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1.26, 1.01)) #loc='lower center' (0.5, -.35)  #[plt0, plt1],  #ax.transData
     ax.set_aspect('equal')
