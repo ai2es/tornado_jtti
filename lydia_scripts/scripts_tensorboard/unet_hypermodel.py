@@ -1745,13 +1745,13 @@ def plot_csi(y, y_preds, fname, label, threshs, fig_ax=None, color='dodgerblue',
         #ax.text(sr_of_maxcsi-0.12, pod_of_maxcsi-0.05, text, path_effects=pe1, 
         #        fontsize=20, color='white')
         
-        text = f'Max F1 = {f1[imax]:.02f}'
+        text = f'Max F1 = {f1[imax]:.02f} thres={threshs[imax]}'
         #ax.text(.48, .7, text, fontsize=18, color='k') # path_effects=pe1,
         ax.text(sr_of_maxcsi-0.1, pod_of_maxcsi-0.16, text, path_effects=pe1, 
                 fontsize=20, color='white')
 
-    print(f"{label} Max F1: {f1[imax]:.02f}. Pre={pmax:.03f}. Rec={rmax:.03f}")
-    print(f"{label} Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f}")
+    print(f"{label} Max F1: {f1[imax]:.02f}. Pre={pmax:.03f}. Rec={rmax:.03f} thres={threshs[imax]}")
+    print(f"{label} Max CSI: {max_csi:.02f}. SR={sr_of_maxcsi:.03f}. POD={pod_of_maxcsi:.03f} thres={threshs[xi]}")
     print(f"{label} AUC", _auc)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1.26, 1.01)) #loc='lower center' (0.5, -.35)  #[plt0, plt1],  #ax.transData

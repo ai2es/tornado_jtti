@@ -1,7 +1,7 @@
 """
 author Monique Shotande
 
-Pixel-wise Evaluation of WoFS predictions.
+Parallelized Pixel-wise Evaluation of WoFS predictions.
 Generates a pandas dataframe of all the files for convenience
 when selecting all ensembles for specific forecast time, 
 initialization time, and date.
@@ -26,6 +26,7 @@ min90-180: 19, 37
 import re, os, sys, stat, errno, glob, argparse
 from datetime import timedelta, datetime, date, time
 from dateutil.parser import parse as parse_date
+from time import perf_counter
 
 import xarray as xr
 print("xr version", xr.__version__)
@@ -42,9 +43,15 @@ from sklearn.metrics import confusion_matrix
 #print("netCDF4 version", netCDF4.__version__)
 from netCDF4 import num2date #, Dataset, date2num
 
+import threading
+from concurrent.futures import (ThreadPoolExecutor, ProcessPoolExecutor, wait, 
+                                as_completed, ALL_COMPLETED, FIRST_COMPLETED,
+                                FIRST_EXCEPTION)
+from multiprocessing import (Manager, Lock, shared_memory, Pipe, get_context)
 from tqdm.auto import tqdm
 
 import gc
+
 
 # Working directory expected to be tornado_jtti/
 sys.path.append("lydia_scripts")
@@ -138,7 +145,7 @@ def create_argsparser(args_list=None):
         help='Threshold time, in minutes, to use for the storm mask construction')
     
     parser.add_argument('--stat', type=str, default='median',
-        help='Stat to use for encorporating the ensembles into the evaluations. median (default) | mean | agg (TODO)')
+        help='Stat to use for encorporating the ensembles into the evaluations. median (default) | mean')
     
     parser.add_argument('--ml_probabs_norm', action='store_true',
         help='Max-normalize ML probabilities ')
@@ -156,6 +163,8 @@ def create_argsparser(args_list=None):
         help='Write/save the masks generated from the storm reports')
     parser.add_argument('-d', '--dry_run', action='store_true',
         help='For testing and debugging')
+    parser.add_argument('-t', '--test', action='store_true',
+        help='Use test args')
 
     return parser
 
@@ -588,10 +597,10 @@ def create_storm_mask(lats, lons, dtime, lats_storms, lons_storms, times_storms,
         neighbor_inds = tree.query_ball_point(storm_points, radius, workers=kdworkers) #thres_ngrids
         if storm_points.size > 0: 
             neighbor_inds = np.concatenate(neighbor_inds).astype(int)
-        
+
     n_nans = np.sum(np.isnan(neighbor_inds))
     if n_nans > 0: print(f"[create_storm_mask()] {n_nans} NaNs dtime={dtime}") 
-
+    
     # Set up mask for the storm reports and neighboring grid space
     ncoords = lats.size #lats_lons.shape[0]
     mask = np.zeros((ncoords, 1), int)
@@ -989,10 +998,10 @@ def compare_rocs(ytrue, ypreds): #, rocs:np.ndarray=None):
 
 if "__main__" == __name__:
     args_list = ['', 
-                 '--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds', 
+                 #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds', 
                  #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights20_80_hyper', 
                  #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample50_50_classweights50_50_hyper', 
-                 #'--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample90_10_classweights20_80_hyper', 
+                 '--dir_wofs_preds', '/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/wofs_preds1/tor_unet_sample90_10_classweights20_80_hyper', 
                  '--loc_storm_report', '/ourdisk/hpc/ai2es/tornado/tor_spc_ncei/2019_actual_tornadoes_clean.csv', # Paper revision with NCEI due Jul 13 2025
                  #'/ourdisk/hpc/ai2es/momoshog/Tornado/tornado_jtti/tornado_reports/tornado_reports_2019_spring.csv', #original
                  #'/ourdisk/hpc/ai2es/tornado/stormreports/processed/tornado_reports_2019.csv', 
@@ -1007,15 +1016,15 @@ if "__main__" == __name__:
                  '--uh_compute', #
                  '--thres_dist', '50', '--thres_time', '20', '--stat', 'mean', 
                  '--nthresholds', '51', '--ml_probabs_dilation', '33',
-                 '--model_name', 'tor_unet_sample50_50_classweightsNone_hyper',
+                 #'--model_name', 'tor_unet_sample50_50_classweightsNone_hyper',
                  #'--model_name', 'tor_unet_sample50_50_classweights50_50_hyper',
+                 '--model_name', 'tor_unet_sample90_10_classweights20_80_hyper',
                  '-w', '0', 
                  #'--write_storm_masks', 
                  '--dry_run'] 
-                 #, '--ml_probabs_norm',
                  #'--uh_thres_list', '0', '200'  #'363'
     
-    args = parse_args() #args_list) #args_list)#
+    args = parse_args(args_list) #args_list)#
     print(args)
 
     # "Round" dilation kernel mask
@@ -1053,7 +1062,8 @@ if "__main__" == __name__:
     rdates = sorted(os.listdir(dir_preds))
     print(f"{len(rdates)} run dates. {rdates}")
 
-    all_dfs = [None] * len(rdates) #[]
+    nrdates = len(rdates)
+    all_dfs = [None] * nrdates #[]
     for i, DATE in enumerate(rdates):
         print(f" ... ({i}) merging", DATE)
         _df = generate_init_times_files_list_all(dir_preds, DATE, 
@@ -1063,6 +1073,10 @@ if "__main__" == __name__:
         all_dfs[i] = _df #all_dfs.append(_df)
     df_all_files = pd.concat(all_dfs, ignore_index=True, verify_integrity=True)
     all_dfs = None #del all_dfs
+
+    
+    ncpus = int(os.environ['SLURM_CPUS_PER_TASK'])
+    #with ThreadPoolExecutor(max_workers=ncpus, thread_name_prefix='rundate_') as executor:
 
 
     # LOAD DATA 
@@ -1076,7 +1090,6 @@ if "__main__" == __name__:
     n_ftimes = ftimes.size
     print("# File Times", n_ftimes)
 
-    wofs_cZH = {}
     y_preds = None
     y_uh = None
 
@@ -1089,30 +1102,35 @@ if "__main__" == __name__:
                           1, 5, 10, 20, 25, 40, 50, 80, 100]) #, 200, 300])
     nthreshs_uh = uhthreshs.size
 
-    NANs = np.zeros((n_ftimes, nthreshs)) #np.full((n_ftimes, nthreshs), np.nan) 
-    results = {'tps': NANs.copy(), 'fps': NANs.copy(), #np.full((n_ftimes, nthreshs), np.nan)
+    manager = Manager()
+    lock = manager.Lock()
+    lock_uh = manager.Lock()
+
+    NANs = np.zeros((n_ftimes, nthreshs)) 
+    results = manager.dict({'tps': NANs.copy(), 'fps': NANs.copy(), #np.full((n_ftimes, nthreshs), np.nan)
                'fns': NANs.copy(), 'tns': NANs.copy(),
-               'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()} 
+               'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()} )
     
     NANs = np.zeros((n_ftimes, nthreshs_uh))  
-    results_uh = {'tps': NANs.copy(), 'fps': NANs.copy(), 
+    results_uh = manager.dict({'tps': NANs.copy(), 'fps': NANs.copy(), 
                   'fns': NANs.copy(), 'tns': NANs.copy(),
-                  'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()}
+                  'npos': NANs[:,0].copy(), 'nneg': NANs[:,0].copy()})
     
     # pandas.DateFrame datetime format string
     fmt_dt_pd = '%Y-%m-%d %H:%M:%S'
     storm_timedelta = pd.Timedelta(hours=1) #timedelta(hours=1) #
 
-    kdtree = None
+    #kdtree = None
 
     # For histogram and reliability plots
     # Observed distribution
-    obs_distr = np.zeros((0,))
+    #>obs_distr = np.zeros((0,))
     # UH distribution
-    uh_distr = np.zeros((0,))
+    #>uh_distr = np.zeros((0,))
     # ML probab distribution
-    prob_distr = np.zeros((0,))
-    q_thres = .68
+    #>prob_distr = np.zeros((0,))
+    
+    q_thres = .3
     q = 0
     qs = np.random.rand(df_all_files.shape[0])
 
@@ -1136,231 +1154,320 @@ if "__main__" == __name__:
     elif nf == 2:
         fslice = slice(*args.forecast_duration)
 
-    # Iterate of WoFS run dates
-    print("Staarting run dates loop")
-    for r, rdate in enumerate(rdates): # #[3:4]20190502 tqdm(, ntotal=, desc='Run date')
-        rdate_files = df_all_files.loc[df_all_files['run_date'] == rdate]
-        itimes = np.unique(rdate_files['init_time'].values)
-        itimes = np.unique(itimes)
+    # create the shared pipe
+    #conn1obs, conn2obs = Pipe()
+    #conn1probs, conn2probs = Pipe()
+    #conn1probsuh, conn2probsuh = Pipe()
 
-        # Isoloate storms in day forecast window
-        t0 = rdate_files['forecast_time'].min()
-        t0 = datetime.strptime(t0, fmt_dt).strftime(fmt_dt_pd)
-        t1 = rdate_files['forecast_time'].max()
-        t1 = datetime.strptime(t1, fmt_dt).strftime(fmt_dt_pd)
-
-        storms_for_rdate = df_storm_report[t0:t1]
-        _latstorm = storms_for_rdate['Lat'].values
-        _lonstorm = storms_for_rdate['Lon'].values
-        _times = np.array([d.to_pydatetime() for d in pd.to_datetime(storms_for_rdate.index.values)])
-
-        nstorms = storms_for_rdate.shape[0]
-        print(nstorms, "Storms for run date:\n", storms_for_rdate)
-
-        if args.write_storm_masks:
-            df_availstorms = pd.concat([df_availstorms, 
-                                        pd.DataFrame({'date': [rdate], 'ftime0': [t0], 
-                                        'ftime1': [t1], 'storm_count': [nstorms]})])
-        if nstorms == 0:
-            print(f"No storms on {rdate}. nstorms={nstorms}")
-            if args.skip_clearday: continue
-
-        # Check storm coords overlap with WoFS domain
-        _fn = rdate_files['filename_path'].values[0]
-        wofs_preds = xr.load_dataset(_fn)
-        xlats = np.squeeze(wofs_preds['XLAT'].values)
-        xlons = np.squeeze(wofs_preds['XLONG'].values)
-        #dateindex = datetime.strptime(rdate, '%Y%m%d').strftime('%Y-%m-%d')
-
-        y_storm, _, _ = create_storm_mask(xlats, xlons, None, 
-                                        _latstorm, _lonstorm, 
-                                        _times, args.gridsize,
-                                        thres_dist=1, 
-                                        thres_time=args.thres_time)
-        nstorms = np.count_nonzero(y_storm)
-        if nstorms == 0: 
-            print(f"No storms on {rdate} in WoFS spatial domain. nstorms={nstorms}. skip={args.skip_clearday}")
-            if args.skip_clearday: continue
-
-        # Iterate over initialization times
-        for i, itime in enumerate(itimes): #tqdm(, ntotal=, desc='Run date')
+    # Collect results
+    #pipe_obs, pipe_probs, pipe_probs_uh
+    def execute_run(r, lock, lock_uh):
             gc.collect()
-            init_files = rdate_files.loc[rdate_files['init_time'] == itime]
-            #forecast_times = init_files['forecast_time'].unique()
-            #if args.dry_run: print(forecast_times[fslice])
+            _pid = os.getpid()
+            print(f"[execute_run()] Worker PID: {_pid}")
+            print(f"[execute_run()] Python Thread ID: {threading.get_ident()}")
+            print(f"[execute_run()] Native Thread ID: {threading.get_native_id()}")
+            global args, df_all_files, rdates, fslice, fmt_dt_pd, storm_timedelta
+            global times_storms, lats_storm, lons_storm, footprint, q_thres
+            global qs, csithreshs, uhthreshs
+            # read the data from the pipe
+            #obs_distr = conn1obs.recv()
+            #prob_distr = conn1probs.recv()
+            #uh_distr = conn1probsuh.recv()
 
-            # Select forecast times 1hr before the first storm of the day
-            #   and 1hr after the last storm of the day
-            if i == 0: print("run: t0 t1", t0, t1)
-            t0 = pd.to_datetime(storms_for_rdate.index[0]) - storm_timedelta
-            t1 = pd.to_datetime(storms_for_rdate.index[-1]) + storm_timedelta
-            sel_after_t0 = pd.to_datetime(init_files['forecast_time'], format=fmt_dt) >= t0
-            sel_before_t1 = pd.to_datetime(init_files['forecast_time'], format=fmt_dt) <= t1
-            forecast_times = init_files['forecast_time'].loc[sel_after_t0 & sel_before_t1].unique()
-            if i == 0: print("itime: t0 t1", t0, t1)
+            # Observed distribution
+            obs_distr = np.zeros((0,))
+            # UH distribution
+            uh_distr = np.zeros((0,))
+            # ML probab distribution
+            prob_distr = np.zeros((0,))
 
-            _fslice = fslice ######
-            if nf != 2: 
-                nt = max(0, min(n_3hrs, forecast_times.size))
-                #fslice = slice(0, nt)
-                _fslice = slice(0, nt)
-            if args.dry_run: 
-                #print("Forecast Times:\n", forecast_times[fslice])
-                print("Forecast Times:\n", forecast_times[_fslice])
-                print(f"Forecast Times Range: {t0} to {t1}")
+            rdate = rdates[r]
 
+        # Iterate of WoFS run dates
+        #for r, rdate in enumerate(rdates): # #[3:4]20190502
+            rdate_files = df_all_files.loc[df_all_files['run_date'] == rdate]
+            itimes = np.unique(rdate_files['init_time'].values)
+            itimes = np.unique(itimes)
 
-            #####################################
-            #wofs_preds = xr.load_dataset(f'/ourdisk/hpc/ai2es/nsnook/WoFS_summary_data_2019/summary_data_{forecast_times[0]}.netcdf', engine='netcdf4')
-            #####################################
+            # Isoloate storms in day forecast window
+            t0 = rdate_files['forecast_time'].min()
+            t0 = datetime.strptime(t0, fmt_dt).strftime(fmt_dt_pd)
+            t1 = rdate_files['forecast_time'].max()
+            t1 = datetime.strptime(t1, fmt_dt).strftime(fmt_dt_pd)
 
+            storms_for_rdate = df_storm_report[t0:t1]
+            _latstorm = storms_for_rdate['Lat'].values
+            _lonstorm = storms_for_rdate['Lon'].values
+            _times = np.array([d.to_pydatetime() for d in pd.to_datetime(storms_for_rdate.index.values)])
 
-            # Iterate over first 3 hours of forecast times or the selected 
-            #   forecast time range
-            #for f, ftime in enumerate(forecast_times[fslice]): 
-            for f, ftime in enumerate(forecast_times[_fslice]): 
-                sel_files_by_ftime = select_files(df_all_files, itime, ftime, 
-                                                  emember=None, rdate=rdate)
-                
-                #######################
-                #wofs_preds_mean = wofs_preds['ens_mean_ML_probability'][f]
-                #'ens_mean_UH'
-                #######################
+            nstorms = storms_for_rdate.shape[0]
+            print(nstorms, "Storms for run date:\n", storms_for_rdate)
 
-                # Load all ensembles for the forecast time
-                concat_dim = 'ENS'
-                _sel_fnpaths = sel_files_by_ftime['filename_path'].values
-                print("\nFILES TO AVERAGE")
-                print(f'r{r:2}:{rdate} | i{i:2}:{itime} | f{f:2}:{ftime}')
-                print(_sel_fnpaths)
-                wofs_preds = xr.open_mfdataset(_sel_fnpaths, concat_dim=concat_dim,
-                                               combine='nested', coords='minimal',
-                                               decode_times=False) #, engine='kvikio')
-                dtime = num2date(wofs_preds.Time[0], 'seconds since 2001-01-01')
-                wofs_preds.drop_vars('Time')
+            if args.write_storm_masks:
+                df_availstorms = pd.concat([df_availstorms, 
+                                            pd.DataFrame({'date': [rdate], 'ftime0': [t0], 
+                                            'ftime1': [t1], 'storm_count': [nstorms]})])
+            if nstorms == 0:
+                print(f"No storms on {rdate}. nstorms={nstorms}")
+                if args.skip_clearday: return #continue
 
-                print(f'[r={r:2d}, {rdate}](i={i:2d}, {itime}) {f:2d} / {n_3hrs} current: {ftime} ({forecast_times[0]} to {forecast_times[-1]}) dtime=', dtime)
+            # Check storm coords overlap with WoFS domain
+            _fn = rdate_files['filename_path'].values[0]
+            wofs_preds = xr.load_dataset(_fn)
+            xlats = np.squeeze(wofs_preds['XLAT'].values)
+            xlons = np.squeeze(wofs_preds['XLONG'].values)
+            #dateindex = datetime.strptime(rdate, '%Y%m%d').strftime('%Y-%m-%d')
 
-                if sel_files_by_ftime.shape[0] != 18: 
-                    print("ENS LOW", sel_files_by_ftime.shape)
-                    of_interest.append(f'{rdate} | {itime} | {ftime} | {dtime}')
-                if args.dry_run:
-                    print(sel_files_by_ftime.shape)
-                    print(sel_files_by_ftime['filename_path'].values)
+            y_storm, _, _ = create_storm_mask(xlats, xlons, None, 
+                                            _latstorm, _lonstorm, 
+                                            _times, args.gridsize,
+                                            thres_dist=1, 
+                                            thres_time=args.thres_time)
+            nstorms = np.count_nonzero(y_storm)
+            if nstorms == 0: 
+                print(f"No storms on {rdate} in WoFS spatial domain. nstorms={nstorms}. skip={args.skip_clearday}")
+                if args.skip_clearday: return #continue
 
-                # COMPUTE MEAN/MEDIAN
-                if args.stat == 'mean':
-                    # Use [0] to remove the singleton dimension. analogous to using np.squeeze
-                    y_preds = wofs_preds['ML_PREDICTED_TOR'].mean(dim=concat_dim).values[0]
-                    if args.uh_compute:
-                        #wofs_cZH[ftime] = wofs_preds['COMPOSITE_REFL_10CM'].mean(dim=concat_dim).values[0]
-                        y_uh = wofs_preds['UP_HELI_MAX'].mean(dim=concat_dim).values[0]
+            # Iterate over initialization times
+            #for i, itime in enumerate(itimes): ####
+            for i, itime in enumerate(itimes[:3]): ########################## ********
+                init_files = rdate_files.loc[rdate_files['init_time'] == itime]
+                #forecast_times = init_files['forecast_time'].unique()
+                #if args.dry_run: print(forecast_times[fslice])
 
-                elif args.stat == 'median':
-                    y_preds = wofs_preds['ML_PREDICTED_TOR'].median(dim=concat_dim).values[0]
-                    if args.uh_compute:
-                        #wofs_cZH[ftime] = wofs_preds['COMPOSITE_REFL_10CM'].median(dim=concat_dim).values[0]
-                        y_uh = wofs_preds['UP_HELI_MAX'].median(dim=concat_dim).values[0]
+                # Select forecast times 1hr before the first storm of the day
+                #   and 1hr after the last storm of the day
+                if i == 0: print("run: t0 t1", t0, t1)
+                t0 = pd.to_datetime(storms_for_rdate.index[0]) - storm_timedelta
+                t1 = pd.to_datetime(storms_for_rdate.index[-1]) + storm_timedelta
+                sel_after_t0 = pd.to_datetime(init_files['forecast_time'], format=fmt_dt) >= t0
+                sel_before_t1 = pd.to_datetime(init_files['forecast_time'], format=fmt_dt) <= t1
+                forecast_times = init_files['forecast_time'].loc[sel_after_t0 & sel_before_t1].unique()
+                if i == 0: print("itime: t0 t1", t0, t1)
 
-                
-                shape = y_preds.shape
-            
-                # CREATE STORM MASK for the given forecast time, distance thres, and time thres
-                # Extract lat/lon once per day or init time instead
-                if f == 0:
-                    xlats = np.squeeze(wofs_preds['XLAT'].values)
-                    xlons = np.squeeze(wofs_preds['XLONG'].values)
-
-                y_storm, sel_storms, _ = create_storm_mask(xlats, xlons, dtime,
-                                                              lats_storm, lons_storm, 
-                                                              times_storms, 
-                                                              args.gridsize, 
-                                                              thres_dist=args.thres_dist, 
-                                                              thres_time=args.thres_time, 
-                                                              kdworkers=-1)
-                
-                npos = np.count_nonzero(y_storm)
-                if args.write_storm_masks:
-                    df_forecaststorms = pd.concat([df_forecaststorms,
-                                                pd.DataFrame({'rundate': [rdate], 
-                                                                'ftime0': [t0],
-                                                                'ftime1': [t1], 
-                                                                'forecastime': [ftime], 
-                                                                'storm_pixel_count': [npos]})])
-                # write stormmasks
-                #dir_stormmask = f'/ourdisk/hpc/ai2es/tornado/tornado_report_masks_2019_spring/50km_20min/{args.year}/{rdate}/{itime}'
-                dir_stormmask = f'/ourdisk/hpc/ai2es/tornado/tor_spc_ncei/report_masks_2019_spring/50km_20min/{args.year}/{rdate}/{itime}'
-                fn_stormmask = os.path.join(dir_stormmask, f'{ftime}.txt')
-                if not os.path.exists(dir_stormmask):
-                    os.makedirs(dir_stormmask, exist_ok=True)
-                if npos == 0: 
-                    print(f"No tornados at {itime} {ftime} or within the WoFS Domain. npos={npos}")
-                    if not os.path.exists(fn_stormmask) and args.write_storm_masks: 
-                        np.savetxt(fn_stormmask, np.array([[0]]), fmt='%d')
-                    if args.skip_cleartime: continue
-                elif not os.path.exists(fn_stormmask) and args.write_storm_masks: 
-                    np.savetxt(fn_stormmask, y_storm, fmt='%d')
-                ### continue ###
-
-                # COMPUTE PERFORMANCE
-                #y_storm = masks #"ground truth"
-                #_npos = np.count_nonzero(y_storm)
-                _nneg = np.count_nonzero(y_storm==0) #np.count_nonzero(~y_storm)
-                print(f"pos: {npos}  neg: {_nneg}; total: {npos + _nneg}; size: {y_storm.size}")
+                _fslice = fslice
+                if nf != 2: 
+                    nt = max(0, min(n_3hrs, forecast_times.size))
+                    _fslice = slice(0, nt)
                 if args.dry_run: 
-                    classes, counts = np.unique(y_storm, return_counts=True)
-                    print("Storm Class Counts:\n", np.stack((classes, counts), axis=-1), f'\n(r:{rdate} i:{itime} f:{ftime})')
+                    print("Forecast Times:\n", forecast_times[_fslice])
+                    print(f"Forecast Times Range: {t0} to {t1}")
 
 
-                # Dilate
-                if args.ml_probabs_dilation > 0:
-                    ksize = args.ml_probabs_dilation
-                    y_preds = grey_dilation(y_preds, footprint=footprint) 
-                if args.ml_probabs_norm:
-                    y_preds = normalize(y_preds.reshape(-1, 1), norm='max', 
-                                        axis=0).reshape(shape)
+                #####################################
+                #wofs_preds = xr.load_dataset(f'/ourdisk/hpc/ai2es/nsnook/WoFS_summary_data_2019/summary_data_{forecast_times[0]}.netcdf', engine='netcdf4')
+                #####################################
 
 
-                # Calculate performance ML
-                tps, fps, fns, tns = contingency_curves(y_storm.ravel(), y_preds.ravel(), csithreshs.tolist())
-                results['tps'][f] += tps
-                results['fps'][f] += fps
-                results['fns'][f] += fns
-                results['tns'][f] += tns
-                results['npos'][f] += npos
-                results['nneg'][f] += _nneg
+                # Iterate over first 3 hours of forecast times or the selected 
+                #   forecast time range
+                for f, ftime in enumerate(forecast_times[_fslice]): 
+                    sel_files_by_ftime = select_files(df_all_files, itime, ftime, 
+                                                    emember=None, rdate=rdate)
+                    
+                    #######################
+                    #wofs_preds_mean = wofs_preds['ens_mean_ML_probability'][f]
+                    #'ens_mean_UH'
+                    #######################
 
-                #q = np.random.rand(1)
-                #if q > q_thres:
-                if qs[q] > q_thres:
-                    obs_distr = np.append(obs_distr, y_storm.ravel())
-                    prob_distr = np.append(prob_distr, y_preds.ravel())
-                if not args.uh_compute: q += 1
+                    # Load all ensembles for the forecast time
+                    concat_dim = 'ENS'
+                    _sel_fnpaths = sel_files_by_ftime['filename_path'].values
+                    print("\nFILES TO AVERAGE")
+                    print(f'r{r:2}:{rdate} | i{i:2}:{itime} | f{f:2}:{ftime}')
+                    print(_sel_fnpaths)
+                    wofs_preds = xr.open_mfdataset(_sel_fnpaths, concat_dim=concat_dim,
+                                                combine='nested', coords='minimal',
+                                                decode_times=False) #, engine='kvikio')
+                    dtime = num2date(wofs_preds.Time[0], 'seconds since 2001-01-01')
+                    wofs_preds.drop_vars('Time')
 
-                # UH
-                if args.uh_compute:
+                    print(f'[r={r:2d}, {rdate}](i={i:2d}, {itime}) {f:2d} / {n_3hrs} current: {ftime} ({forecast_times[0]} to {forecast_times[-1]}) dtime=', dtime)
+
+                    if sel_files_by_ftime.shape[0] != 18: 
+                        print("ENS LOW", sel_files_by_ftime.shape)
+                        of_interest.append(f'{rdate} | {itime} | {ftime} | {dtime}')
+                    if args.dry_run:
+                        print(sel_files_by_ftime.shape)
+                        print(sel_files_by_ftime['filename_path'].values)
+
+                    # COMPUTE MEAN/MEDIAN
+                    if args.stat == 'mean':
+                        # Use [0] to remove the singleton dimension. analogous to np.squeeze
+                        y_preds = wofs_preds['ML_PREDICTED_TOR'].mean(dim=concat_dim).values[0]
+                        if args.uh_compute:
+                            y_uh = wofs_preds['UP_HELI_MAX'].mean(dim=concat_dim).values[0]
+
+                    elif args.stat == 'median':
+                        y_preds = wofs_preds['ML_PREDICTED_TOR'].median(dim=concat_dim).values[0]
+                        if args.uh_compute:
+                            y_uh = wofs_preds['UP_HELI_MAX'].median(dim=concat_dim).values[0]
+                            
+                    
+                    shape = y_preds.shape
+                
+                    # CREATE STORM MASK for the given forecast time, distance thres, and time thres
+                    # Extract lat/lon once per day or init time instead
+                    if f == 0:
+                        xlats = np.squeeze(wofs_preds['XLAT'].values)
+                        xlons = np.squeeze(wofs_preds['XLONG'].values)
+
+                    y_storm, sel_storms, _ = create_storm_mask(xlats, xlons, dtime, 
+                                                                lats_storm, lons_storm, 
+                                                                times_storms, 
+                                                                args.gridsize, 
+                                                                thres_dist=args.thres_dist, 
+                                                                thres_time=args.thres_time, 
+                                                                kdworkers=-1) #-1
+                    
+                    npos = np.count_nonzero(y_storm)
+                    if args.write_storm_masks:
+                        df_forecaststorms = pd.concat([df_forecaststorms,
+                                                    pd.DataFrame({'rundate': [rdate], 
+                                                                    'ftime0': [t0],
+                                                                    'ftime1': [t1], 
+                                                                    'forecastime': [ftime], 
+                                                                    'storm_pixel_count': [npos]})])
+                    # write stormmasks
+                    #dir_stormmask = f'/ourdisk/hpc/ai2es/tornado/tornado_report_masks_2019_spring/50km_20min/{args.year}/{rdate}/{itime}'
+                    dir_stormmask = f'/ourdisk/hpc/ai2es/tornado/tor_spc_ncei/report_masks_2019_spring/50km_20min/{args.year}/{rdate}/{itime}'
+                    fn_stormmask = os.path.join(dir_stormmask, f'{ftime}.txt')
+                    if not os.path.exists(dir_stormmask): 
+                        os.makedirs(dir_stormmask, exist_ok=True) 
+                    if npos == 0: 
+                        print(f"No tornados at {itime} {ftime} or within the WoFS Domain. npos={npos}")
+                        if not os.path.exists(fn_stormmask) and args.write_storm_masks: 
+                            np.savetxt(fn_stormmask, np.array([[0]]), fmt='%d')
+                        if args.skip_cleartime: continue
+                    elif not os.path.exists(fn_stormmask) and args.write_storm_masks: 
+                        np.savetxt(fn_stormmask, y_storm, fmt='%d')
+
+
+                    # COMPUTE PERFORMANCE
+                    #y_storm = masks #"ground truth"
+                    #_npos = np.count_nonzero(y_storm)
+                    _nneg = np.count_nonzero(y_storm==0) #np.count_nonzero(~y_storm)
+                    print(f"pos: {npos}  neg: {_nneg}; total: {npos + _nneg}; size: {y_storm.size}")
+                    if args.dry_run: 
+                        classes, counts = np.unique(y_storm, return_counts=True)
+                        print("Storm Class Counts:\n", np.stack((classes, counts), axis=-1), f'\n(r{r:2}:{rdate} i{i:2}:{itime} f{f:2}:{ftime})')
+
+
                     # Dilate
                     if args.ml_probabs_dilation > 0:
                         ksize = args.ml_probabs_dilation
-                        y_uh = grey_dilation(y_uh, footprint=footprint) 
+                        y_preds = grey_dilation(y_preds, footprint=footprint) 
                     if args.ml_probabs_norm:
-                        y_uh = normalize(y_uh.reshape(-1, 1), norm='max', axis=0).reshape(shape)
+                        y_preds = normalize(y_preds.reshape(-1, 1), norm='max', 
+                                            axis=0).reshape(shape)
 
-                    # Max UH over time
-                    #if f == 0: uh_max = y_uh
-                    #else: uh_max = np.nanmax(np.stack([y_uh, uh_max], axis=0), axis=0)
+
+                    # Calculate performance ML
+                    print(f" [PID={_pid}] Calculate performance ML...")
+                    tps, fps, fns, tns = contingency_curves(y_storm.ravel(), y_preds.ravel(), csithreshs.tolist())
+                    with lock:
+                        results['tps'][f] += tps
+                        results['fps'][f] += fps
+                        results['fns'][f] += fns
+                        results['tns'][f] += tns
+                        results['npos'][f] += npos
+                        results['nneg'][f] += _nneg
+                    print(f" [PID={_pid}] Done calculating performance ML")
+
+                    #q = np.random.rand(1)
                     #if q > q_thres:
-                    if qs[q] > q_thres:
-                        uh_distr = np.append(uh_distr, y_uh.ravel())
-                    q += 1
+                    #if qs[q] > q_thres:
+                    qi = np.random.choice(qs)
+                    print("qi", qi)
+                    if qi > q_thres:
+                        obs_distr = np.append(obs_distr, y_storm.ravel())
+                        prob_distr = np.append(prob_distr, y_preds.ravel())
+                    #if not args.uh_compute: q += 1
 
-                    _res = compute_performance(y_storm, y_uh, uhthreshs)
-                    results_uh['tps'][f] += _res['tps']
-                    results_uh['fps'][f] += _res['fps']
-                    results_uh['fns'][f] += _res['fns']
-                    results_uh['tns'][f] += _res['tns']
-                    results_uh['npos'][f] += npos
-                    results_uh['nneg'][f] += _nneg
+                    # UH
+                    if args.uh_compute:
+                        # Dilate
+                        if args.ml_probabs_dilation > 0:
+                            ksize = args.ml_probabs_dilation
+                            y_uh = grey_dilation(y_uh, footprint=footprint) 
+                        if args.ml_probabs_norm:
+                            y_uh = normalize(y_uh.reshape(-1, 1), norm='max', axis=0).reshape(shape)
+
+                        # Max UH over time
+                        #if q > q_thres:
+                        #if qs[q] > q_thres:
+                        if qi > q_thres:
+                            uh_distr = np.append(uh_distr, y_uh.ravel())
+                        #q += 1
+
+                        _res = compute_performance(y_storm, y_uh, uhthreshs)
+                        with lock_uh:
+                            results_uh['tps'][f] += _res['tps']
+                            results_uh['fps'][f] += _res['fps']
+                            results_uh['fns'][f] += _res['fns']
+                            results_uh['tns'][f] += _res['tns']
+                            results_uh['npos'][f] += npos
+                            results_uh['nneg'][f] += _nneg
+
+            # send the array via a pipe
+            #pipe_obs.send(obs_distr)
+            #pipe_probs.send(prob_distr)
+            #pipe_probs_uh.send(uh_distr)
+            #pipe_obs.close()
+            #pipe_probs.close()
+            #pipe_probs_uh.close()
+            print(f'[PID={_pid}] FINAL RESULTS')
+            print(results)
+            if args.uh_compute: print(results_uh)
+            return {#'results': results, 'results_uh': results_uh,
+                    'obs_distr': obs_distr, 'prob_distr': prob_distr,
+                    'uh_distr': uh_distr}
+
+    nprocesses = int(os.environ['SLURM_NTASKS']) #SLURM_NPROCS
+    print(nprocesses, "workers")
+
+    obs_distr = np.zeros((0,))
+    prob_distr = np.zeros((0,))
+    uh_distr = np.zeros((0,))
+
+    future_results = []
+    locks = [lock for _ in range(nrdates)]
+    locks_uh = [lock_uh for _ in range(nrdates)]
+
+    #, mp_context=get_context('spawn')
+    with ProcessPoolExecutor(max_workers=nprocesses, mp_context=get_context('fork')) as process_executor:
+        #futures = [executor.submit(execute_run, *(conn2obs, conn2probs, conn2probsuh, r, qi)) for r, qi in enumerate(qs[:3])]
+        #wait(futures)
+        try: 
+            future_results = process_executor.map(execute_run, range(nrdates), locks, locks_uh)
+        except Exception as err:
+            print("[PROCESS ERR]", err)
+    
+        # Wait until at least one task completes
+        #done, not_done = wait(futures, return_when=FIRST_COMPLETED)
+
+        for future in tqdm(as_completed(future_results), total=nrdates, desc='Futures Completed'):
+            print("===="*9)
+            try:
+                res = future.result()
+                obs_distr = np.append(obs_distr, res['obs_distr'])
+                prob_distr = np.append(prob_distr, res['prob_distr'])
+                uh_distr = np.append(uh_distr, res['uh_distr'])
+                print("COMPLETED\n", res) #timeout=36_000
+            except Exception as err:
+                print("[FUTURE.RESULT() ERR]", err)
+            print('\n\n')
+            print("===="*9)
+        #timeout=...
+
+        #conn1obs.send(obs_distr)
+        #conn1probs.send(prob_distr)
+        #conn1probsuh.send(uh_distr)
+        # read the data from the pipe
+        #obs_distr = conn1obs.recv()
+        #prob_distr = conn1probs.recv()
+        #uh_distr = conn1probsuh.recv()
 
     if args.write:
         if args.write_storm_masks:
@@ -1439,6 +1546,13 @@ if "__main__" == __name__:
         _figax = plot_roc(obs_distr, prob_distr, fname, tpr_fpr=(pods_agg, fpr), 
                            fig_ax=(fig, axs[0]), save=False, plot_ann=3) 
 
+        if args.uh_compute:
+            _ypreds = np.stack([uh_distr, prob_distr], axis=-1)
+            roc_stattest = compare_rocs(obs_distr, _ypreds)
+            fn_roc_stattest = os.path.join(args.out_dir, f'{prefix}{args.year}_delong_result_{args.stat}{fn_suffix}_uh.csv') 
+            roc_stattest.to_csv(fn_roc_stattest, header=True)
+            print(f" [WRITE=args.write] Saved {fn_roc_stattest}")
+
         '''# PRC
         _figax = plot_prc(obs_distr, prob_distr, fname, 
                            pre_rec_posrate=(srs_agg, pods_agg, pos_rate), 
@@ -1498,10 +1612,6 @@ if "__main__" == __name__:
             pd.DataFrame({'y_true': obs_distr, f'y_{args.model_name}': prob_distr}).to_csv(fn_outputs, header=True, index=False)
 
 
-            #fn_ = os.path.join(args.out_dir, f'{prefix}{args.year}_ytrue_ypreds_{args.stat}{fn_suffix}.csv')
-            #pd.DataFrame({'ytrue':obs_distr, 'y_uh':uh_distr, f'y_{args.model_name}':prob_distr}).to_csv(fn_, header=True, index=False)
-            #print(f"Saved {fn_}")
-
         '''
         # Calculate confidence intervals for AUROC
         metrics = ['roc_auc', 'pr_auc'] #, 'f1', 'accuracy', 'recall', 'precision']
@@ -1512,8 +1622,10 @@ if "__main__" == __name__:
         stats_uh = pd.DataFrame({score: [pd.NA] * 3 for score in metrics}) 
         stats_uh['label'] = ['score_value', 'confidence_lower', 'confidence_upper']
 
+        n_bootstraps = 500
+
         for s, score in enumerate(metrics):
-            og_score, confidence_lower, confidence_upper = Bootstrapping(obs_distr, prob_distr, score)
+            og_score, confidence_lower, confidence_upper = Bootstrapping(obs_distr, prob_distr, score, n_bootstraps=n_bootstraps)
             print(f"{score}: {og_score:.3f}, Confidence interval: [{confidence_lower:.3f} - {confidence_upper:.3f}]")
 
             stats_model[score] = [og_score, confidence_lower, confidence_upper]
@@ -1568,14 +1680,6 @@ if "__main__" == __name__:
                             color='blue', save=True, 
                             srs_pods_csis=(srs_agg, pods_agg, csis_agg, pos_rate), 
                             return_scores=False, fig_ax=None, figsize=(10, 6), tight=False)
-            
-            # DeLong Test
-            _ypreds = np.stack([uh_distr, prob_distr], axis=-1)
-            roc_stattest = compare_rocs(obs_distr, _ypreds.values)
-
-            fn_roc_stattest = os.path.join(args.out_dir, f'{prefix}{args.year}_delong_test_{args.stat}{fn_suffix}_uh.csv') 
-            roc_stattest.to_csv(fn_roc_stattest, header=True)
-            print(f" [WRITE=args.write] Saved {fn_roc_stattest}")
 
     print("ENS Dimension Low:", of_interest)
 
